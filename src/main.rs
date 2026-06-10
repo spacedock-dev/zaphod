@@ -16,6 +16,8 @@ struct Sidebar {
     docked: bool,
     hidden: bool,
     rendered_once: bool,
+    own_tab: Option<usize>,
+    active_tab: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -43,9 +45,11 @@ impl ZellijPlugin for Sidebar {
         request_permission(&[
             PermissionType::ReadApplicationState,
             PermissionType::ChangeApplicationState,
+            PermissionType::ReadPaneContents,
         ]);
         subscribe(&[
             EventType::PaneUpdate,
+            EventType::TabUpdate,
             EventType::Mouse,
             EventType::Timer,
             EventType::PermissionRequestResult,
@@ -62,7 +66,12 @@ impl ZellijPlugin for Sidebar {
                 set_selectable(false);
                 true
             },
+            Event::TabUpdate(tabs) => {
+                self.active_tab = tabs.iter().find(|t| t.active).map(|t| t.position);
+                false
+            },
             Event::PaneUpdate(manifest) => {
+                self.own_tab = own_tab_position(&manifest, self.plugin_id);
                 let old = std::mem::take(&mut self.rows);
                 self.rows = rows_for_own_tab(&manifest, self.plugin_id);
                 for row in self.rows.iter_mut() {
@@ -92,6 +101,11 @@ impl ZellijPlugin for Sidebar {
         }
         // A pipe that launched us arrives before the first render: stay visible.
         if !self.rendered_once {
+            return false;
+        }
+        // Per-tab toggle: the pipe broadcasts to every instance; only the one
+        // in the active tab responds.
+        if self.own_tab.is_some() && self.own_tab != self.active_tab {
             return false;
         }
         if self.hidden {
@@ -136,21 +150,17 @@ impl ZellijPlugin for Sidebar {
 }
 
 impl Sidebar {
-    // Dock ourselves: when launched ad-hoc (wide split), move to the left edge
-    // and shrink to the target width. Each resize triggers a PaneUpdate, which
-    // re-renders, driving the next step. Layout-placed instances are already
-    // narrow and skip this entirely.
+    // Shrink ad-hoc launches toward the target width. Tiled placement cannot be
+    // controlled at runtime (zellij move primitives are swap-based); proper
+    // placement comes from layouts (default_tab_template / sidebar-tab.kdl),
+    // which spawn at the right width and skip this entirely.
     fn dock(&mut self, cols: usize) {
         if self.docked {
             return;
         }
-        if self.dock_steps == 0 {
-            if cols <= TARGET_COLS + 4 {
-                self.docked = true;
-                return;
-            }
-            move_pane_with_pane_id_in_direction(PaneId::Plugin(self.plugin_id), Direction::Left);
-            move_pane_with_pane_id_in_direction(PaneId::Plugin(self.plugin_id), Direction::Left);
+        if self.dock_steps == 0 && cols <= TARGET_COLS + 4 {
+            self.docked = true;
+            return;
         }
         if cols > TARGET_COLS && self.dock_steps < MAX_DOCK_STEPS {
             self.dock_steps += 1;
@@ -217,17 +227,20 @@ fn last_meaningful_line(viewport: &[String]) -> String {
         .to_owned()
 }
 
-// Rows for the tab this plugin lives in: terminal panes only, top-to-bottom,
-// excluding suppressed/unselectable panes. Agent panes are those whose title
-// carries the ✳ marker set by Claude/codex.
-fn rows_for_own_tab(manifest: &PaneManifest, own_plugin_id: u32) -> Vec<Row> {
-    let own_tab = manifest.panes.iter().find_map(|(tab, panes)| {
+fn own_tab_position(manifest: &PaneManifest, own_plugin_id: u32) -> Option<usize> {
+    manifest.panes.iter().find_map(|(tab, panes)| {
         panes
             .iter()
             .any(|p| p.is_plugin && p.id == own_plugin_id)
             .then_some(*tab)
-    });
-    let Some(tab) = own_tab else {
+    })
+}
+
+// Rows for the tab this plugin lives in: terminal panes only, top-to-bottom,
+// excluding suppressed/unselectable panes. Agent panes are those whose title
+// carries the ✳ marker set by Claude/codex.
+fn rows_for_own_tab(manifest: &PaneManifest, own_plugin_id: u32) -> Vec<Row> {
+    let Some(tab) = own_tab_position(manifest, own_plugin_id) else {
         return Vec::new();
     };
     let mut panes: Vec<&PaneInfo> = manifest
