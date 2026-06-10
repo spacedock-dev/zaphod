@@ -5,11 +5,17 @@ use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
 const STATUS_POLL_SECS: f64 = 2.0;
+const TARGET_COLS: usize = 28;
+const MAX_DOCK_STEPS: u8 = 10;
 
 #[derive(Default)]
 struct Sidebar {
     rows: Vec<Row>,
     plugin_id: u32,
+    dock_steps: u8,
+    docked: bool,
+    hidden: bool,
+    rendered_once: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -80,7 +86,29 @@ impl ZellijPlugin for Sidebar {
         }
     }
 
+    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        if pipe_message.name != "toggle" {
+            return false;
+        }
+        // A pipe that launched us arrives before the first render: stay visible.
+        if !self.rendered_once {
+            return false;
+        }
+        if self.hidden {
+            self.hidden = false;
+            self.docked = false;
+            self.dock_steps = 0;
+            show_self(false);
+        } else {
+            self.hidden = true;
+            hide_self();
+        }
+        false
+    }
+
     fn render(&mut self, _rows: usize, cols: usize) {
+        self.rendered_once = true;
+        self.dock(cols);
         println!(
             "\u{1b}[7m▾ PANES{}\u{1b}[0m",
             " ".repeat(cols.saturating_sub(7))
@@ -108,9 +136,39 @@ impl ZellijPlugin for Sidebar {
 }
 
 impl Sidebar {
-    fn handle_click(&self, line: isize) {
+    // Dock ourselves: when launched ad-hoc (wide split), move to the left edge
+    // and shrink to the target width. Each resize triggers a PaneUpdate, which
+    // re-renders, driving the next step. Layout-placed instances are already
+    // narrow and skip this entirely.
+    fn dock(&mut self, cols: usize) {
+        if self.docked {
+            return;
+        }
+        if self.dock_steps == 0 {
+            if cols <= TARGET_COLS + 4 {
+                self.docked = true;
+                return;
+            }
+            move_pane_with_pane_id_in_direction(PaneId::Plugin(self.plugin_id), Direction::Left);
+            move_pane_with_pane_id_in_direction(PaneId::Plugin(self.plugin_id), Direction::Left);
+        }
+        if cols > TARGET_COLS && self.dock_steps < MAX_DOCK_STEPS {
+            self.dock_steps += 1;
+            resize_pane_with_id(
+                ResizeStrategy::new(Resize::Decrease, Some(Direction::Right)),
+                PaneId::Plugin(self.plugin_id),
+            );
+        } else {
+            self.docked = true;
+        }
+    }
+
+    fn handle_click(&mut self, line: isize) {
         match target_for_line(line, self.rows.len()) {
-            LineTarget::Header => hide_self(),
+            LineTarget::Header => {
+                self.hidden = true;
+                hide_self();
+            },
             LineTarget::Row(idx) => {
                 if let Some(row) = self.rows.get(idx) {
                     focus_terminal_pane(row.pane_id, false, false);
@@ -190,6 +248,12 @@ fn rows_for_own_tab(manifest: &PaneManifest, own_plugin_id: u32) -> Vec<Row> {
         })
         .collect()
 }
+
+// Host test builds cannot link the wasm host import; tests only exercise pure
+// functions, so a no-op stub satisfies the linker.
+#[cfg(all(test, not(target_family = "wasm")))]
+#[no_mangle]
+extern "C" fn host_run_plugin_command() {}
 
 #[cfg(test)]
 mod tests {
