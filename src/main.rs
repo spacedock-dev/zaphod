@@ -18,6 +18,7 @@ struct Sidebar {
     hidden: bool,
     rendered_once: bool,
     permissions_requested: bool,
+    rail_positioned: bool,
     own_tab: Option<usize>,
     own_floating: bool,
     active_tab: Option<usize>,
@@ -161,6 +162,12 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ChangeApplicationState,
                 PermissionType::ReadPaneContents,
             ]);
+        }
+        // A floating instance (fresh keybind launch spawns floating, centered)
+        // snaps itself to the left rail once.
+        if self.own_floating && !self.rail_positioned {
+            self.rail_positioned = true;
+            self.float_as_rail();
         }
         self.dock(cols);
         println!(
