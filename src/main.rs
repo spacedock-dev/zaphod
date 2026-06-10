@@ -22,6 +22,7 @@ struct Sidebar {
     rail_mode: bool, // sticky: once a floating rail, always re-show as one
     own_tab: Option<usize>,
     own_floating: bool,
+    manifest_seen: bool,
     last_cols: usize,
     nav_mode: bool,
     nav_selected: usize,
@@ -116,6 +117,7 @@ impl ZellijPlugin for Sidebar {
                 false
             },
             Event::PaneUpdate(manifest) => {
+                self.manifest_seen = true;
                 self.own_tab = own_tab_position(&manifest, self.plugin_id);
                 self.instances = sidebar_instances(&manifest);
                 self.own_floating = manifest
@@ -272,7 +274,12 @@ impl Sidebar {
     fn float_as_rail(&mut self) {
         self.rail_mode = true;
         let own = PaneId::Plugin(self.plugin_id);
-        float_multiple_panes(vec![own]);
+        // Only force the float transition when the manifest confirms we are
+        // tiled: ripping a tiled pane out triggers auto-layout reflows (which
+        // restack the user's tabs), and keybind launches float from birth.
+        if self.manifest_seen && !self.own_floating {
+            float_multiple_panes(vec![own]);
+        }
         let mut coords = FloatingPaneCoordinates::default()
             .with_x_fixed(0)
             .with_y_fixed(1)
@@ -340,7 +347,10 @@ impl Sidebar {
     // reflows (new panes, swap layouts) inflate us. Floating rails keep their
     // coordinates and skip this.
     fn dock(&mut self, cols: usize) {
-        if self.own_floating {
+        // Never resize before the manifest confirms we are a tiled pane:
+        // pre-manifest own_floating defaults to false, and tiled resizes in a
+        // stacked_resize environment restack the user's layout.
+        if !self.manifest_seen || self.own_floating {
             return;
         }
         if cols > TARGET_COLS + 6 {
