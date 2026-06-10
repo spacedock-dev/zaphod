@@ -54,16 +54,19 @@ impl ZellijPlugin for Sidebar {
             EventType::Timer,
             EventType::PermissionRequestResult,
         ]);
-        // Never take focus: clicks are delivered to the plugin without focusing
-        // it (same mechanism as the built-in tab-bar).
-        set_selectable(false);
+        // set_selectable(false) happens only after permissions are granted —
+        // the permission prompt needs a focusable pane to be approved.
         set_timeout(STATUS_POLL_SECS);
     }
 
     fn update(&mut self, event: Event) -> bool {
         match event {
-            Event::PermissionRequestResult(_) => {
-                set_selectable(false);
+            Event::PermissionRequestResult(status) => {
+                // Never take focus: clicks are delivered to the plugin without
+                // focusing it (same mechanism as the built-in tab-bar).
+                if status == PermissionStatus::Granted {
+                    set_selectable(false);
+                }
                 true
             },
             Event::TabUpdate(tabs) => {
