@@ -22,6 +22,10 @@ struct Sidebar {
     rail_mode: bool, // sticky: once a floating rail, always re-show as one
     own_tab: Option<usize>,
     own_floating: bool,
+    last_cols: usize,
+    nav_mode: bool,
+    nav_selected: usize,
+    return_focus: Option<u32>,
     active_tab: Option<usize>,
     instances: Vec<(u32, usize)>, // (plugin pane id, tab position) of every sidebar instance
 }
@@ -60,6 +64,7 @@ impl ZellijPlugin for Sidebar {
             EventType::PaneUpdate,
             EventType::TabUpdate,
             EventType::Mouse,
+            EventType::Key,
             EventType::Timer,
             EventType::PermissionRequestResult,
         ]);
@@ -75,8 +80,34 @@ impl ZellijPlugin for Sidebar {
                 // Never take focus: clicks are delivered to the plugin without
                 // focusing it (same mechanism as the built-in tab-bar). Only
                 // after the grant — the permission prompt needs a focusable pane.
-                if status == PermissionStatus::Granted {
+                if status == PermissionStatus::Granted && !self.nav_mode {
                     set_selectable(false);
+                }
+                true
+            },
+            Event::Key(key) if self.nav_mode => {
+                if key.has_no_modifiers() {
+                    match key.bare_key {
+                        BareKey::Up | BareKey::Char('k') => {
+                            self.nav_selected =
+                                move_selection(self.nav_selected, -1, self.rows.len());
+                        },
+                        BareKey::Down | BareKey::Char('j') => {
+                            self.nav_selected =
+                                move_selection(self.nav_selected, 1, self.rows.len());
+                        },
+                        BareKey::Enter => {
+                            let target = self.rows.get(self.nav_selected).map(|r| r.pane_id);
+                            self.exit_nav(false);
+                            if let Some(id) = target {
+                                focus_terminal_pane(id, false, false);
+                            }
+                        },
+                        BareKey::Esc => {
+                            self.exit_nav(true);
+                        },
+                        _ => {},
+                    }
                 }
                 true
             },
@@ -109,8 +140,8 @@ impl ZellijPlugin for Sidebar {
                 set_timeout(STATUS_POLL_SECS);
                 true
             },
-            Event::Mouse(Mouse::LeftClick(line, _col)) => {
-                self.handle_click(line);
+            Event::Mouse(Mouse::LeftClick(line, col)) => {
+                self.handle_click(line, col);
                 false
             },
             _ => false,
@@ -122,6 +153,18 @@ impl ZellijPlugin for Sidebar {
         // so `zellij pipe` callers terminate instead of wedging the pipe bus.
         if let PipeSource::Cli(pipe_id) = &pipe_message.source {
             unblock_cli_pipe_input(pipe_id);
+        }
+        if pipe_message.name == "navigate" {
+            if !self.rendered_once {
+                // Launching pipe: just summon; nav needs a settled pane.
+                show_self(true);
+                self.float_as_rail();
+                self.hidden = false;
+                return false;
+            }
+            self.ensure_visible_in_active_tab();
+            self.enter_nav();
+            return true;
         }
         if pipe_message.name != "toggle" {
             return false;
@@ -190,12 +233,15 @@ impl ZellijPlugin for Sidebar {
             self.rail_positioned = true;
             self.float_as_rail();
         }
+        self.last_cols = cols;
         self.dock(cols);
+        // Header: click body to hide, click the ⇄ at the right edge to toggle
+        // floating rail <-> docked tile.
         println!(
-            "\u{1b}[7m▾ PANES{}\u{1b}[0m",
-            " ".repeat(cols.saturating_sub(7))
+            "\u{1b}[7m▾ PANES{}⇄ \u{1b}[0m",
+            " ".repeat(cols.saturating_sub(10))
         );
-        for row in &self.rows {
+        for (idx, row) in self.rows.iter().enumerate() {
             let title: String = row.title.chars().take(cols.saturating_sub(2)).collect();
             let mark = if row.focused {
                 "\u{1b}[33m●\u{1b}[0m " // focused: yellow
@@ -204,7 +250,9 @@ impl ZellijPlugin for Sidebar {
             } else {
                 "  "
             };
-            if row.agent {
+            if self.nav_mode && idx == self.nav_selected {
+                println!("{}\u{1b}[7m{}\u{1b}[0m", mark, title); // nav selection
+            } else if row.agent {
                 println!("{}\u{1b}[36m{}\u{1b}[0m", mark, title);
             } else if row.focused {
                 println!("{}\u{1b}[1m{}\u{1b}[0m", mark, title);
@@ -229,6 +277,60 @@ impl Sidebar {
             .with_height_percent(97);
         coords.pinned = Some(true);
         change_floating_panes_coordinates(vec![(own, coords)]);
+    }
+
+    // Same show paths as the toggle, minus the hide arm.
+    fn ensure_visible_in_active_tab(&mut self) {
+        match decide_toggle(
+            self.hidden,
+            self.own_tab,
+            self.active_tab,
+            self.plugin_id,
+            &self.instances,
+        ) {
+            ToggleAction::ShowHere => {
+                self.hidden = false;
+                if self.rail_mode {
+                    show_self(true);
+                    self.float_as_rail();
+                } else {
+                    show_self(false);
+                }
+            },
+            ToggleAction::BringToActive(tab) => {
+                if self.hidden {
+                    show_self(true);
+                    self.hidden = false;
+                }
+                break_panes_to_tab_with_index(&[PaneId::Plugin(self.plugin_id)], tab, false);
+                self.float_as_rail();
+                self.own_tab = Some(tab);
+            },
+            ToggleAction::HideSelf | ToggleAction::Ignore => {},
+        }
+    }
+
+    fn enter_nav(&mut self) {
+        self.nav_mode = true;
+        self.return_focus = self.rows.iter().find(|r| r.focused).map(|r| r.pane_id);
+        self.nav_selected = self
+            .rows
+            .iter()
+            .position(|r| r.focused)
+            .unwrap_or(0)
+            .min(self.rows.len().saturating_sub(1));
+        set_selectable(true);
+        focus_plugin_pane(self.plugin_id, false, false);
+    }
+
+    fn exit_nav(&mut self, restore_focus: bool) {
+        self.nav_mode = false;
+        set_selectable(false);
+        if restore_focus {
+            if let Some(id) = self.return_focus.take() {
+                focus_terminal_pane(id, false, false);
+            }
+        }
     }
 
     // Tiled instances only: re-shrink toward the target width whenever layout
@@ -260,11 +362,22 @@ impl Sidebar {
         }
     }
 
-    fn handle_click(&mut self, line: isize) {
+    fn handle_click(&mut self, line: isize, col: usize) {
         match target_for_line(line, self.rows.len()) {
             LineTarget::Header => {
-                self.hidden = true;
-                hide_self();
+                if header_dock_toggle_hit(col, self.last_cols) {
+                    if self.own_floating {
+                        self.rail_mode = false;
+                        self.docked = false;
+                        self.dock_steps = 0;
+                        embed_multiple_panes(vec![PaneId::Plugin(self.plugin_id)]);
+                    } else {
+                        self.float_as_rail();
+                    }
+                } else {
+                    self.hidden = true;
+                    hide_self();
+                }
             },
             LineTarget::Row(idx) => {
                 if let Some(row) = self.rows.get(idx) {
@@ -338,6 +451,18 @@ fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
         .collect();
     instances.sort_unstable();
     instances
+}
+
+fn move_selection(current: usize, delta: isize, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    (current as isize + delta).clamp(0, len as isize - 1) as usize
+}
+
+// The ⇄ control occupies the right edge of the header line.
+fn header_dock_toggle_hit(col: usize, total_cols: usize) -> bool {
+    total_cols > 4 && col >= total_cols.saturating_sub(4)
 }
 
 // Each pane occupies two display lines (title + status) below the header.
@@ -496,6 +621,24 @@ mod tests {
         assert_eq!(target_for_line(4, 2), LineTarget::Row(1));
         assert_eq!(target_for_line(5, 2), LineTarget::None);
         assert_eq!(target_for_line(-3, 2), LineTarget::None);
+    }
+
+    #[test]
+    fn selection_moves_within_bounds() {
+        assert_eq!(move_selection(0, -1, 5), 0);
+        assert_eq!(move_selection(0, 1, 5), 1);
+        assert_eq!(move_selection(4, 1, 5), 4);
+        assert_eq!(move_selection(2, -1, 5), 1);
+        assert_eq!(move_selection(0, 1, 0), 0);
+    }
+
+    #[test]
+    fn dock_toggle_hit_zone_is_right_edge_of_header() {
+        assert!(header_dock_toggle_hit(26, 30));
+        assert!(header_dock_toggle_hit(29, 30));
+        assert!(!header_dock_toggle_hit(25, 30));
+        assert!(!header_dock_toggle_hit(0, 30));
+        assert!(!header_dock_toggle_hit(3, 4)); // degenerate width: never hit
     }
 
     #[test]
