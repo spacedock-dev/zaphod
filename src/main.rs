@@ -22,6 +22,8 @@ struct Sidebar {
     rail_mode: bool, // sticky: once a floating rail, always re-show as one
     own_tab: Option<usize>,
     own_floating: bool,
+    own_url: Option<String>,
+    config: BTreeMap<String, String>,
     manifest_seen: bool,
     last_cols: usize,
     nav_mode: bool,
@@ -52,15 +54,16 @@ enum LineTarget {
 enum ToggleAction {
     HideSelf,
     ShowHere,
-    BringToActive(usize),
+    SpawnInActive,
     Ignore,
 }
 
 register_plugin!(Sidebar);
 
 impl ZellijPlugin for Sidebar {
-    fn load(&mut self, _configuration: BTreeMap<String, String>) {
+    fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.plugin_id = get_plugin_ids().plugin_id;
+        self.config = configuration;
         subscribe(&[
             EventType::PaneUpdate,
             EventType::TabUpdate,
@@ -120,13 +123,23 @@ impl ZellijPlugin for Sidebar {
                 self.manifest_seen = true;
                 self.own_tab = own_tab_position(&manifest, self.plugin_id);
                 self.instances = sidebar_instances(&manifest);
-                self.own_floating = manifest
+                if let Some(own) = manifest
                     .panes
                     .values()
                     .flatten()
                     .find(|p| p.is_plugin && p.id == self.plugin_id)
-                    .map(|p| p.is_floating)
-                    .unwrap_or(false);
+                {
+                    self.own_floating = own.is_floating;
+                    self.own_url = own.plugin_url.clone();
+                    // Ground truth beats our flag: drift here caused phantom
+                    // show/hide cycles.
+                    self.hidden = own.is_suppressed;
+                    // If focus ever lands on us outside nav mode (launch,
+                    // spawn, show_self), hand it back.
+                    if own.is_focused && !self.nav_mode {
+                        focus_previous_pane();
+                    }
+                }
                 let old = std::mem::take(&mut self.rows);
                 self.rows = rows_for_own_tab(&manifest, self.plugin_id);
                 for row in self.rows.iter_mut() {
@@ -181,7 +194,6 @@ impl ZellijPlugin for Sidebar {
             show_self(true);
             self.float_as_rail();
             self.hidden = false;
-            focus_previous_pane(); // show_self steals focus; give it back
             return false;
         }
         match decide_toggle(
@@ -205,17 +217,19 @@ impl ZellijPlugin for Sidebar {
                 } else {
                     show_self(false);
                 }
-                focus_previous_pane(); // show_self steals focus; give it back
             },
-            ToggleAction::BringToActive(tab) => {
-                if self.hidden {
-                    show_self(true);
-                    self.hidden = false;
+            ToggleAction::SpawnInActive => {
+                // No cross-tab moves (show_self/break would yank the user's
+                // view to our tab): the leader spawns a sibling instance
+                // directly in the active tab instead.
+                if let Some(url) = self.own_url.clone() {
+                    open_plugin_pane_floating(
+                        &url,
+                        self.config.clone(),
+                        Some(rail_coordinates()),
+                        BTreeMap::new(),
+                    );
                 }
-                break_panes_to_tab_with_index(&[PaneId::Plugin(self.plugin_id)], tab, false);
-                self.float_as_rail();
-                focus_previous_pane();
-                self.own_tab = Some(tab);
             },
             ToggleAction::Ignore => {},
         }
@@ -280,13 +294,7 @@ impl Sidebar {
         if self.manifest_seen && !self.own_floating {
             float_multiple_panes(vec![own]);
         }
-        let mut coords = FloatingPaneCoordinates::default()
-            .with_x_fixed(0)
-            .with_y_fixed(1)
-            .with_width_fixed(RAIL_WIDTH)
-            .with_height_percent(97);
-        coords.pinned = Some(true);
-        change_floating_panes_coordinates(vec![(own, coords)]);
+        change_floating_panes_coordinates(vec![(own, rail_coordinates())]);
     }
 
     // Same show paths as the toggle, minus the hide arm.
@@ -307,14 +315,15 @@ impl Sidebar {
                     show_self(false);
                 }
             },
-            ToggleAction::BringToActive(tab) => {
-                if self.hidden {
-                    show_self(true);
-                    self.hidden = false;
+            ToggleAction::SpawnInActive => {
+                if let Some(url) = self.own_url.clone() {
+                    open_plugin_pane_floating(
+                        &url,
+                        self.config.clone(),
+                        Some(rail_coordinates()),
+                        BTreeMap::new(),
+                    );
                 }
-                break_panes_to_tab_with_index(&[PaneId::Plugin(self.plugin_id)], tab, false);
-                self.float_as_rail();
-                self.own_tab = Some(tab);
             },
             ToggleAction::HideSelf | ToggleAction::Ignore => {},
         }
@@ -440,7 +449,7 @@ fn decide_toggle(
     {
         ToggleAction::Ignore
     } else if instances.iter().all(|(id, _)| *id >= own_pane_id) {
-        ToggleAction::BringToActive(active)
+        ToggleAction::SpawnInActive
     } else {
         ToggleAction::Ignore
     }
@@ -464,6 +473,16 @@ fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
         .collect();
     instances.sort_unstable();
     instances
+}
+
+fn rail_coordinates() -> FloatingPaneCoordinates {
+    let mut coords = FloatingPaneCoordinates::default()
+        .with_x_fixed(0)
+        .with_y_fixed(1)
+        .with_width_fixed(RAIL_WIDTH)
+        .with_height_percent(97);
+    coords.pinned = Some(true);
+    coords
 }
 
 fn move_selection(current: usize, delta: isize, len: usize) -> usize {
@@ -680,11 +699,11 @@ mod tests {
     }
 
     #[test]
-    fn solo_instance_follows_to_active_tab() {
+    fn solo_instance_spawns_sibling_in_active_tab() {
         let instances = vec![(7, 1)];
         assert_eq!(
             decide_toggle(false, Some(1), Some(3), 7, &instances),
-            ToggleAction::BringToActive(3)
+            ToggleAction::SpawnInActive
         );
     }
 
@@ -698,12 +717,12 @@ mod tests {
     }
 
     #[test]
-    fn only_leader_teleports_when_active_tab_is_empty() {
+    fn only_leader_spawns_when_active_tab_is_empty() {
         let instances = vec![(7, 1), (9, 2)];
-        // leader (7) goes; follower (9) ignores
+        // leader (7) spawns; follower (9) ignores
         assert_eq!(
             decide_toggle(false, Some(1), Some(5), 7, &instances),
-            ToggleAction::BringToActive(5)
+            ToggleAction::SpawnInActive
         );
         assert_eq!(
             decide_toggle(false, Some(2), Some(5), 9, &instances),
