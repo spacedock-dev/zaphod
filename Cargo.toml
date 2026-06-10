@@ -1,0 +1,9 @@
+# ABOUTME: Zellij sidebar plugin — clickable pane switcher docked as a left pane.
+# ABOUTME: Build: cargo build --release --target wasm32-wasip1
+[package]
+name = "zellij-sidebar"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zellij-tile = "0.44.1"
