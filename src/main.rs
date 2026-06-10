@@ -179,6 +179,7 @@ impl ZellijPlugin for Sidebar {
             show_self(true);
             self.float_as_rail();
             self.hidden = false;
+            focus_previous_pane(); // show_self steals focus; give it back
             return false;
         }
         match decide_toggle(
@@ -202,6 +203,7 @@ impl ZellijPlugin for Sidebar {
                 } else {
                     show_self(false);
                 }
+                focus_previous_pane(); // show_self steals focus; give it back
             },
             ToggleAction::BringToActive(tab) => {
                 if self.hidden {
@@ -210,6 +212,7 @@ impl ZellijPlugin for Sidebar {
                 }
                 break_panes_to_tab_with_index(&[PaneId::Plugin(self.plugin_id)], tab, false);
                 self.float_as_rail();
+                focus_previous_pane();
                 self.own_tab = Some(tab);
             },
             ToggleAction::Ignore => {},
