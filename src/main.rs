@@ -120,8 +120,14 @@ impl ZellijPlugin for Sidebar {
         if pipe_message.name != "toggle" {
             return false;
         }
-        // A pipe that launched us arrives before the first render: stay visible.
+        // A pipe that launched us arrives before the first render. If we were
+        // launched into a hidden floating layer (hide_floating_panes tabs), we
+        // never render and would stay invisible forever — summon explicitly.
         if !self.rendered_once {
+            let _ = show_floating_panes(None);
+            show_self(true);
+            self.float_as_rail();
+            self.hidden = false;
             return false;
         }
         match decide_toggle(
@@ -137,6 +143,9 @@ impl ZellijPlugin for Sidebar {
             },
             ToggleAction::ShowHere => {
                 self.hidden = false;
+                if self.own_floating {
+                    let _ = show_floating_panes(None);
+                }
                 show_self(self.own_floating);
             },
             ToggleAction::BringToActive(tab) => {
@@ -145,6 +154,7 @@ impl ZellijPlugin for Sidebar {
                     self.hidden = false;
                 }
                 break_panes_to_tab_with_index(&[PaneId::Plugin(self.plugin_id)], tab, false);
+                let _ = show_floating_panes(None);
                 self.float_as_rail();
                 self.own_tab = Some(tab);
             },
