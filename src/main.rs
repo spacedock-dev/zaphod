@@ -19,6 +19,7 @@ struct Sidebar {
     rendered_once: bool,
     permissions_requested: bool,
     rail_positioned: bool,
+    rail_mode: bool, // sticky: once a floating rail, always re-show as one
     own_tab: Option<usize>,
     own_floating: bool,
     active_tab: Option<usize>,
@@ -143,10 +144,15 @@ impl ZellijPlugin for Sidebar {
             },
             ToggleAction::ShowHere => {
                 self.hidden = false;
-                if self.own_floating {
+                if self.rail_mode {
+                    // While hidden the manifest reports is_floating=false, so
+                    // never trust it here: a rail always re-shows as a rail.
                     let _ = show_floating_panes(None);
+                    show_self(true);
+                    self.float_as_rail();
+                } else {
+                    show_self(false);
                 }
-                show_self(self.own_floating);
             },
             ToggleAction::BringToActive(tab) => {
                 if self.hidden {
@@ -207,14 +213,15 @@ impl ZellijPlugin for Sidebar {
 }
 
 impl Sidebar {
-    fn float_as_rail(&self) {
+    fn float_as_rail(&mut self) {
+        self.rail_mode = true;
         let own = PaneId::Plugin(self.plugin_id);
         float_multiple_panes(vec![own]);
         let mut coords = FloatingPaneCoordinates::default()
             .with_x_fixed(0)
             .with_y_fixed(1)
             .with_width_fixed(RAIL_WIDTH)
-            .with_height_percent(90);
+            .with_height_percent(97);
         coords.pinned = Some(true);
         change_floating_panes_coordinates(vec![(own, coords)]);
     }
