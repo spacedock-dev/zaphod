@@ -1,5 +1,5 @@
 // ABOUTME: Clickable pane-switcher sidebar for zellij — lists panes in its own tab with their
-// ABOUTME: last terminal line, click a row to focus that pane, click the header to hide.
+// ABOUTME: last terminal line; Alt-/ summons it as a floating left rail in the active tab.
 
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
@@ -7,6 +7,7 @@ use zellij_tile::prelude::*;
 const STATUS_POLL_SECS: f64 = 2.0;
 const TARGET_COLS: usize = 28;
 const MAX_DOCK_STEPS: u8 = 10;
+const RAIL_WIDTH: usize = 30;
 
 #[derive(Default)]
 struct Sidebar {
@@ -16,8 +17,11 @@ struct Sidebar {
     docked: bool,
     hidden: bool,
     rendered_once: bool,
+    permissions_requested: bool,
     own_tab: Option<usize>,
+    own_floating: bool,
     active_tab: Option<usize>,
+    instances: Vec<(u32, usize)>, // (plugin pane id, tab position) of every sidebar instance
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -37,16 +41,19 @@ enum LineTarget {
     None,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ToggleAction {
+    HideSelf,
+    ShowHere,
+    BringToActive(usize),
+    Ignore,
+}
+
 register_plugin!(Sidebar);
 
 impl ZellijPlugin for Sidebar {
     fn load(&mut self, _configuration: BTreeMap<String, String>) {
         self.plugin_id = get_plugin_ids().plugin_id;
-        request_permission(&[
-            PermissionType::ReadApplicationState,
-            PermissionType::ChangeApplicationState,
-            PermissionType::ReadPaneContents,
-        ]);
         subscribe(&[
             EventType::PaneUpdate,
             EventType::TabUpdate,
@@ -54,8 +61,9 @@ impl ZellijPlugin for Sidebar {
             EventType::Timer,
             EventType::PermissionRequestResult,
         ]);
-        // set_selectable(false) happens only after permissions are granted —
-        // the permission prompt needs a focusable pane to be approved.
+        // Permissions are requested on first render, not here: a request made
+        // during tab construction races pane registration and gets parked in
+        // the server's waiting-for-client queue, so the prompt never shows.
         set_timeout(STATUS_POLL_SECS);
     }
 
@@ -63,7 +71,8 @@ impl ZellijPlugin for Sidebar {
         match event {
             Event::PermissionRequestResult(status) => {
                 // Never take focus: clicks are delivered to the plugin without
-                // focusing it (same mechanism as the built-in tab-bar).
+                // focusing it (same mechanism as the built-in tab-bar). Only
+                // after the grant — the permission prompt needs a focusable pane.
                 if status == PermissionStatus::Granted {
                     set_selectable(false);
                 }
@@ -75,6 +84,14 @@ impl ZellijPlugin for Sidebar {
             },
             Event::PaneUpdate(manifest) => {
                 self.own_tab = own_tab_position(&manifest, self.plugin_id);
+                self.instances = sidebar_instances(&manifest);
+                self.own_floating = manifest
+                    .panes
+                    .values()
+                    .flatten()
+                    .find(|p| p.is_plugin && p.id == self.plugin_id)
+                    .map(|p| p.is_floating)
+                    .unwrap_or(false);
                 let old = std::mem::take(&mut self.rows);
                 self.rows = rows_for_own_tab(&manifest, self.plugin_id);
                 for row in self.rows.iter_mut() {
@@ -106,25 +123,45 @@ impl ZellijPlugin for Sidebar {
         if !self.rendered_once {
             return false;
         }
-        // Per-tab toggle: the pipe broadcasts to every instance; only the one
-        // in the active tab responds.
-        if self.own_tab.is_some() && self.own_tab != self.active_tab {
-            return false;
-        }
-        if self.hidden {
-            self.hidden = false;
-            self.docked = false;
-            self.dock_steps = 0;
-            show_self(false);
-        } else {
-            self.hidden = true;
-            hide_self();
+        match decide_toggle(
+            self.hidden,
+            self.own_tab,
+            self.active_tab,
+            self.plugin_id,
+            &self.instances,
+        ) {
+            ToggleAction::HideSelf => {
+                self.hidden = true;
+                hide_self();
+            },
+            ToggleAction::ShowHere => {
+                self.hidden = false;
+                show_self(self.own_floating);
+            },
+            ToggleAction::BringToActive(tab) => {
+                if self.hidden {
+                    show_self(true);
+                    self.hidden = false;
+                }
+                break_panes_to_tab_with_index(&[PaneId::Plugin(self.plugin_id)], tab, false);
+                self.float_as_rail();
+                self.own_tab = Some(tab);
+            },
+            ToggleAction::Ignore => {},
         }
         false
     }
 
     fn render(&mut self, _rows: usize, cols: usize) {
         self.rendered_once = true;
+        if !self.permissions_requested {
+            self.permissions_requested = true;
+            request_permission(&[
+                PermissionType::ReadApplicationState,
+                PermissionType::ChangeApplicationState,
+                PermissionType::ReadPaneContents,
+            ]);
+        }
         self.dock(cols);
         println!(
             "\u{1b}[7m▾ PANES{}\u{1b}[0m",
@@ -153,26 +190,44 @@ impl ZellijPlugin for Sidebar {
 }
 
 impl Sidebar {
-    // Shrink ad-hoc launches toward the target width. Tiled placement cannot be
-    // controlled at runtime (zellij move primitives are swap-based); proper
-    // placement comes from layouts (default_tab_template / sidebar-tab.kdl),
-    // which spawn at the right width and skip this entirely.
+    fn float_as_rail(&self) {
+        let own = PaneId::Plugin(self.plugin_id);
+        float_multiple_panes(vec![own]);
+        let mut coords = FloatingPaneCoordinates::default()
+            .with_x_fixed(0)
+            .with_y_fixed(1)
+            .with_width_fixed(RAIL_WIDTH)
+            .with_height_percent(90);
+        coords.pinned = Some(true);
+        change_floating_panes_coordinates(vec![(own, coords)]);
+    }
+
+    // Tiled instances only: re-shrink toward the target width whenever layout
+    // reflows (new panes, swap layouts) inflate us. Floating rails keep their
+    // coordinates and skip this.
     fn dock(&mut self, cols: usize) {
+        if self.own_floating {
+            return;
+        }
+        if cols > TARGET_COLS + 6 {
+            self.docked = false;
+        }
         if self.docked {
             return;
         }
-        if self.dock_steps == 0 && cols <= TARGET_COLS + 4 {
+        if cols <= TARGET_COLS + 4 {
             self.docked = true;
+            self.dock_steps = 0;
             return;
         }
-        if cols > TARGET_COLS && self.dock_steps < MAX_DOCK_STEPS {
+        if self.dock_steps < MAX_DOCK_STEPS {
             self.dock_steps += 1;
             resize_pane_with_id(
                 ResizeStrategy::new(Resize::Decrease, Some(Direction::Right)),
                 PaneId::Plugin(self.plugin_id),
             );
         } else {
-            self.docked = true;
+            self.docked = true; // give up until the next successful dock resets steps
         }
     }
 
@@ -202,6 +257,58 @@ impl Sidebar {
             }
         }
     }
+}
+
+// The pipe broadcasts to every instance; exactly one may act on it.
+// - The active tab's own instance toggles in place.
+// - Otherwise, if the active tab has no instance, the leader (lowest pane id)
+//   teleports there as a floating rail.
+fn decide_toggle(
+    hidden: bool,
+    own_tab: Option<usize>,
+    active_tab: Option<usize>,
+    own_pane_id: u32,
+    instances: &[(u32, usize)],
+) -> ToggleAction {
+    let Some(active) = active_tab else {
+        return ToggleAction::Ignore;
+    };
+    if own_tab == Some(active) {
+        if hidden {
+            ToggleAction::ShowHere
+        } else {
+            ToggleAction::HideSelf
+        }
+    } else if instances
+        .iter()
+        .any(|(id, tab)| *tab == active && *id != own_pane_id)
+    {
+        ToggleAction::Ignore
+    } else if instances.iter().all(|(id, _)| *id >= own_pane_id) {
+        ToggleAction::BringToActive(active)
+    } else {
+        ToggleAction::Ignore
+    }
+}
+
+fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
+    let mut instances: Vec<(u32, usize)> = manifest
+        .panes
+        .iter()
+        .flat_map(|(tab, panes)| {
+            panes
+                .iter()
+                .filter(|p| {
+                    p.is_plugin
+                        && p.plugin_url
+                            .as_deref()
+                            .map_or(false, |u| u.contains("zellij-sidebar"))
+                })
+                .map(move |p| (p.id, *tab))
+        })
+        .collect();
+    instances.sort_unstable();
+    instances
 }
 
 // Each pane occupies two display lines (title + status) below the header.
@@ -372,5 +479,50 @@ mod tests {
         ];
         assert_eq!(last_meaningful_line(&viewport), "> do the thing");
         assert_eq!(last_meaningful_line(&[]), "");
+    }
+
+    #[test]
+    fn toggle_in_own_active_tab_hides_or_shows() {
+        let instances = vec![(7, 1)];
+        assert_eq!(
+            decide_toggle(false, Some(1), Some(1), 7, &instances),
+            ToggleAction::HideSelf
+        );
+        assert_eq!(
+            decide_toggle(true, Some(1), Some(1), 7, &instances),
+            ToggleAction::ShowHere
+        );
+    }
+
+    #[test]
+    fn solo_instance_follows_to_active_tab() {
+        let instances = vec![(7, 1)];
+        assert_eq!(
+            decide_toggle(false, Some(1), Some(3), 7, &instances),
+            ToggleAction::BringToActive(3)
+        );
+    }
+
+    #[test]
+    fn defers_to_instance_already_in_active_tab() {
+        let instances = vec![(7, 1), (9, 3)];
+        assert_eq!(
+            decide_toggle(false, Some(1), Some(3), 7, &instances),
+            ToggleAction::Ignore
+        );
+    }
+
+    #[test]
+    fn only_leader_teleports_when_active_tab_is_empty() {
+        let instances = vec![(7, 1), (9, 2)];
+        // leader (7) goes; follower (9) ignores
+        assert_eq!(
+            decide_toggle(false, Some(1), Some(5), 7, &instances),
+            ToggleAction::BringToActive(5)
+        );
+        assert_eq!(
+            decide_toggle(false, Some(2), Some(5), 9, &instances),
+            ToggleAction::Ignore
+        );
     }
 }
