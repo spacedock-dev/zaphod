@@ -118,14 +118,21 @@ impl ZellijPlugin for Sidebar {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        // CLI pipes stay blocked until explicitly released; release immediately
+        // so `zellij pipe` callers terminate instead of wedging the pipe bus.
+        if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+            unblock_cli_pipe_input(pipe_id);
+        }
         if pipe_message.name != "toggle" {
             return false;
         }
         // A pipe that launched us arrives before the first render. If we were
         // launched into a hidden floating layer (hide_floating_panes tabs), we
         // never render and would stay invisible forever — summon explicitly.
+        // NOTE: no blocking shim calls in here (show_floating_panes etc. wait
+        // for a server response and deadlock the launch); the pinned rail is
+        // visible even while the floating layer is hidden.
         if !self.rendered_once {
-            let _ = show_floating_panes(None);
             show_self(true);
             self.float_as_rail();
             self.hidden = false;
@@ -147,7 +154,6 @@ impl ZellijPlugin for Sidebar {
                 if self.rail_mode {
                     // While hidden the manifest reports is_floating=false, so
                     // never trust it here: a rail always re-shows as a rail.
-                    let _ = show_floating_panes(None);
                     show_self(true);
                     self.float_as_rail();
                 } else {
@@ -160,7 +166,6 @@ impl ZellijPlugin for Sidebar {
                     self.hidden = false;
                 }
                 break_panes_to_tab_with_index(&[PaneId::Plugin(self.plugin_id)], tab, false);
-                let _ = show_floating_panes(None);
                 self.float_as_rail();
                 self.own_tab = Some(tab);
             },
