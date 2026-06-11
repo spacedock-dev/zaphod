@@ -173,7 +173,7 @@ impl ZellijPlugin for Sidebar {
                 show_self(true);
                 self.float_as_rail();
                 self.hidden = false;
-                return false;
+                return true;
             }
             self.ensure_visible_in_active_tab();
             self.enter_nav();
@@ -192,15 +192,16 @@ impl ZellijPlugin for Sidebar {
             show_self(true);
             self.float_as_rail();
             self.hidden = false;
-            return false;
+            return true;
         }
-        match decide_toggle(
+        let action = decide_toggle(
             self.hidden,
             self.own_tab,
-            self.active_tab,
+            self.current_active_tab(),
             self.plugin_id,
             &self.instances,
-        ) {
+        );
+        match action {
             ToggleAction::HideSelf => {
                 self.hidden = true;
                 hide_self();
@@ -231,7 +232,7 @@ impl ZellijPlugin for Sidebar {
             }
             ToggleAction::Ignore => {}
         }
-        false
+        toggle_action_requests_render(action)
     }
 
     fn render(&mut self, _rows: usize, cols: usize) {
@@ -287,10 +288,11 @@ impl Sidebar {
 
     // Same show paths as the toggle, minus the hide arm.
     fn ensure_visible_in_active_tab(&mut self) {
+        let active_tab = self.current_active_tab();
         match decide_toggle(
             self.hidden,
             self.own_tab,
-            self.active_tab,
+            active_tab,
             self.plugin_id,
             &self.instances,
         ) {
@@ -315,6 +317,12 @@ impl Sidebar {
             }
             ToggleAction::HideSelf | ToggleAction::Ignore => {}
         }
+    }
+
+    fn current_active_tab(&mut self) -> Option<usize> {
+        let active_tab = active_tab_for_decision(self.active_tab, get_focused_pane_info());
+        self.active_tab = active_tab;
+        active_tab
     }
 
     fn enter_nav(&mut self) {
@@ -445,6 +453,20 @@ fn decide_toggle(
     } else {
         ToggleAction::Ignore
     }
+}
+
+fn toggle_action_requests_render(action: ToggleAction) -> bool {
+    matches!(action, ToggleAction::ShowHere | ToggleAction::SpawnInActive)
+}
+
+fn active_tab_for_decision(
+    cached_active_tab: Option<usize>,
+    focused_pane_info: Result<(usize, PaneId), String>,
+) -> Option<usize> {
+    focused_pane_info
+        .map(|(tab, _)| tab)
+        .ok()
+        .or(cached_active_tab)
 }
 
 fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
@@ -764,6 +786,26 @@ mod tests {
         assert_eq!(
             decide_toggle(true, Some(1), Some(1), 7, &instances),
             ToggleAction::ShowHere
+        );
+    }
+
+    #[test]
+    fn showing_a_hidden_instance_requests_render() {
+        assert!(toggle_action_requests_render(ToggleAction::ShowHere));
+        assert!(toggle_action_requests_render(ToggleAction::SpawnInActive));
+        assert!(!toggle_action_requests_render(ToggleAction::HideSelf));
+        assert!(!toggle_action_requests_render(ToggleAction::Ignore));
+    }
+
+    #[test]
+    fn live_focused_tab_overrides_stale_cached_active_tab() {
+        assert_eq!(
+            active_tab_for_decision(Some(1), Ok((3, PaneId::Terminal(9)))),
+            Some(3)
+        );
+        assert_eq!(
+            active_tab_for_decision(Some(1), Err("unavailable".to_owned())),
+            Some(1)
         );
     }
 
