@@ -143,12 +143,15 @@ impl ZellijPlugin for Sidebar {
                 let old = std::mem::take(&mut self.rows);
                 self.rows = rows_for_own_tab(&manifest, self.plugin_id);
                 preserve_agent_fields(&mut self.rows, &old);
-                true
+                // PaneUpdate fires constantly in agent-heavy tabs; re-rendering
+                // a pinned overlay on every one makes the underlying panes
+                // flicker. Only render when the derived view changed.
+                self.rows != old || !self.rendered_once
             }
             Event::Timer(_) => {
-                self.refresh_statuses();
+                let changed = self.refresh_statuses();
                 set_timeout(STATUS_POLL_SECS);
-                true
+                changed
             }
             Event::Mouse(Mouse::LeftClick(line, col)) => {
                 self.handle_click(line, col);
@@ -395,13 +398,20 @@ impl Sidebar {
         }
     }
 
-    fn refresh_statuses(&mut self) {
+    // Returns whether any row's agent fields changed (i.e. a render is due).
+    fn refresh_statuses(&mut self) -> bool {
+        let mut changed = false;
         for row in self.rows.iter_mut() {
             let pane_id = PaneId::Terminal(row.pane_id);
             let command = get_pane_running_command(pane_id);
             let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
-            row.agent = agent::enrich_fields(&row.agent, &row.title, command, viewport);
+            let enriched = agent::enrich_fields(&row.agent, &row.title, command, viewport);
+            if enriched != row.agent {
+                row.agent = enriched;
+                changed = true;
+            }
         }
+        changed
     }
 }
 
