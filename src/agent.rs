@@ -24,6 +24,25 @@ pub struct ViewportDetection {
     pub status: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentFields {
+    pub kind: AgentKind,
+    pub state: AgentState,
+    pub status: String,
+    pub running_command: Option<Vec<String>>,
+}
+
+impl Default for AgentFields {
+    fn default() -> Self {
+        Self {
+            kind: AgentKind::Unknown,
+            state: AgentState::Unknown,
+            status: String::new(),
+            running_command: None,
+        }
+    }
+}
+
 fn normalized_basename(command: &str) -> String {
     let base = command
         .rsplit(['/', '\\'])
@@ -137,6 +156,52 @@ pub fn detect_viewport(agent: AgentKind, viewport: &[String]) -> ViewportDetecti
     ViewportDetection {
         state: AgentState::Idle,
         status,
+    }
+}
+
+pub fn enrich_fields(
+    previous: &AgentFields,
+    title: &str,
+    command: Result<Vec<String>, String>,
+    viewport: Result<Vec<String>, String>,
+) -> AgentFields {
+    let current_command = command.ok();
+    let viewport = viewport.ok();
+
+    if current_command.is_none() && viewport.is_none() {
+        return previous.clone();
+    }
+
+    let command_kind = current_command
+        .as_deref()
+        .map(agent_from_command)
+        .unwrap_or(AgentKind::Unknown);
+    let running_command = current_command.or_else(|| previous.running_command.clone());
+    let title_kind = agent_from_title(title);
+    let viewport_kind = viewport
+        .as_deref()
+        .map(agent_from_viewport)
+        .unwrap_or(AgentKind::Unknown);
+    let kind = [command_kind, title_kind, viewport_kind]
+        .into_iter()
+        .find(|kind| *kind != AgentKind::Unknown)
+        .unwrap_or(AgentKind::Unknown);
+
+    let Some(viewport) = viewport else {
+        return AgentFields {
+            kind,
+            state: previous.state,
+            status: previous.status.clone(),
+            running_command,
+        };
+    };
+
+    let detection = detect_viewport(kind, viewport.as_slice());
+    AgentFields {
+        kind,
+        state: detection.state,
+        status: detection.status,
+        running_command,
     }
 }
 
@@ -261,5 +326,104 @@ mod tests {
             "".to_owned(),
         ];
         assert_eq!(detect_viewport(AgentKind::Claude, &viewport).status, "last");
+    }
+
+    #[test]
+    fn enriches_from_command_and_viewport() {
+        let fields = enrich_fields(
+            &AgentFields::default(),
+            "ignored",
+            Ok(argv(&["codex"])),
+            Ok(vec!["Esc to cancel".to_owned()]),
+        );
+        assert_eq!(fields.kind, AgentKind::Codex);
+        assert_eq!(fields.state, AgentState::Working);
+        assert_eq!(fields.status, "Esc to cancel");
+        assert_eq!(fields.running_command, Some(argv(&["codex"])));
+    }
+
+    #[test]
+    fn command_failure_preserves_command_but_uses_title_and_viewport_identity() {
+        let previous = AgentFields {
+            kind: AgentKind::Codex,
+            running_command: Some(argv(&["codex"])),
+            ..AgentFields::default()
+        };
+        let fields = enrich_fields(
+            &previous,
+            "pi reviewer",
+            Err("denied".to_owned()),
+            Ok(vec!["Working...".to_owned()]),
+        );
+        assert_eq!(fields.kind, AgentKind::Pi);
+        assert_eq!(fields.state, AgentState::Working);
+        assert_eq!(fields.running_command, Some(argv(&["codex"])));
+    }
+
+    #[test]
+    fn scrollback_failure_preserves_state_and_status() {
+        let previous = AgentFields {
+            kind: AgentKind::Claude,
+            state: AgentState::Working,
+            status: "Esc to interrupt".to_owned(),
+            running_command: Some(argv(&["claude"])),
+        };
+        let fields = enrich_fields(
+            &previous,
+            "claude",
+            Ok(argv(&["claude"])),
+            Err("denied".to_owned()),
+        );
+        assert_eq!(fields.kind, AgentKind::Claude);
+        assert_eq!(fields.state, AgentState::Working);
+        assert_eq!(fields.status, "Esc to interrupt");
+    }
+
+    #[test]
+    fn both_failures_preserve_previous_enriched_fields() {
+        let previous = AgentFields {
+            kind: AgentKind::Codex,
+            state: AgentState::Blocked,
+            status: "allow command?".to_owned(),
+            running_command: Some(argv(&["codex"])),
+        };
+        let fields = enrich_fields(
+            &previous,
+            "claude",
+            Err("command denied".to_owned()),
+            Err("scrollback denied".to_owned()),
+        );
+        assert_eq!(fields, previous);
+    }
+
+    #[test]
+    fn uses_viewport_identity_when_command_and_title_are_unknown() {
+        let fields = enrich_fields(
+            &AgentFields::default(),
+            "plain",
+            Ok(argv(&["bash"])),
+            Ok(vec!["Working...".to_owned()]),
+        );
+        assert_eq!(fields.kind, AgentKind::Pi);
+        assert_eq!(fields.state, AgentState::Working);
+    }
+
+    #[test]
+    fn successful_unknown_sources_clear_stale_agent_kind() {
+        let previous = AgentFields {
+            kind: AgentKind::Codex,
+            state: AgentState::Idle,
+            status: ">".to_owned(),
+            running_command: Some(argv(&["codex"])),
+        };
+        let fields = enrich_fields(
+            &previous,
+            "plain shell",
+            Ok(argv(&["bash"])),
+            Ok(vec![">".to_owned()]),
+        );
+        assert_eq!(fields.kind, AgentKind::Unknown);
+        assert_eq!(fields.state, AgentState::Unknown);
+        assert_eq!(fields.running_command, Some(argv(&["bash"])));
     }
 }
