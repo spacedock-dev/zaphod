@@ -9,6 +9,21 @@ pub enum AgentKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentState {
+    Blocked,
+    Working,
+    Done,
+    Idle,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ViewportDetection {
+    pub state: AgentState,
+    pub status: String,
+}
+
 fn normalized_basename(command: &str) -> String {
     let base = command
         .rsplit(['/', '\\'])
@@ -59,6 +74,69 @@ pub fn agent_from_viewport(viewport: &[String]) -> AgentKind {
         AgentKind::Pi
     } else {
         AgentKind::Unknown
+    }
+}
+
+fn last_non_empty_line(viewport: &[String]) -> String {
+    viewport
+        .iter()
+        .rev()
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn blocker_line(viewport: &[String]) -> Option<String> {
+    viewport.iter().rev().find_map(|line| {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        let blocked = lower.contains("allow command")
+            || lower.contains("enter to confirm")
+            || lower.contains("press enter to confirm")
+            || lower.contains("enter to submit answer")
+            || lower.contains("enter to submit all")
+            || lower.contains("[y/n]")
+            || lower.contains("yes (y)")
+            || lower.contains("submit answer");
+        blocked.then(|| trimmed.to_owned())
+    })
+}
+
+fn has_working_signal(agent: AgentKind, viewport: &[String]) -> bool {
+    viewport.iter().any(|line| {
+        let trimmed = line.trim();
+        let lower = trimmed.to_ascii_lowercase();
+        lower.contains("esc to interrupt")
+            || lower.contains("esc to cancel")
+            || lower.contains("esc to stop")
+            || (agent == AgentKind::Pi && trimmed == "Working...")
+    })
+}
+
+pub fn detect_viewport(agent: AgentKind, viewport: &[String]) -> ViewportDetection {
+    let status = last_non_empty_line(viewport);
+    if agent == AgentKind::Unknown {
+        return ViewportDetection {
+            state: AgentState::Unknown,
+            status,
+        };
+    }
+    if let Some(status) = blocker_line(viewport) {
+        return ViewportDetection {
+            state: AgentState::Blocked,
+            status,
+        };
+    }
+    if has_working_signal(agent, viewport) {
+        return ViewportDetection {
+            state: AgentState::Working,
+            status,
+        };
+    }
+    ViewportDetection {
+        state: AgentState::Idle,
+        status,
     }
 }
 
@@ -127,5 +205,61 @@ mod tests {
             agent_from_viewport(&["Working...".to_owned()]),
             AgentKind::Pi
         );
+    }
+
+    #[test]
+    fn blocked_beats_working() {
+        let viewport = vec![
+            "esc to interrupt".to_owned(),
+            "Allow command?".to_owned(),
+            "press enter to confirm".to_owned(),
+        ];
+        let detection = detect_viewport(AgentKind::Codex, &viewport);
+        assert_eq!(detection.state, AgentState::Blocked);
+        assert_eq!(detection.status, "press enter to confirm");
+    }
+
+    #[test]
+    fn working_matches_interrupt_controls_and_pi_working_line() {
+        let codex = vec!["Esc to cancel".to_owned()];
+        assert_eq!(
+            detect_viewport(AgentKind::Codex, &codex).state,
+            AgentState::Working
+        );
+
+        let pi = vec!["Working...".to_owned()];
+        assert_eq!(
+            detect_viewport(AgentKind::Pi, &pi).state,
+            AgentState::Working
+        );
+    }
+
+    #[test]
+    fn known_agent_without_signal_is_idle() {
+        let viewport = vec!["> ".to_owned()];
+        assert_eq!(
+            detect_viewport(AgentKind::Claude, &viewport).state,
+            AgentState::Idle
+        );
+    }
+
+    #[test]
+    fn unknown_agent_stays_unknown() {
+        let viewport = vec!["plain shell".to_owned()];
+        assert_eq!(
+            detect_viewport(AgentKind::Unknown, &viewport).state,
+            AgentState::Unknown
+        );
+    }
+
+    #[test]
+    fn status_uses_last_non_empty_line() {
+        let viewport = vec![
+            "first".to_owned(),
+            "  ".to_owned(),
+            "last".to_owned(),
+            "".to_owned(),
+        ];
+        assert_eq!(detect_viewport(AgentKind::Claude, &viewport).status, "last");
     }
 }
