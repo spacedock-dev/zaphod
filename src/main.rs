@@ -4,6 +4,8 @@
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
 
+mod agent;
+
 const STATUS_POLL_SECS: f64 = 2.0;
 const TARGET_COLS: usize = 28;
 const MAX_DOCK_STEPS: u8 = 10;
