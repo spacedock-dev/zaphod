@@ -479,15 +479,16 @@ fn header_dock_toggle_hit(col: usize, total_cols: usize) -> bool {
     total_cols > 4 && col >= total_cols.saturating_sub(4)
 }
 
-// Each pane occupies two display lines (title + status) below the header.
+// Zellij mouse positions are pane-local and one-based. Each pane occupies two
+// display lines (title + status) below the header.
 fn target_for_line(line: isize, row_count: usize) -> LineTarget {
-    if line == 0 {
-        return LineTarget::Header;
-    }
-    if line < 0 {
+    if line <= 0 {
         return LineTarget::None;
     }
-    let idx = (line as usize - 1) / 2;
+    if line == 1 {
+        return LineTarget::Header;
+    }
+    let idx = (line as usize - 2) / 2;
     if idx < row_count {
         LineTarget::Row(idx)
     } else {
@@ -715,12 +716,13 @@ mod tests {
 
     #[test]
     fn maps_display_lines_to_header_and_two_line_rows() {
-        assert_eq!(target_for_line(0, 2), LineTarget::Header);
-        assert_eq!(target_for_line(1, 2), LineTarget::Row(0));
+        assert_eq!(target_for_line(0, 2), LineTarget::None);
+        assert_eq!(target_for_line(1, 2), LineTarget::Header);
         assert_eq!(target_for_line(2, 2), LineTarget::Row(0));
-        assert_eq!(target_for_line(3, 2), LineTarget::Row(1));
+        assert_eq!(target_for_line(3, 2), LineTarget::Row(0));
         assert_eq!(target_for_line(4, 2), LineTarget::Row(1));
-        assert_eq!(target_for_line(5, 2), LineTarget::None);
+        assert_eq!(target_for_line(5, 2), LineTarget::Row(1));
+        assert_eq!(target_for_line(6, 2), LineTarget::None);
         assert_eq!(target_for_line(-3, 2), LineTarget::None);
     }
 
