@@ -40,9 +40,7 @@ struct Row {
     pane_id: u32,
     title: String,
     focused: bool,
-    agent: bool,
-    busy: bool,
-    status: String,
+    agent: agent::AgentFields,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -90,37 +88,37 @@ impl ZellijPlugin for Sidebar {
                     set_selectable(false);
                 }
                 true
-            },
+            }
             Event::Key(key) if self.nav_mode => {
                 if key.has_no_modifiers() {
                     match key.bare_key {
                         BareKey::Up | BareKey::Char('k') => {
                             self.nav_selected =
                                 move_selection(self.nav_selected, -1, self.rows.len());
-                        },
+                        }
                         BareKey::Down | BareKey::Char('j') => {
                             self.nav_selected =
                                 move_selection(self.nav_selected, 1, self.rows.len());
-                        },
+                        }
                         BareKey::Enter => {
                             let target = self.rows.get(self.nav_selected).map(|r| r.pane_id);
                             self.exit_nav(false);
                             if let Some(id) = target {
                                 focus_terminal_pane(id, false, false);
                             }
-                        },
+                        }
                         BareKey::Esc => {
                             self.exit_nav(true);
-                        },
-                        _ => {},
+                        }
+                        _ => {}
                     }
                 }
                 true
-            },
+            }
             Event::TabUpdate(tabs) => {
                 self.active_tab = tabs.iter().find(|t| t.active).map(|t| t.position);
                 false
-            },
+            }
             Event::PaneUpdate(manifest) => {
                 self.manifest_seen = true;
                 self.own_tab = own_tab_position(&manifest, self.plugin_id);
@@ -144,23 +142,18 @@ impl ZellijPlugin for Sidebar {
                 }
                 let old = std::mem::take(&mut self.rows);
                 self.rows = rows_for_own_tab(&manifest, self.plugin_id);
-                for row in self.rows.iter_mut() {
-                    if let Some(prev) = old.iter().find(|r| r.pane_id == row.pane_id) {
-                        row.status = prev.status.clone();
-                        row.busy = prev.busy;
-                    }
-                }
+                preserve_agent_fields(&mut self.rows, &old);
                 true
-            },
+            }
             Event::Timer(_) => {
                 self.refresh_statuses();
                 set_timeout(STATUS_POLL_SECS);
                 true
-            },
+            }
             Event::Mouse(Mouse::LeftClick(line, col)) => {
                 self.handle_click(line, col);
                 false
-            },
+            }
             _ => false,
         }
     }
@@ -208,7 +201,7 @@ impl ZellijPlugin for Sidebar {
             ToggleAction::HideSelf => {
                 self.hidden = true;
                 hide_self();
-            },
+            }
             ToggleAction::ShowHere => {
                 self.hidden = false;
                 if self.rail_mode {
@@ -219,7 +212,7 @@ impl ZellijPlugin for Sidebar {
                 } else {
                     show_self(false);
                 }
-            },
+            }
             ToggleAction::SpawnInActive => {
                 // No cross-tab moves (show_self/break would yank the user's
                 // view to our tab): the leader spawns a sibling instance
@@ -232,8 +225,8 @@ impl ZellijPlugin for Sidebar {
                         BTreeMap::new(),
                     );
                 }
-            },
-            ToggleAction::Ignore => {},
+            }
+            ToggleAction::Ignore => {}
         }
         false
     }
@@ -264,23 +257,13 @@ impl ZellijPlugin for Sidebar {
         );
         for (idx, row) in self.rows.iter().enumerate() {
             let title: String = row.title.chars().take(cols.saturating_sub(2)).collect();
-            let mark = if row.focused {
-                "\u{1b}[33m●\u{1b}[0m " // focused: yellow
-            } else if row.busy {
-                "\u{1b}[31m●\u{1b}[0m " // agent working: red
-            } else {
-                "  "
-            };
+            let mark = row_marker(row);
             if self.nav_mode && idx == self.nav_selected {
                 println!("{}\u{1b}[7m{}\u{1b}[0m", mark, title); // nav selection
-            } else if row.agent {
-                println!("{}\u{1b}[36m{}\u{1b}[0m", mark, title);
-            } else if row.focused {
-                println!("{}\u{1b}[1m{}\u{1b}[0m", mark, title);
             } else {
-                println!("{}{}", mark, title);
+                println!("{}{}{}\u{1b}[0m", mark, title_style(row), title);
             }
-            let status: String = row.status.chars().take(cols.saturating_sub(4)).collect();
+            let status = agent::status_line(&row.agent, cols.saturating_sub(4));
             println!("    \u{1b}[2m{}\u{1b}[0m", status);
         }
     }
@@ -316,7 +299,7 @@ impl Sidebar {
                 } else {
                     show_self(false);
                 }
-            },
+            }
             ToggleAction::SpawnInActive => {
                 if let Some(url) = self.own_url.clone() {
                     open_plugin_pane_floating(
@@ -326,8 +309,8 @@ impl Sidebar {
                         BTreeMap::new(),
                     );
                 }
-            },
-            ToggleAction::HideSelf | ToggleAction::Ignore => {},
+            }
+            ToggleAction::HideSelf | ToggleAction::Ignore => {}
         }
     }
 
@@ -402,25 +385,22 @@ impl Sidebar {
                     self.hidden = true;
                     hide_self();
                 }
-            },
+            }
             LineTarget::Row(idx) => {
                 if let Some(row) = self.rows.get(idx) {
                     focus_terminal_pane(row.pane_id, false, false);
                 }
-            },
-            LineTarget::None => {},
+            }
+            LineTarget::None => {}
         }
     }
 
     fn refresh_statuses(&mut self) {
         for row in self.rows.iter_mut() {
-            if let Ok(contents) = get_pane_scrollback(PaneId::Terminal(row.pane_id), false) {
-                row.status = last_meaningful_line(&contents.viewport);
-                row.busy = contents
-                    .viewport
-                    .iter()
-                    .any(|l| l.contains("esc to interrupt"));
-            }
+            let pane_id = PaneId::Terminal(row.pane_id);
+            let command = get_pane_running_command(pane_id);
+            let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
+            row.agent = agent::enrich_fields(&row.agent, &row.title, command, viewport);
         }
     }
 }
@@ -468,7 +448,7 @@ fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
                     p.is_plugin
                         && p.plugin_url
                             .as_deref()
-                            .map_or(false, |u| u.contains("zellij-sidebar"))
+                            .is_some_and(|u| u.contains("zellij-sidebar"))
                 })
                 .map(move |p| (p.id, *tab))
         })
@@ -515,14 +495,35 @@ fn target_for_line(line: isize, row_count: usize) -> LineTarget {
     }
 }
 
-fn last_meaningful_line(viewport: &[String]) -> String {
-    viewport
-        .iter()
-        .rev()
-        .map(|l| l.trim())
-        .find(|l| !l.is_empty())
-        .unwrap_or("")
-        .to_owned()
+fn state_marker(fields: &agent::AgentFields) -> &'static str {
+    match fields.state {
+        agent::AgentState::Blocked => "\u{1b}[31m\u{25cf}\u{1b}[0m ",
+        agent::AgentState::Working => "\u{1b}[33m\u{25cf}\u{1b}[0m ",
+        agent::AgentState::Done => "\u{1b}[36m\u{25cf}\u{1b}[0m ",
+        agent::AgentState::Idle => "\u{1b}[32m\u{2713}\u{1b}[0m ",
+        agent::AgentState::Unknown => "  ",
+    }
+}
+
+fn row_marker(row: &Row) -> &'static str {
+    state_marker(&row.agent)
+}
+
+fn title_style(row: &Row) -> &'static str {
+    match (row.focused, row.agent.kind == agent::AgentKind::Unknown) {
+        (true, false) => "\u{1b}[1;36m",
+        (true, true) => "\u{1b}[1m",
+        (false, false) => "\u{1b}[36m",
+        (false, true) => "",
+    }
+}
+
+fn preserve_agent_fields(rows: &mut [Row], old: &[Row]) {
+    for row in rows.iter_mut() {
+        if let Some(prev) = old.iter().find(|r| r.pane_id == row.pane_id) {
+            row.agent = prev.agent.clone();
+        }
+    }
 }
 
 fn own_tab_position(manifest: &PaneManifest, own_plugin_id: u32) -> Option<usize> {
@@ -535,8 +536,8 @@ fn own_tab_position(manifest: &PaneManifest, own_plugin_id: u32) -> Option<usize
 }
 
 // Rows for the tab this plugin lives in: terminal panes only, top-to-bottom,
-// excluding suppressed/unselectable panes. Agent panes are those whose title
-// carries the ✳ marker set by Claude/codex.
+// excluding suppressed/unselectable panes. Agent identity is enriched by
+// timer polling, after the manifest has created the base rows.
 fn rows_for_own_tab(manifest: &PaneManifest, own_plugin_id: u32) -> Vec<Row> {
     let Some(tab) = own_tab_position(manifest, own_plugin_id) else {
         return Vec::new();
@@ -554,8 +555,7 @@ fn rows_for_own_tab(manifest: &PaneManifest, own_plugin_id: u32) -> Vec<Row> {
             pane_id: p.id,
             title: p.title.clone(),
             focused: p.is_focused,
-            agent: p.title.contains('✳'),
-            ..Default::default()
+            agent: agent::AgentFields::default(),
         })
         .collect()
 }
@@ -610,21 +610,88 @@ mod tests {
         );
         assert!(rows[0].focused);
         assert!(!rows[1].focused);
+        assert_eq!(rows[0].agent, agent::AgentFields::default());
     }
 
     #[test]
-    fn marks_agent_panes_by_title_marker() {
+    fn initial_rows_start_with_unknown_agent_fields() {
         let m = manifest(vec![(
             0,
             vec![
                 pane(7, true, "sidebar", 0, false),
-                pane(1, false, "✳ Claude Code", 1, false),
-                pane(2, false, "shell", 2, false),
+                pane(1, false, "shell", 1, false),
             ],
         )]);
         let rows = rows_for_own_tab(&m, 7);
-        assert!(rows[0].agent);
-        assert!(!rows[1].agent);
+        assert_eq!(rows[0].agent, agent::AgentFields::default());
+    }
+
+    #[test]
+    fn preserves_agent_fields_by_pane_id_after_manifest_rebuild() {
+        let enriched = agent::AgentFields {
+            kind: agent::AgentKind::Codex,
+            state: agent::AgentState::Blocked,
+            status: "allow command?".to_owned(),
+            running_command: Some(vec!["codex".to_owned()]),
+        };
+        let old = vec![Row {
+            pane_id: 1,
+            title: "old".to_owned(),
+            focused: false,
+            agent: enriched.clone(),
+        }];
+        let mut rebuilt = vec![Row {
+            pane_id: 1,
+            title: "new".to_owned(),
+            focused: true,
+            agent: agent::AgentFields::default(),
+        }];
+
+        preserve_agent_fields(&mut rebuilt, &old);
+
+        assert_eq!(rebuilt[0].agent, enriched);
+        assert_eq!(rebuilt[0].title, "new");
+        assert!(rebuilt[0].focused);
+    }
+
+    #[test]
+    fn focused_rows_still_use_agent_state_marker() {
+        let row = Row {
+            pane_id: 1,
+            title: "codex".to_owned(),
+            focused: true,
+            agent: agent::AgentFields {
+                kind: agent::AgentKind::Codex,
+                state: agent::AgentState::Blocked,
+                status: "press enter to confirm".to_owned(),
+                running_command: Some(vec!["codex".to_owned()]),
+            },
+        };
+
+        assert_eq!(row_marker(&row), state_marker(&row.agent));
+    }
+
+    #[test]
+    fn focused_known_agent_rows_have_distinct_title_style() {
+        let focused = Row {
+            pane_id: 1,
+            title: "codex".to_owned(),
+            focused: true,
+            agent: agent::AgentFields {
+                kind: agent::AgentKind::Codex,
+                state: agent::AgentState::Working,
+                status: "Esc to cancel".to_owned(),
+                running_command: Some(vec!["codex".to_owned()]),
+            },
+        };
+        let unfocused = Row {
+            focused: false,
+            ..focused.clone()
+        };
+
+        assert_ne!(title_style(&focused), title_style(&unfocused));
+        assert_eq!(title_style(&focused), "\u{1b}[1;36m");
+        assert_eq!(title_style(&unfocused), "\u{1b}[36m");
     }
 
     #[test]
@@ -673,18 +740,6 @@ mod tests {
         assert!(!header_dock_toggle_hit(25, 30));
         assert!(!header_dock_toggle_hit(0, 30));
         assert!(!header_dock_toggle_hit(3, 4)); // degenerate width: never hit
-    }
-
-    #[test]
-    fn last_meaningful_line_skips_trailing_blanks() {
-        let viewport = vec![
-            "first".to_owned(),
-            "> do the thing".to_owned(),
-            "   ".to_owned(),
-            "".to_owned(),
-        ];
-        assert_eq!(last_meaningful_line(&viewport), "> do the thing");
-        assert_eq!(last_meaningful_line(&[]), "");
     }
 
     #[test]

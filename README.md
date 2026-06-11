@@ -8,12 +8,12 @@ tab and what does it want from me?**
 ```
 ┌ sidebar ──────────────┐
 │▾ PANES             ⇄ │
-│● ✳ spacedock:officer  │   ← focused (yellow ●), agent title in cyan
-│    > approve merge?   │   ← the pane's last terminal line, live
-│● ✳ codex literature   │   ← red ● = working ("esc to interrupt")
-│    Searching arxiv…   │
+│● codex literature   │   ← blocked/working agent state marker
+│    blocked . codex  │   ← state, agent, and latest prompt/status
+│✓ claude planner     │   ← idle known agent
+│    idle . claude    │
 │  clkao@mac:~/git/x    │
-│    $                  │
+│    unknown . unknown  │
 └───────────────────────┘
 ```
 
@@ -22,9 +22,13 @@ tab and what does it want from me?**
 - Lists the current tab's terminal panes; **click a row to focus that pane**
 - The sidebar is unfocusable (tab-bar mechanism): clicks are delivered
   without focusing it, so it never steals your keyboard
-- Per-pane status line: the last non-empty terminal line, refreshed every 2s
-- Agent awareness: `✳`-titled panes (Claude Code/codex) highlighted; red dot
-  while the agent is working
+- Per-pane status line: detected state, agent kind, and latest prompt/status,
+  refreshed every 2s
+- Plugin-only agent awareness for Claude, Codex, and Pi panes using zellij's
+  running-command and scrollback APIs; shell panes remain visible as
+  `unknown . unknown`
+- Blocked prompts outrank working prompts, with state markers in the first
+  line and details in the dimmed second line
 - **Keyboard navigation mode**: `j/k`/arrows move a highlight, `Enter` jumps,
   `Esc` returns focus where it was
 - Floating "rail" mode (pinned, left edge, exact placement at runtime) and
@@ -102,7 +106,7 @@ zellij caches the grant.
 ## Status
 
 Working prototype (zellij 0.44.1): per-tab toggle, click/keyboard switching,
-status lines, busy markers, rail and docked modes. Known broken: lazily
+plugin-local agent awareness, state/status lines, rail and docked modes. Known broken: lazily
 spawning an instance into a tab that never had one (crashes the spawning
 instance — a response-reading shim call inside a pipe handler; see SPEC.md
 law #4). Workaround: open the sidebar via the layout, or press `Alt /` in a

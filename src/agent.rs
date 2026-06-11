@@ -13,6 +13,7 @@ pub enum AgentKind {
 pub enum AgentState {
     Blocked,
     Working,
+    #[allow(dead_code)]
     Done,
     Idle,
     Unknown,
@@ -203,6 +204,53 @@ pub fn enrich_fields(
         status: detection.status,
         running_command,
     }
+}
+
+pub fn state_label(state: AgentState) -> &'static str {
+    match state {
+        AgentState::Blocked => "blocked",
+        AgentState::Working => "working",
+        AgentState::Done => "done",
+        AgentState::Idle => "idle",
+        AgentState::Unknown => "unknown",
+    }
+}
+
+pub fn agent_label(kind: AgentKind) -> &'static str {
+    match kind {
+        AgentKind::Claude => "claude",
+        AgentKind::Codex => "codex",
+        AgentKind::Pi => "pi",
+        AgentKind::Unknown => "unknown",
+    }
+}
+
+fn truncate_chars(text: &str, max_width: usize) -> String {
+    let len = text.chars().count();
+    if len <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+    if max_width == 1 {
+        return ".".to_owned();
+    }
+    let prefix: String = text.chars().take(max_width - 1).collect();
+    format!("{prefix}.")
+}
+
+pub fn status_line(fields: &AgentFields, max_width: usize) -> String {
+    let mut line = format!(
+        "{} . {}",
+        state_label(fields.state),
+        agent_label(fields.kind)
+    );
+    if !fields.status.is_empty() {
+        line.push_str(" . ");
+        line.push_str(&fields.status);
+    }
+    truncate_chars(&line, max_width)
 }
 
 #[cfg(test)]
@@ -425,5 +473,41 @@ mod tests {
         assert_eq!(fields.kind, AgentKind::Unknown);
         assert_eq!(fields.state, AgentState::Unknown);
         assert_eq!(fields.running_command, Some(argv(&["bash"])));
+    }
+
+    #[test]
+    fn state_and_agent_labels_are_stable() {
+        assert_eq!(state_label(AgentState::Blocked), "blocked");
+        assert_eq!(state_label(AgentState::Working), "working");
+        assert_eq!(state_label(AgentState::Done), "done");
+        assert_eq!(state_label(AgentState::Idle), "idle");
+        assert_eq!(state_label(AgentState::Unknown), "unknown");
+
+        assert_eq!(agent_label(AgentKind::Claude), "claude");
+        assert_eq!(agent_label(AgentKind::Codex), "codex");
+        assert_eq!(agent_label(AgentKind::Pi), "pi");
+        assert_eq!(agent_label(AgentKind::Unknown), "unknown");
+    }
+
+    #[test]
+    fn status_line_omits_empty_status() {
+        let fields = AgentFields {
+            kind: AgentKind::Codex,
+            state: AgentState::Idle,
+            status: String::new(),
+            running_command: Some(argv(&["codex"])),
+        };
+        assert_eq!(status_line(&fields, 80), "idle . codex");
+    }
+
+    #[test]
+    fn status_line_truncates_by_chars() {
+        let fields = AgentFields {
+            kind: AgentKind::Claude,
+            state: AgentState::Blocked,
+            status: "approve command now".to_owned(),
+            running_command: Some(argv(&["claude"])),
+        };
+        assert_eq!(status_line(&fields, 12), "blocked . c.");
     }
 }
