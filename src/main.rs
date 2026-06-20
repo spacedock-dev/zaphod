@@ -7,16 +7,12 @@ use zellij_tile::prelude::*;
 mod agent;
 
 const STATUS_POLL_SECS: f64 = 2.0;
-const TARGET_COLS: usize = 28;
-const MAX_DOCK_STEPS: u8 = 10;
 const RAIL_WIDTH: usize = 30;
 
 #[derive(Default)]
 struct Sidebar {
     rows: Vec<Row>,
     plugin_id: u32,
-    dock_steps: u8,
-    docked: bool,
     hidden: bool,
     rendered_once: bool,
     permissions_requested: bool,
@@ -55,6 +51,7 @@ enum ToggleAction {
     HideSelf,
     ShowHere,
     SpawnInActive,
+    SwapLayout,
     Ignore,
 }
 
@@ -196,12 +193,18 @@ impl ZellijPlugin for Sidebar {
         }
         let action = decide_toggle(
             self.hidden,
+            self.own_floating,
             self.own_tab,
             self.current_active_tab(),
             self.plugin_id,
             &self.instances,
         );
         match action {
+            ToggleAction::SwapLayout => {
+                // A docked tile lives in a swap-layout tab: flip docked <-> undocked
+                // by rearranging the tab's existing panes, no hide/show needed.
+                next_swap_layout();
+            }
             ToggleAction::HideSelf => {
                 self.hidden = true;
                 hide_self();
@@ -252,9 +255,8 @@ impl ZellijPlugin for Sidebar {
             self.float_as_rail();
         }
         self.last_cols = cols;
-        self.dock(cols);
         // Header: click body to hide, click the ⇄ at the right edge to toggle
-        // floating rail <-> docked tile.
+        // the docked <-> undocked swap layout.
         println!(
             "\u{1b}[7m▾ PANES{}⇄ \u{1b}[0m",
             " ".repeat(cols.saturating_sub(10))
@@ -291,11 +293,14 @@ impl Sidebar {
         let active_tab = self.current_active_tab();
         match decide_toggle(
             self.hidden,
+            self.own_floating,
             self.own_tab,
             active_tab,
             self.plugin_id,
             &self.instances,
         ) {
+            // A docked tile is already visible; nav just needs it in place.
+            ToggleAction::SwapLayout => {}
             ToggleAction::ShowHere => {
                 self.hidden = false;
                 if self.rail_mode {
@@ -348,50 +353,12 @@ impl Sidebar {
         }
     }
 
-    // Tiled instances only: re-shrink toward the target width whenever layout
-    // reflows (new panes, swap layouts) inflate us. Floating rails keep their
-    // coordinates and skip this.
-    fn dock(&mut self, cols: usize) {
-        // Never resize before the manifest confirms we are a tiled pane:
-        // pre-manifest own_floating defaults to false, and tiled resizes in a
-        // stacked_resize environment restack the user's layout.
-        if !self.manifest_seen || self.own_floating {
-            return;
-        }
-        if cols > TARGET_COLS + 6 {
-            self.docked = false;
-        }
-        if self.docked {
-            return;
-        }
-        if cols <= TARGET_COLS + 4 {
-            self.docked = true;
-            self.dock_steps = 0;
-            return;
-        }
-        if self.dock_steps < MAX_DOCK_STEPS {
-            self.dock_steps += 1;
-            resize_pane_with_id(
-                ResizeStrategy::new(Resize::Decrease, Some(Direction::Right)),
-                PaneId::Plugin(self.plugin_id),
-            );
-        } else {
-            self.docked = true; // give up until the next successful dock resets steps
-        }
-    }
-
     fn handle_click(&mut self, line: isize, col: usize) {
         match target_for_line(line, self.rows.len()) {
             LineTarget::Header => {
                 if header_dock_toggle_hit(col, self.last_cols) {
-                    if self.own_floating {
-                        self.rail_mode = false;
-                        self.docked = false;
-                        self.dock_steps = 0;
-                        embed_multiple_panes(vec![PaneId::Plugin(self.plugin_id)]);
-                    } else {
-                        self.float_as_rail();
-                    }
+                    // ⇄ toggles the docked <-> undocked swap layout, same as Alt-/.
+                    next_swap_layout();
                 } else {
                     self.hidden = true;
                     hide_self();
@@ -429,6 +396,7 @@ impl Sidebar {
 //   teleports there as a floating rail.
 fn decide_toggle(
     hidden: bool,
+    own_floating: bool,
     own_tab: Option<usize>,
     active_tab: Option<usize>,
     own_pane_id: u32,
@@ -438,7 +406,11 @@ fn decide_toggle(
         return ToggleAction::Ignore;
     };
     if own_tab == Some(active) {
-        if hidden {
+        if !own_floating {
+            // A docked tile toggles the tab's swap layout (docked <-> undocked);
+            // only a floating rail hides/shows itself.
+            ToggleAction::SwapLayout
+        } else if hidden {
             ToggleAction::ShowHere
         } else {
             ToggleAction::HideSelf
@@ -777,15 +749,26 @@ mod tests {
     }
 
     #[test]
-    fn toggle_in_own_active_tab_hides_or_shows() {
+    fn floating_rail_in_own_active_tab_hides_or_shows() {
         let instances = vec![(7, 1)];
         assert_eq!(
-            decide_toggle(false, Some(1), Some(1), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(1), 7, &instances),
             ToggleAction::HideSelf
         );
         assert_eq!(
-            decide_toggle(true, Some(1), Some(1), 7, &instances),
+            decide_toggle(true, true, Some(1), Some(1), 7, &instances),
             ToggleAction::ShowHere
+        );
+    }
+
+    #[test]
+    fn docked_tile_in_own_active_tab_toggles_swap_layout() {
+        let instances = vec![(7, 1)];
+        // own_floating=false marks the docked layout instance: toggling flips
+        // the swap layout instead of hiding the pane.
+        assert_eq!(
+            decide_toggle(false, false, Some(1), Some(1), 7, &instances),
+            ToggleAction::SwapLayout
         );
     }
 
@@ -794,6 +777,7 @@ mod tests {
         assert!(toggle_action_requests_render(ToggleAction::ShowHere));
         assert!(toggle_action_requests_render(ToggleAction::SpawnInActive));
         assert!(!toggle_action_requests_render(ToggleAction::HideSelf));
+        assert!(!toggle_action_requests_render(ToggleAction::SwapLayout));
         assert!(!toggle_action_requests_render(ToggleAction::Ignore));
     }
 
@@ -813,7 +797,7 @@ mod tests {
     fn solo_instance_spawns_sibling_in_active_tab() {
         let instances = vec![(7, 1)];
         assert_eq!(
-            decide_toggle(false, Some(1), Some(3), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(3), 7, &instances),
             ToggleAction::SpawnInActive
         );
     }
@@ -822,7 +806,7 @@ mod tests {
     fn defers_to_instance_already_in_active_tab() {
         let instances = vec![(7, 1), (9, 3)];
         assert_eq!(
-            decide_toggle(false, Some(1), Some(3), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(3), 7, &instances),
             ToggleAction::Ignore
         );
     }
@@ -832,11 +816,11 @@ mod tests {
         let instances = vec![(7, 1), (9, 2)];
         // leader (7) spawns; follower (9) ignores
         assert_eq!(
-            decide_toggle(false, Some(1), Some(5), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(5), 7, &instances),
             ToggleAction::SpawnInActive
         );
         assert_eq!(
-            decide_toggle(false, Some(2), Some(5), 9, &instances),
+            decide_toggle(false, true, Some(2), Some(5), 9, &instances),
             ToggleAction::Ignore
         );
     }
