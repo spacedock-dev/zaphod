@@ -66,14 +66,21 @@ these as laws.
    background**: pane-less instances that swallow all future pipes and cannot
    materialize a pane (`show_self` is a no-op without a pane).
    `start-or-reload-plugin` also creates background instances. Zombies are
-   only killable via plugin-manager or session restart.
+   only killable via plugin-manager or session restart. The `Alt /` toggle
+   pipe must reach the resident layout instance: its keybind configuration
+   must exactly match the layout plugin's (`rail "1"`), or the pipe launches
+   a fresh instance instead — this zombie class, or a stray floating one.
 4. **Never call response-reading/blocking shim functions inside `pipe()` or
    `load()`** — `show_floating_panes` deadlocked the launch (plugin blocks on
    server response, server waits on handler); `open_plugin_pane_floating`
    crashed the instance outright (`wasm unreachable`). Side effects that need
    responses must be deferred to normal event handlers or avoided.
-5. **CLI pipe sources stay blocked** until `unblock_cli_pipe_input`; without
-   it, `zellij pipe` callers hang forever.
+5. **CLI pipe sources stay blocked** while any plugin is still processing the
+   pipe or holds an explicit block; the server auto-unblocks once every
+   plugin's `pipe()` has returned, so a synchronous `pipe()` needs no explicit
+   `unblock_cli_pipe_input`. The explicit call requires the `ReadCliPipes`
+   grant — without it, it is silently denied (verified against v0.44.1 server
+   source: `pipes.rs` NoChange bookkeeping + `zellij_exports.rs:5297`).
 
 ### Permissions
 
@@ -88,7 +95,9 @@ these as laws.
    it). Defer `set_selectable(false)` until after the grant arrives.
 9. Permission grants cache in `<cache-dir>/permissions.kdl`, keyed by plugin
    location string. Pre-granting by writing this file works (useful for
-   headless test benches).
+   headless test benches). On macOS the cache dir is
+   `~/Library/Caches/org.Zellij-Contributors.Zellij/` (not Application
+   Support).
 
 ### Placement
 
@@ -99,10 +108,19 @@ these as laws.
     - `override-layout` is destructive: it seated panes at 1-row heights and
       lost terminals despite `--retain-existing-terminal-panes`. Never run it
       against a tab that matters.
+
+    Revised (validated live — see `docs/docking-approach.md`):
+    `override-layout` is a full-tab **replacement**, not a rail-adder. Applied
+    with a complete KDL (tab-bar/status-bar chrome + a stacked main that
+    absorbs existing panes) and the retain flags, it reserves tiled space
+    cleanly, keeps existing terminals, and installs any embedded
+    `swap_tiled_layout` set on the tab. The destructive result above came from
+    incomplete KDL — empty slots spawn shells, omitted chrome is dropped.
 11. **Layouts are the only reliable tiled placement**: `default_tab_template`
     in the default layout (new sessions), `new-tab --layout` (on demand).
     Note: `default_tab_template` in `config.kdl` is *silently ignored* — it
-    is a layout-file construct only.
+    is a layout-file construct only. A layout can also be applied to a live
+    tab at runtime — inline KDL via `override_layout` (see #10's revision).
 12. **Floating + `change_floating_panes_coordinates` is the only runtime-exact
     placement.** `pinned` panes survive the user's floating-layer toggles.
 13. **Tabs with `hide_floating_panes` make floating spawns invisible — and an
@@ -121,14 +139,21 @@ these as laws.
 
 16. **`show_self` always focuses the pane** — and for a pane in another tab,
     it yanks the user's view to that tab. Cross-tab "follow me" via
-    `show_self`/`break_panes_to_tab_with_index` is therefore unusable;
-    spawning a per-tab sibling instance (`open_plugin_pane_floating`) is the
-    right model — but see law #4 about where it may be called from.
+    `show_self`/`break_panes_to_tab_with_index` is therefore unusable. The
+    per-tab sibling-spawn model (`open_plugin_pane_floating`) that replaced
+    it is retired too: the adopted architecture keeps a sidebar pane in every
+    tab's layout and toggles by cycling swap layouts
+    (`docs/docking-approach.md`), so nothing is shown, hidden, or spawned.
 17. **`set_selectable(false)` does not evict already-resident focus** — the
     pane arrives focused and stays "focused" visually. A manifest-driven
     bounce (own pane `is_focused` outside nav mode → `focus_previous_pane`)
     is self-correcting; blind bounces after every show degenerate into
-    focus-cycling when state drifts.
+    focus-cycling when state drifts. Caveat (verified live, 0.44.1): if a
+    fresh session's *layout* focuses the plugin pane, the bounce fires in the
+    session-birth window and panics the whole server —
+    `get_active_pane_id().unwrap()` on `None`
+    (`zellij-server/src/panes/tiled_panes/mod.rs:1837`). Guard the handback
+    until the manifest shows another focusable pane.
 
 ### State
 
@@ -165,16 +190,19 @@ these as laws.
 
 1. **Manifest-derived state machine.** One `State` struct recomputed from
    `PaneUpdate`/`TabUpdate`; the only persistent fields are user intent
-   (rail vs docked, nav mode). All decisions as pure functions
+   (nav mode). All decisions as pure functions
    (`decide_toggle` + tests worked well — extend the pattern).
 2. **Two-phase commands.** Event/pipe handlers only *record* intended side
    effects; a drain step executes them from a safe context, never calling
    response-reading shims from `pipe()`/`load()`. No `unwrap` anywhere near
    shim responses.
-3. **Layout-first placement.** Ship the docked sidebar via
-   `default_tab_template` (this is what the user actually wants); the
-   floating rail is the summon mode for tabs without an instance — spawned
-   per-tab, never moved across tabs.
+3. **Layout-first placement.** The sidebar pane lives in every tab's layout
+   (`default_tab_template` + the zaphod tab layout), with docked and
+   undocked (`size=1` sliver) `swap_tiled_layout` states; toggling cycles
+   swap layouts only. Tabs without the swap set get a one-time
+   `override_layout` retrofit — complete KDL: chrome, stacked main, both
+   swaps (`docs/docking-approach.md`, Adopted architecture). Nothing is
+   spawned, hidden, or shown.
 4. **Keybind = pipe toggle only**, with `floating true` + `skip_cache` (dev)
    + an identity config key. Treat any pane-less instance as dead weight to
    be starved, not managed.

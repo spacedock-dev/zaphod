@@ -1,6 +1,7 @@
 # Docking via layouts — findings and proposed approach
 
-> Investigation date: 2026-06-20 · zellij CLI 0.44.1 · `zellij-tile` locked at 0.44.3
+> Investigation date: 2026-06-20 · adopted architecture validated 2026-07-02
+> zellij CLI 0.44.1 · `zellij-tile` locked at 0.44.3
 > Scope: replace the runtime `embed_multiple_panes` + resize-hysteresis dock with a
 > layout-driven docked tile. Supersedes the "runtime tiled docking is unwinnable"
 > verdict in `SPEC.md` (landmines #10/#11).
@@ -12,7 +13,8 @@ The sidebar has two presentation modes:
 - **Floating pinned rail** — `float_as_rail` / `rail_coordinates` (`src/main.rs:277`,
   `:492`). x=0, fixed width, ~97% height, pinned. The only runtime-exact placement,
   but it **overlays** — it does not reserve space, so the underlying panes keep their
-  full width and the rail sits on top of them.
+  full width and the rail sits on top of them. The rail machinery is deleted under
+  the adopted architecture (below).
 - **Docked tile** — the mode the user actually wants: a left column that **reserves
   space**, pushing the other panes aside.
 
@@ -164,10 +166,12 @@ option to reserve space is `override_layout(LayoutInfo::Stringified(kdl), true, 
 absorbs the existing agents. Accept that this is a full-tab replacement and is less clean
 than the swap path.
 
-### Summon — floating pinned rail (unchanged)
+### Summon — floating pinned rail (superseded)
 
-Keep `float_as_rail` / `rail_coordinates` verbatim for the on-demand summon in tabs that
-lack the layout (SPEC #12). This is proven and is the right tool for glance-and-jump.
+This proposal kept `float_as_rail` / `rail_coordinates` for an on-demand summon in tabs
+that lack the layout (SPEC #12). The adopted architecture (below) supersedes it: the
+sidebar exists in every tab's layout, the retrofit override covers tabs without the
+swap set, and the summon machinery is deleted.
 
 ### Concrete code changes
 
@@ -238,8 +242,9 @@ only those two, so `next_swap_layout()` is a clean 2-state toggle (verified: the
 cycle never touched the session's vertical/horizontal/stacked swaps). The
 runtime-dock machinery (`fn dock`, `embed_multiple_panes`, the
 `dock_steps`/`docked`/`TARGET_COLS`/`MAX_DOCK_STEPS` state) is retired; the `⇄`
-header control also calls `next_swap_layout()`. Floating-rail summon is kept for
-tabs without a docked instance.
+header control also calls `next_swap_layout()`. Floating-rail summon was kept at
+the time for tabs without a docked instance; the adopted architecture (below)
+deletes it.
 
 **Caveats found during live validation:**
 
@@ -253,6 +258,112 @@ tabs without a docked instance.
   carries `rail "1"`; confirm with a real `Alt /` keypress in a fresh session
   (a CLI `zellij pipe` with a mismatched `--plugin-configuration` spawns a new
   floating instance instead of reaching the docked one).
+
+## Adopted architecture (validated live, 2026-07-02)
+
+The end state, mirroring yazelix's model:
+
+**The sidebar pane exists in every tab's layout, permanently.** "Toggle" (`Alt /`
+and the `⇄` header control) never creates, hides, shows, moves, or destroys a
+pane — it only cycles the tab's `swap_tiled_layout` states:
+
+- **docked** — the sidebar reserves a left column (`size=28`; the shipped layout
+  currently uses 26 — reconciled when the sliver undocked state ships);
+- **undocked** — the sidebar collapses to a separate `size=1` sliver
+  (yazelix-style), never absorbed into the stacked main.
+
+`hide_self` / `show_self` / `open_plugin_pane_floating` are never called; the
+whole summon/spawn machinery is deleted (list below).
+
+Two paths put the swap set on a tab:
+
+1. **Layout-born tabs** (the default layout's tab template, or
+   `zellij action new-tab --layout zaphod`) carry the docked/undocked swap set
+   from birth. Toggle = `next_swap_layout()`.
+2. **Retrofit (option a)** — for a live tab without the swap set, a one-time
+   `override_layout(LayoutInfo::Stringified(kdl), retain_terminals=true,
+   retain_plugins=true, apply_only_to_active_tab=true)` whose KDL contains the
+   tab-bar/status-bar chrome, a stacked main that absorbs the existing panes,
+   the `rail "1"` sidebar slot, and **both** `swap_tiled_layout` sections. The
+   override installs the swap set on that tab; every subsequent toggle is pure
+   swap cycling. (Confirmed viable — no per-toggle re-override needed.)
+
+### Live validation evidence (2026-07-02, ztest, zellij 0.44.1, attached client)
+
+The one unproven mechanism — does an override KDL *containing* swap sections
+install that swap set on the tab — was confirmed:
+
+| Step | Observed |
+|---|---|
+| Control probe: `next-swap-layout` pre-override | builtin compact swap set cycled — the baseline signature a refuted result would reproduce |
+| `override-layout --layout-string "$(cat …)" --apply-only-to-active-tab --retain-existing-terminal-panes --retain-existing-plugin-panes` | exit 0; tab renamed; 28-col sidebar docked left; existing panes reflowed into the stacked main; chrome replaced; other tabs untouched |
+| `next-swap-layout` press 1 | **no visible change** — the base layout is geometrically identical to the "docked" swap; the toggle UX must account for this silent first press |
+| press 2 | sidebar collapsed to the 1-col sliver |
+| press 3 | restored to the 28-col rail; same plugin instance throughout (no reload, no permission re-prompt, no new shells) |
+| Leak check: one press with another tab focused | nothing happened — the swap set installs **per-tab**, not session-wide |
+
+Caveats from the run:
+
+- **Absorption fidelity:** three pre-existing panes landed as a stack-of-2 plus
+  one standalone sibling rather than one stack of three. Minor UX wart, not a
+  mechanism failure.
+- **No read-back probe exists:** `dump-layout` omits `swap_tiled_layout`
+  sections (verified live), so swap-set installation can only be verified
+  behaviorally.
+- The run auto-granted from the cached grant — the grant cache lives at
+  `~/Library/Caches/org.Zellij-Contributors.Zellij/permissions.kdl` (not
+  Application Support).
+
+### Permission gating (zellij v0.44.1 source, verified)
+
+`override_layout` is gated by **`ChangeApplicationState`**
+(`zellij-server/src/plugins/zellij_exports.rs:5289`); `next_swap_layout`
+likewise (`:5243`). Both are fire-and-forget shims: **a denied call is a silent
+no-op** — no panic, no error reaches the plugin, so the plugin must hold the
+grant before toggling; there is no failure signal to react to. With the spawn
+machinery deleted, `OpenTerminalsOrPlugins` has no consumer and is dropped; the
+minimal grant set is `ReadApplicationState` + `ChangeApplicationState` +
+`ReadPaneContents`.
+
+### Approved deletion list
+
+Mapped with file:line citations at HEAD `95d8eda` (baseline: 37/37 tests green;
+`src/agent.rs` contains none of the symbols):
+
+- `ToggleAction::SpawnInActive` / `::HideSelf` / `::ShowHere` — the variants,
+  their `pipe()` / `ensure_visible_in_active_tab` arms, and their
+  `decide_toggle` production sites. `toggle_action_requests_render` collapses
+  with them.
+- Leader election inside `decide_toggle` (`src/main.rs:424-440`) and its
+  satellite state: `instances`, `sidebar_instances()`, `own_url`
+  (`permissions_granted` becomes write-only). `decide_toggle` itself stays —
+  the SwapLayout head — with a shrunken signature.
+- The summon machinery: `float_as_rail`, `rail_coordinates`, the crate's only
+  `float_multiple_panes` / `change_floating_panes_coordinates` calls,
+  `RAIL_WIDTH`, `rail_mode`, `rail_positioned`, and render's first-float rail
+  snap (`src/main.rs:257-260`).
+- The out-of-set `hide_self`/`show_self` sites: the pre-render summon blocks in
+  `pipe()` (`src/main.rs:170-176`, `:184-195`) and the header-body
+  click-to-hide (`:368-369`) — `handle_click` is redesigned, and the navigate
+  flow through `ensure_visible_in_active_tab` is rethought as that fn
+  collapses.
+- The `unblock_cli_pipe_input` call (`src/main.rs:166-168`): it needs the
+  never-requested `ReadCliPipes` grant, is silently denied today, and CLI pipes
+  terminate anyway via the server's auto-unblock once `pipe()` returns.
+- `OpenTerminalsOrPlugins` from the permission request list (`src/main.rs:252`)
+  and the `can_spawn` gate.
+- Tests: four spawn/leader tests deleted, two hide/show tests deleted or
+  rewritten, one swap-layout test updated to the shrunken signature.
+
+### Hazard for layouts that ship the sidebar (verified live)
+
+A fresh session whose layout **focuses** the sidebar pane crashes the whole
+zellij server: the plugin's focus-handback (`own.is_focused && !nav_mode` →
+`focus_previous_pane()`) fires in the session-birth window and the server
+panics at `zellij-server/src/panes/tiled_panes/mod.rs:1837`
+(`get_active_pane_id().unwrap()` on `None`). Mid-session the call is safe.
+Layouts must not focus the sidebar; the plugin-side guard lands with the toggle
+rework, and an upstream zellij report is planned.
 
 ## Prototype / worktree info
 
@@ -273,6 +384,7 @@ tabs without a docked instance.
   2026-06-10 (predates this investigation; no rebuild needed yet — no source changed).
 - **Versions:** zellij CLI 0.44.1; `zellij-tile` locked 0.44.3 (current release 0.44.3,
   bug-fix-only).
-- **Source under change:** `src/main.rs` (843 lines) — docking logic in `fn dock`,
-  `fn float_as_rail`, `fn handle_click`, `fn ensure_visible_in_active_tab`; `src/agent.rs`
-  (agent awareness) is unaffected.
+- **Source under change:** `src/main.rs` — the adopted-architecture deletion set
+  (`float_as_rail`, the spawn/hide/show `ToggleAction` arms, leader election in
+  `decide_toggle`, `ensure_visible_in_active_tab`, the `handle_click` redesign);
+  `src/agent.rs` (agent awareness) is unaffected.
