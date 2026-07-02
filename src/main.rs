@@ -1,5 +1,5 @@
 // ABOUTME: Clickable pane-switcher sidebar for zellij — lists panes in its own tab with their
-// ABOUTME: last terminal line; Alt-/ summons it as a floating left rail in the active tab.
+// ABOUTME: last terminal line; Alt-/ flips it between a docked rail and a 1-col sliver.
 
 use std::collections::BTreeMap;
 use zellij_tile::prelude::*;
@@ -7,24 +7,20 @@ use zellij_tile::prelude::*;
 mod agent;
 
 const STATUS_POLL_SECS: f64 = 2.0;
-const RAIL_WIDTH: usize = 30;
+// Sidebar widths in the two swap-layout states (mirrors layouts/zaphod.kdl).
+const DOCKED_COLS: usize = 28;
+const UNDOCKED_COLS: usize = 1;
 
 #[derive(Default)]
 struct Sidebar {
     rows: Vec<Row>,
     plugin_id: u32,
-    hidden: bool,
     rendered_once: bool,
     permissions_requested: bool,
     permissions_granted: bool,
-    rail_positioned: bool,
-    rail_mode: bool, // sticky: once a floating rail, always re-show as one
     own_tab: Option<usize>,
-    own_floating: bool,
     own_url: Option<String>,
     config: BTreeMap<String, String>,
-    manifest_seen: bool,
-    last_cols: usize,
     nav_mode: bool,
     nav_selected: usize,
     return_focus: Option<u32>,
@@ -49,11 +45,16 @@ enum LineTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ToggleAction {
-    HideSelf,
-    ShowHere,
-    SpawnInActive,
     SwapLayout,
+    Retrofit,
     Ignore,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ClickAction {
+    ToggleDock,
+    FocusPane(u32),
+    None,
 }
 
 register_plugin!(Sidebar);
@@ -119,29 +120,27 @@ impl ZellijPlugin for Sidebar {
                 false
             }
             Event::PaneUpdate(manifest) => {
-                self.manifest_seen = true;
                 self.own_tab = own_tab_position(&manifest, self.plugin_id);
                 self.instances = sidebar_instances(&manifest);
+                let old = std::mem::take(&mut self.rows);
+                self.rows = rows_for_own_tab(&manifest, self.plugin_id);
+                preserve_agent_fields(&mut self.rows, &old);
                 if let Some(own) = manifest
                     .panes
                     .values()
                     .flatten()
                     .find(|p| p.is_plugin && p.id == self.plugin_id)
                 {
-                    self.own_floating = own.is_floating;
                     self.own_url = own.plugin_url.clone();
-                    // Ground truth beats our flag: drift here caused phantom
-                    // show/hide cycles.
-                    self.hidden = own.is_suppressed;
                     // If focus ever lands on us outside nav mode (launch,
-                    // spawn, show_self), hand it back.
-                    if own.is_focused && !self.nav_mode {
+                    // layout focus), hand it back — but only when the tab has
+                    // another selectable pane to receive it: bouncing in the
+                    // session-birth window panics the whole server.
+                    if should_hand_back_focus(own.is_focused, self.nav_mode, !self.rows.is_empty())
+                    {
                         focus_previous_pane();
                     }
                 }
-                let old = std::mem::take(&mut self.rows);
-                self.rows = rows_for_own_tab(&manifest, self.plugin_id);
-                preserve_agent_fields(&mut self.rows, &old);
                 // PaneUpdate fires constantly in agent-heavy tabs; re-rendering
                 // a pinned overlay on every one makes the underlying panes
                 // flicker. Only render when the derived view changed.
@@ -152,8 +151,8 @@ impl ZellijPlugin for Sidebar {
                 set_timeout(STATUS_POLL_SECS);
                 changed
             }
-            Event::Mouse(Mouse::LeftClick(line, col)) => {
-                self.handle_click(line, col);
+            Event::Mouse(Mouse::LeftClick(line, _col)) => {
+                self.handle_click(line);
                 false
             }
             _ => false,
@@ -161,84 +160,53 @@ impl ZellijPlugin for Sidebar {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
-        // CLI pipes stay blocked until explicitly released; release immediately
-        // so `zellij pipe` callers terminate instead of wedging the pipe bus.
-        if let PipeSource::Cli(pipe_id) = &pipe_message.source {
-            unblock_cli_pipe_input(pipe_id);
-        }
+        // CLI pipe callers terminate via the server's auto-unblock once this
+        // returns; an explicit unblock would need the ReadCliPipes grant.
         if pipe_message.name == "navigate" {
-            if !self.rendered_once {
-                // Launching pipe: just summon; nav needs a settled pane.
-                show_self(true);
-                self.float_as_rail();
-                self.hidden = false;
+            // Nav belongs to the active tab's resident instance; every tab's
+            // layout carries one.
+            let active_tab = self.current_active_tab();
+            if self.own_tab.is_some() && self.own_tab == active_tab {
+                self.enter_nav();
                 return true;
             }
-            self.ensure_visible_in_active_tab();
-            self.enter_nav();
-            return true;
+            return false;
         }
         if pipe_message.name != "toggle" {
             return false;
         }
-        // A pipe that launched us arrives before the first render. If we were
-        // launched into a hidden floating layer (hide_floating_panes tabs), we
-        // never render and would stay invisible forever — summon explicitly.
-        // NOTE: no blocking shim calls in here (show_floating_panes etc. wait
-        // for a server response and deadlock the launch); the pinned rail is
-        // visible even while the floating layer is hidden.
-        if !self.rendered_once {
-            show_self(true);
-            self.float_as_rail();
-            self.hidden = false;
-            return true;
-        }
-        let action = decide_toggle(
-            self.hidden,
-            self.own_floating,
+        match decide_toggle(
             self.own_tab,
             self.current_active_tab(),
             self.plugin_id,
-            self.permissions_granted,
             &self.instances,
-        );
-        match action {
+        ) {
             ToggleAction::SwapLayout => {
-                // A docked tile lives in a swap-layout tab: flip docked <-> undocked
-                // by rearranging the tab's existing panes, no hide/show needed.
+                // Flip docked <-> sliver by rearranging the tab's existing
+                // panes; the plugin pane itself never hides or moves. A tab's
+                // base layout is geometrically identical to the "docked" swap
+                // state, so the first press on a tab can be visually silent:
+                // it steps base -> docked, and the next press reaches the
+                // sliver.
                 next_swap_layout();
             }
-            ToggleAction::HideSelf => {
-                self.hidden = true;
-                hide_self();
-            }
-            ToggleAction::ShowHere => {
-                self.hidden = false;
-                if self.rail_mode {
-                    // While hidden the manifest reports is_floating=false, so
-                    // never trust it here: a rail always re-shows as a rail.
-                    show_self(true);
-                    self.float_as_rail();
-                } else {
-                    show_self(false);
-                }
-            }
-            ToggleAction::SpawnInActive => {
-                // No cross-tab moves (show_self/break would yank the user's
-                // view to our tab): the leader spawns a sibling instance
-                // directly in the active tab instead.
+            ToggleAction::Retrofit => {
+                // A tab without a sidebar gets its layout replaced once,
+                // docking the sidebar and installing the swap set; every
+                // later toggle there is a pure swap cycle.
                 if let Some(url) = self.own_url.clone() {
-                    open_plugin_pane_floating(
-                        &url,
-                        self.config.clone(),
-                        Some(rail_coordinates()),
+                    override_layout(
+                        LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
+                        true, // retain existing terminal panes
+                        true, // retain existing plugin panes
+                        true, // apply only to the active tab
                         BTreeMap::new(),
                     );
                 }
             }
             ToggleAction::Ignore => {}
         }
-        toggle_action_requests_render(action)
+        false
     }
 
     fn render(&mut self, _rows: usize, cols: usize) {
@@ -249,18 +217,10 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ReadApplicationState,
                 PermissionType::ChangeApplicationState,
                 PermissionType::ReadPaneContents,
-                PermissionType::OpenTerminalsOrPlugins,
             ]);
         }
-        // A floating instance (fresh keybind launch spawns floating, centered)
-        // snaps itself to the left rail once.
-        if self.own_floating && !self.rail_positioned {
-            self.rail_positioned = true;
-            self.float_as_rail();
-        }
-        self.last_cols = cols;
-        // Header: click body to hide, click the ⇄ at the right edge to toggle
-        // the docked <-> undocked swap layout.
+        // Header: any click flips the docked <-> sliver swap layout, same as
+        // Alt-/ (the ⇄ marks it).
         println!(
             "\u{1b}[7m▾ PANES{}⇄ \u{1b}[0m",
             " ".repeat(cols.saturating_sub(10))
@@ -280,56 +240,13 @@ impl ZellijPlugin for Sidebar {
 }
 
 impl Sidebar {
-    fn float_as_rail(&mut self) {
-        self.rail_mode = true;
-        let own = PaneId::Plugin(self.plugin_id);
-        // Only force the float transition when the manifest confirms we are
-        // tiled: ripping a tiled pane out triggers auto-layout reflows (which
-        // restack the user's tabs), and keybind launches float from birth.
-        if self.manifest_seen && !self.own_floating {
-            float_multiple_panes(vec![own]);
-        }
-        change_floating_panes_coordinates(vec![(own, rail_coordinates())]);
-    }
-
-    // Same show paths as the toggle, minus the hide arm.
-    fn ensure_visible_in_active_tab(&mut self) {
-        let active_tab = self.current_active_tab();
-        match decide_toggle(
-            self.hidden,
-            self.own_floating,
-            self.own_tab,
-            active_tab,
-            self.plugin_id,
-            self.permissions_granted,
-            &self.instances,
-        ) {
-            // A docked tile is already visible; nav just needs it in place.
-            ToggleAction::SwapLayout => {}
-            ToggleAction::ShowHere => {
-                self.hidden = false;
-                if self.rail_mode {
-                    show_self(true);
-                    self.float_as_rail();
-                } else {
-                    show_self(false);
-                }
-            }
-            ToggleAction::SpawnInActive => {
-                if let Some(url) = self.own_url.clone() {
-                    open_plugin_pane_floating(
-                        &url,
-                        self.config.clone(),
-                        Some(rail_coordinates()),
-                        BTreeMap::new(),
-                    );
-                }
-            }
-            ToggleAction::HideSelf | ToggleAction::Ignore => {}
-        }
-    }
-
     fn current_active_tab(&mut self) -> Option<usize> {
+        // get_focused_pane_info blocks on a response the host only writes
+        // once ReadApplicationState is granted; pre-grant it panics inside
+        // the shim, so fall back to the cached TabUpdate value.
+        if !self.permissions_granted {
+            return self.active_tab;
+        }
         let active_tab = active_tab_for_decision(self.active_tab, get_focused_pane_info());
         self.active_tab = active_tab;
         active_tab
@@ -358,23 +275,11 @@ impl Sidebar {
         }
     }
 
-    fn handle_click(&mut self, line: isize, col: usize) {
-        match target_for_line(line, self.rows.len()) {
-            LineTarget::Header => {
-                if header_dock_toggle_hit(col, self.last_cols) {
-                    // ⇄ toggles the docked <-> undocked swap layout, same as Alt-/.
-                    next_swap_layout();
-                } else {
-                    self.hidden = true;
-                    hide_self();
-                }
-            }
-            LineTarget::Row(idx) => {
-                if let Some(row) = self.rows.get(idx) {
-                    focus_terminal_pane(row.pane_id, false, false);
-                }
-            }
-            LineTarget::None => {}
+    fn handle_click(&mut self, line: isize) {
+        match decide_click(line, &self.rows) {
+            ClickAction::ToggleDock => next_swap_layout(),
+            ClickAction::FocusPane(id) => focus_terminal_pane(id, false, false),
+            ClickAction::None => {}
         }
     }
 
@@ -395,53 +300,89 @@ impl Sidebar {
     }
 }
 
-// The pipe broadcasts to every instance; exactly one may act on it.
-// - The active tab's own instance toggles in place.
-// - Otherwise, if the active tab has no instance, the leader (lowest pane id)
-//   teleports there as a floating rail.
+// The pipe broadcasts to every config-matched instance; exactly one may act.
+// - The active tab's resident instance cycles the tab's swap layout.
+// - A tab with no sidebar gets a one-time override_layout retrofit; the
+//   lowest-pane-id instance is the single actor so the override runs once.
 fn decide_toggle(
-    hidden: bool,
-    own_floating: bool,
     own_tab: Option<usize>,
     active_tab: Option<usize>,
     own_pane_id: u32,
-    can_spawn: bool,
     instances: &[(u32, usize)],
 ) -> ToggleAction {
     let Some(active) = active_tab else {
         return ToggleAction::Ignore;
     };
     if own_tab == Some(active) {
-        if !own_floating {
-            // A docked tile toggles the tab's swap layout (docked <-> undocked);
-            // only a floating rail hides/shows itself.
-            ToggleAction::SwapLayout
-        } else if hidden {
-            ToggleAction::ShowHere
-        } else {
-            ToggleAction::HideSelf
-        }
-    } else if instances
-        .iter()
-        .any(|(id, tab)| *tab == active && *id != own_pane_id)
-    {
+        ToggleAction::SwapLayout
+    } else if instances.iter().any(|(_, tab)| *tab == active) {
         ToggleAction::Ignore
     } else if instances.iter().all(|(id, _)| *id >= own_pane_id) {
-        // Spawning calls open_plugin_pane_floating, which requires the
-        // OpenTerminalsOrPlugins grant; without it the host writes no
-        // response and the blocking shim call panics the instance.
-        if can_spawn {
-            ToggleAction::SpawnInActive
-        } else {
-            ToggleAction::Ignore
-        }
+        ToggleAction::Retrofit
     } else {
         ToggleAction::Ignore
     }
 }
 
-fn toggle_action_requests_render(action: ToggleAction) -> bool {
-    matches!(action, ToggleAction::ShowHere | ToggleAction::SpawnInActive)
+// Any click on the header — the ⇄ control or the title text — flips the
+// docked <-> sliver swap layout, same as Alt-/; row clicks focus their pane.
+fn decide_click(line: isize, rows: &[Row]) -> ClickAction {
+    match target_for_line(line, rows.len()) {
+        LineTarget::Header => ClickAction::ToggleDock,
+        LineTarget::Row(idx) => rows
+            .get(idx)
+            .map(|row| ClickAction::FocusPane(row.pane_id))
+            .unwrap_or(ClickAction::None),
+        LineTarget::None => ClickAction::None,
+    }
+}
+
+// Handing focus back with nowhere to send it panics the server in the
+// session-birth window (get_active_pane_id unwraps None); only bounce when
+// the manifest shows another selectable pane in our tab.
+fn should_hand_back_focus(own_focused: bool, nav_mode: bool, has_focus_target: bool) -> bool {
+    own_focused && !nav_mode && has_focus_target
+}
+
+// One-time override for a tab without a sidebar: a full replacement layout
+// that docks the sidebar and installs the docked/undocked swap set. It must
+// carry the tab-bar/status-bar chrome and a stacked main that absorbs the
+// existing panes — override_layout replaces the whole tab, and anything the
+// KDL omits is dropped. The tab node stays unnamed so the user's tab name
+// survives the override.
+fn retrofit_layout_kdl(plugin_url: &str, config: &BTreeMap<String, String>) -> String {
+    let config_lines: String = config
+        .iter()
+        .map(|(key, value)| format!("                {key} \"{value}\"\n"))
+        .collect();
+    let tab_body = |sidebar_cols: usize| {
+        format!(
+            r#"  tab {{
+    pane size=1 borderless=true {{
+        plugin location="zellij:tab-bar"
+    }}
+    pane split_direction="vertical" {{
+        pane size={sidebar_cols} borderless=true name="sidebar" {{
+            plugin location="{plugin_url}" {{
+{config_lines}            }}
+        }}
+        pane stacked=true {{
+            children
+        }}
+    }}
+    pane size=1 borderless=true {{
+        plugin location="zellij:status-bar"
+    }}
+  }}
+"#
+        )
+    };
+    format!(
+        "layout {{\n swap_tiled_layout name=\"docked\" {{\n{docked} }}\n swap_tiled_layout name=\"undocked\" {{\n{undocked} }}\n{base}}}\n",
+        docked = tab_body(DOCKED_COLS),
+        undocked = tab_body(UNDOCKED_COLS),
+        base = tab_body(DOCKED_COLS),
+    )
 }
 
 fn active_tab_for_decision(
@@ -474,26 +415,11 @@ fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
     instances
 }
 
-fn rail_coordinates() -> FloatingPaneCoordinates {
-    let mut coords = FloatingPaneCoordinates::default()
-        .with_x_fixed(0)
-        .with_y_fixed(1)
-        .with_width_fixed(RAIL_WIDTH)
-        .with_height_percent(97);
-    coords.pinned = Some(true);
-    coords
-}
-
 fn move_selection(current: usize, delta: isize, len: usize) -> usize {
     if len == 0 {
         return 0;
     }
     (current as isize + delta).clamp(0, len as isize - 1) as usize
-}
-
-// The ⇄ control occupies the right edge of the header line.
-fn header_dock_toggle_hit(col: usize, total_cols: usize) -> bool {
-    total_cols > 4 && col >= total_cols.saturating_sub(4)
 }
 
 // Zellij mouse positions are pane-local and one-based. Each pane occupies two
@@ -753,45 +679,42 @@ mod tests {
     }
 
     #[test]
-    fn dock_toggle_hit_zone_is_right_edge_of_header() {
-        assert!(header_dock_toggle_hit(26, 30));
-        assert!(header_dock_toggle_hit(29, 30));
-        assert!(!header_dock_toggle_hit(25, 30));
-        assert!(!header_dock_toggle_hit(0, 30));
-        assert!(!header_dock_toggle_hit(3, 4)); // degenerate width: never hit
-    }
-
-    #[test]
-    fn floating_rail_in_own_active_tab_hides_or_shows() {
+    fn resident_instance_in_active_tab_cycles_swap_layout() {
         let instances = vec![(7, 1)];
         assert_eq!(
-            decide_toggle(false, true, Some(1), Some(1), 7, true, &instances),
-            ToggleAction::HideSelf
-        );
-        assert_eq!(
-            decide_toggle(true, true, Some(1), Some(1), 7, true, &instances),
-            ToggleAction::ShowHere
-        );
-    }
-
-    #[test]
-    fn docked_tile_in_own_active_tab_toggles_swap_layout() {
-        let instances = vec![(7, 1)];
-        // own_floating=false marks the docked layout instance: toggling flips
-        // the swap layout instead of hiding the pane.
-        assert_eq!(
-            decide_toggle(false, false, Some(1), Some(1), 7, true, &instances),
+            decide_toggle(Some(1), Some(1), 7, &instances),
             ToggleAction::SwapLayout
         );
     }
 
     #[test]
-    fn showing_a_hidden_instance_requests_render() {
-        assert!(toggle_action_requests_render(ToggleAction::ShowHere));
-        assert!(toggle_action_requests_render(ToggleAction::SpawnInActive));
-        assert!(!toggle_action_requests_render(ToggleAction::HideSelf));
-        assert!(!toggle_action_requests_render(ToggleAction::SwapLayout));
-        assert!(!toggle_action_requests_render(ToggleAction::Ignore));
+    fn defers_to_the_resident_instance_of_the_active_tab() {
+        let instances = vec![(7, 1), (9, 3)];
+        assert_eq!(
+            decide_toggle(Some(1), Some(3), 7, &instances),
+            ToggleAction::Ignore
+        );
+    }
+
+    #[test]
+    fn lowest_id_instance_retrofits_a_tab_without_a_sidebar() {
+        let instances = vec![(7, 1), (9, 2)];
+        assert_eq!(
+            decide_toggle(Some(1), Some(5), 7, &instances),
+            ToggleAction::Retrofit
+        );
+        assert_eq!(
+            decide_toggle(Some(2), Some(5), 9, &instances),
+            ToggleAction::Ignore
+        );
+    }
+
+    #[test]
+    fn ignores_toggle_when_active_tab_is_unknown() {
+        assert_eq!(
+            decide_toggle(Some(1), None, 7, &[(7, 1)]),
+            ToggleAction::Ignore
+        );
     }
 
     #[test]
@@ -807,46 +730,111 @@ mod tests {
     }
 
     #[test]
-    fn solo_instance_spawns_sibling_in_active_tab() {
-        let instances = vec![(7, 1)];
-        assert_eq!(
-            decide_toggle(false, true, Some(1), Some(3), 7, true, &instances),
-            ToggleAction::SpawnInActive
-        );
+    fn header_clicks_anywhere_toggle_the_swap_layout() {
+        let rows = vec![
+            Row {
+                pane_id: 4,
+                ..Default::default()
+            },
+            Row {
+                pane_id: 8,
+                ..Default::default()
+            },
+        ];
+        // The whole header line is one control: clicking it collapses or
+        // expands the sidebar via the tab's swap layout, same as Alt-/.
+        assert_eq!(decide_click(1, &rows), ClickAction::ToggleDock);
+        assert_eq!(decide_click(2, &rows), ClickAction::FocusPane(4));
+        assert_eq!(decide_click(5, &rows), ClickAction::FocusPane(8));
+        assert_eq!(decide_click(99, &rows), ClickAction::None);
     }
 
     #[test]
-    fn never_spawns_before_permission_grant() {
-        // Spawning calls open_plugin_pane_floating, which needs the
-        // OpenTerminalsOrPlugins grant; an ungranted call gets no response
-        // bytes and panics the instance inside the shim.
-        let instances = vec![(7, 1)];
-        assert_eq!(
-            decide_toggle(false, true, Some(1), Some(3), 7, false, &instances),
-            ToggleAction::Ignore
-        );
+    fn pre_grant_active_tab_comes_from_the_cache_only() {
+        // Before the ReadApplicationState grant the host writes no response
+        // bytes for get_focused_pane_info and the blocking shim call panics;
+        // the cached TabUpdate value is the only safe source.
+        let mut sidebar = Sidebar::default();
+        sidebar.active_tab = Some(2);
+        assert_eq!(sidebar.current_active_tab(), Some(2));
     }
 
     #[test]
-    fn defers_to_instance_already_in_active_tab() {
-        let instances = vec![(7, 1), (9, 3)];
-        assert_eq!(
-            decide_toggle(false, true, Some(1), Some(3), 7, true, &instances),
-            ToggleAction::Ignore
-        );
+    fn hands_back_focus_only_when_another_pane_can_take_it() {
+        assert!(should_hand_back_focus(true, false, true));
+        // Session-birth window: no other selectable pane yet — bouncing focus
+        // here panics the whole server (get_active_pane_id unwraps None).
+        assert!(!should_hand_back_focus(true, false, false));
+        assert!(!should_hand_back_focus(true, true, true)); // nav mode keeps focus
+        assert!(!should_hand_back_focus(false, false, true));
     }
 
     #[test]
-    fn only_leader_spawns_when_active_tab_is_empty() {
-        let instances = vec![(7, 1), (9, 2)];
-        // leader (7) spawns; follower (9) ignores
+    fn navigate_enters_nav_only_in_the_resident_instance() {
+        let navigate = || PipeMessage {
+            source: PipeSource::Keybind,
+            name: "navigate".to_owned(),
+            payload: None,
+            args: BTreeMap::new(),
+            is_private: false,
+        };
+        // The pipe reaches every instance; only the active tab's resident
+        // takes nav focus — otherwise every tab's sidebar would call
+        // focus_plugin_pane and fight over the client.
+        let mut resident = Sidebar::default();
+        resident.own_tab = Some(1);
+        resident.active_tab = Some(1);
+        assert!(resident.pipe(navigate()));
+        assert!(resident.nav_mode);
+
+        let mut bystander = Sidebar::default();
+        bystander.own_tab = Some(2);
+        bystander.active_tab = Some(1);
+        assert!(!bystander.pipe(navigate()));
+        assert!(!bystander.nav_mode);
+    }
+
+    #[test]
+    fn session_birth_manifest_with_only_the_sidebar_never_bounces_focus() {
+        // A layout that focuses the sidebar produces a birth manifest whose
+        // tab holds no other selectable pane; handing focus back then makes
+        // the server unwrap a missing active pane and the session dies. The
+        // handler derives has_focus_target from the row list.
+        let m = manifest(vec![(0, vec![pane(7, true, "sidebar", 0, true)])]);
+        let rows = rows_for_own_tab(&m, 7);
+        assert!(!should_hand_back_focus(true, false, !rows.is_empty()));
+    }
+
+    #[test]
+    fn retrofit_layout_carries_swap_set_chrome_and_config_identity() {
+        let mut config = BTreeMap::new();
+        config.insert("rail".to_owned(), "1".to_owned());
+        let kdl = retrofit_layout_kdl("file:/tmp/zellij-sidebar.wasm", &config);
+        assert!(kdl.contains("swap_tiled_layout name=\"docked\""));
+        assert!(kdl.contains("swap_tiled_layout name=\"undocked\""));
+        // docked swap + base tab reserve the full slot; undocked is a sliver
         assert_eq!(
-            decide_toggle(false, true, Some(1), Some(5), 7, true, &instances),
-            ToggleAction::SpawnInActive
+            kdl.matches("pane size=28 borderless=true name=\"sidebar\"")
+                .count(),
+            2
         );
         assert_eq!(
-            decide_toggle(false, true, Some(2), Some(5), 9, true, &instances),
-            ToggleAction::Ignore
+            kdl.matches("pane size=1 borderless=true name=\"sidebar\"")
+                .count(),
+            1
         );
+        // every sidebar block carries the plugin URL and its config identity
+        assert_eq!(
+            kdl.matches("plugin location=\"file:/tmp/zellij-sidebar.wasm\"")
+                .count(),
+            3
+        );
+        assert_eq!(kdl.matches("rail \"1\"").count(), 3);
+        assert!(kdl.contains("zellij:tab-bar"));
+        assert!(kdl.contains("zellij:status-bar"));
+        assert!(kdl.contains("pane stacked=true"));
+        assert!(kdl.contains("children"));
+        // The tab node stays unnamed so the user's tab name survives the override.
+        assert!(!kdl.contains("tab name="));
     }
 }
