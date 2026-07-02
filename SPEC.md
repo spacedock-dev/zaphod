@@ -186,6 +186,38 @@ these as laws.
     `query-tab-names`, `dump-screen --pane-id` (terminals only; plugins dump
     empty), `subscribe` (streaming pane content), `pipe` (blocks).
 
+### Swap layouts & layout application
+
+24. **Swap cycling has a damage latch.** Any manual split, user resize,
+    terminal-window resize, or added tiled pane sets `is_tiled_damaged`; the
+    next `next_swap_layout` then only re-applies (snap-folds) the current
+    template **without advancing** (v0.44.1 `swap_layouts.rs:242-251`; damage
+    sites `tab/mod.rs:2361`, `:2428`, `:3396`, `:3425`, `:5370`).
+    Deterministic toggling must read `TabInfo.is_swap_layout_dirty` and issue
+    two calls on a dirty tab — but zellij reports `(None, false)` for a tab
+    with at most one selectable tiled pane (`tab/mod.rs:1005-1018`), so
+    damage there is invisible.
+25. **Every tab gets a hidden BASE swap layout**: `set_base_layout` inserts
+    the tab's birth layout at swap position 0, named "BASE", constrained
+    `ExactPanes(birth pane count)` (`swap_layouts.rs:38-57`) — whether or not
+    the layout carries a swap set. The first press on a fresh tab is often
+    visually silent (BASE → an identical-geometry first swap), BASE stops
+    fitting once the pane count changes, and the effective cycle length
+    varies at runtime. Corollary: `TabInfo.active_swap_layout_name` reports
+    "BASE" on tabs *without* any swap set too, so it cannot detect "this tab
+    lacks my swap set".
+26. **`dump-layout` emits a resurrection format, not a reapplication
+    format**: a concrete `pane` node means "spawn a new pane here"; retained
+    panes re-seat only into `children` insertion points (exact run-match
+    first — `layout_applier.rs:160-221`). Re-applying a tab's own dump via
+    `override-layout` duplicates every terminal (verified live, twice). An
+    override KDL must absorb existing panes via `pane stacked=true
+    { children }`.
+27. **A custom default layout must carry an explicit `tab { pane }`**: a
+    template-only layout (no `tab` node), or a bare `tab` whose template
+    holds `children` inside a nested split, births zero terminals and the
+    session exits immediately ("Bye from Zellij!") — both observed live.
+
 ## If building v2 from scratch
 
 1. **Manifest-derived state machine.** One `State` struct recomputed from
@@ -196,13 +228,14 @@ these as laws.
    effects; a drain step executes them from a safe context, never calling
    response-reading shims from `pipe()`/`load()`. No `unwrap` anywhere near
    shim responses.
-3. **Layout-first placement.** The sidebar pane lives in every tab's layout
-   (`default_tab_template` + the zaphod tab layout), with docked and
-   undocked (`size=1` sliver) `swap_tiled_layout` states; toggling cycles
-   swap layouts only. Tabs without the swap set get a one-time
-   `override_layout` retrofit — complete KDL: chrome, stacked main, both
-   swaps (`docs/docking-approach.md`, Adopted architecture). Nothing is
-   spawned, hidden, or shown.
+3. **Layout-first placement.** The sidebar pane lives in every toggled tab's
+   layout, with docked and undocked (`size=1` sliver) `swap_tiled_layout`
+   states; toggling cycles swap layouts only. The default layout stays
+   chrome-only with an explicit `tab { pane }` (see #27); tabs get the
+   sidebar + swap set from `new-tab --layout zaphod` at birth or from a
+   one-time `override_layout` retrofit on first toggle — complete KDL:
+   chrome, stacked main, both swaps (`docs/docking-approach.md`, Adopted
+   architecture). Nothing is spawned, hidden, or shown.
 4. **Keybind = pipe toggle only**, with `floating true` + `skip_cache` (dev)
    + an identity config key. Treat any pane-less instance as dead weight to
    be starved, not managed.

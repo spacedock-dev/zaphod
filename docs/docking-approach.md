@@ -263,9 +263,11 @@ deletes it.
 
 The end state, mirroring yazelix's model:
 
-**The sidebar pane exists in every tab's layout, permanently.** "Toggle" (`Alt /`
-and the `⇄` header control) never creates, hides, shows, moves, or destroys a
-pane — it only cycles the tab's `swap_tiled_layout` states:
+**The sidebar pane exists in every toggled tab's layout, permanently.** The
+default layout is chrome-only; a tab's first toggle retrofits the sidebar in.
+"Toggle" (`Alt /` and the `⇄` header control) never creates, hides, shows,
+moves, or destroys a pane — it only cycles the tab's `swap_tiled_layout`
+states:
 
 - **docked** — the sidebar reserves a left column (`size=28`);
 - **undocked** — the sidebar collapses to a separate `size=1` sliver
@@ -276,9 +278,13 @@ whole summon/spawn machinery is deleted (list below).
 
 Two paths put the swap set on a tab:
 
-1. **Layout-born tabs** (the default layout's tab template, or
-   `zellij action new-tab --layout zaphod`) carry the docked/undocked swap set
-   from birth. Toggle = `next_swap_layout()`.
+1. **Layout-born tabs** (`zellij action new-tab --layout zaphod`) carry the
+   docked/undocked swap set from birth. Toggle = `next_swap_layout()`. The
+   default layout stays chrome-only — tab-bar / `children` / status-bar plus
+   an explicit `tab { pane }` (a template-only or bare-`tab` layout births
+   zero terminals and the session exits immediately; both observed live) —
+   so ordinary tabs are born without a sidebar and reach the docked state
+   via the retrofit.
 2. **Retrofit (option a)** — for a live tab without the swap set, a one-time
    `override_layout(LayoutInfo::Stringified(kdl), retain_terminals=true,
    retain_plugins=true, apply_only_to_active_tab=true)` whose KDL contains the
@@ -313,6 +319,74 @@ Caveats from the run:
 - The run auto-granted from the cached grant — the grant cache lives at
   `~/Library/Caches/org.Zellij-Contributors.Zellij/permissions.kdl` (not
   Application Support).
+
+### Toggle v2 live evidence (2026-07-02 evening, fresh ztest, attached client)
+
+Source cites below are zellij v0.44.1.
+
+**dump→transform→override — REFUTED.** The candidate split-preserving toggle
+(dump the tab's actual layout, flip the sidebar width, override the same tab)
+fails structurally. Round-trip experiment on two tabs, identical signature:
+overriding a tab with its own *unchanged* dump spawned three new shells and
+nested the original three panes as leftovers. Root cause: `dump-layout` emits
+a **resurrection** format — a concrete `pane` node means "spawn a new pane
+here"; retained panes re-seat only into `children` insertion points
+(`layout_applier.rs:160-221`). A dump cannot round-trip through
+`override-layout` on the same tab. Consequences: the toggle stays pure swap
+cycling (made deterministic below), and the retrofit KDL keeps its
+`stacked=true { children }` main — the only retained-pane-correct shape,
+proven three times. Positive datum from the same run: the floating sidebar
+instance seated cleanly into a config-matched floating slot of an override
+KDL (no duplicate) — the retain flags plus exact configuration identity do
+re-seat plugin panes.
+
+**Retrofit arm — VERIFIED.** With the session's sole sidebar instance
+floating in another tab, `Alt /` on a sidebar-less tab ran the cross-tab
+election (lowest pane id acted), the override hit the *active* tab rather
+than the actor's, the unnamed `tab` node preserved the tab's name, and
+post-retrofit toggling cycled cleanly.
+
+**Bootstrap gap — CONFIRMED, fix shipped with toggle v2.** In a fresh
+chrome-only session, the `Alt /` keybind's launch-if-missing spawned a
+*floating* rail-"1" instance in the active tab. `own_tab == active` then
+routed every toggle to `next_swap_layout()` on a tab with no zaphod swap
+set: toggle-dead, and the resident blocked the retrofit election.
+`decide_toggle` now carries the floating dimension — a floating resident
+retrofits its own tab; a tiled sidebar in the tab always takes precedence,
+so the state settles whether or not the override seats the floating actor
+into the rail slot. (Whether it seats is the remaining live question; the
+positive datum above says a config-matched slot should claim it.)
+
+**Deterministic cycling — designed from source, needs live confirmation.**
+Two mechanisms make a single `next_swap_layout()` per press nondeterministic:
+
+- `set_base_layout` inserts every tab's birth layout as swap position 0,
+  named "BASE", constrained `ExactPanes(birth pane count)`
+  (`swap_layouts.rs:38-57`). The installed cycle is really
+  `[BASE, docked, undocked]`; BASE drops out of fit when the pane count
+  changes, so the cycle length varies at runtime. This — not just
+  geometry — is the silent-first-press mechanism.
+- A damage latch: any manual split, user resize, terminal-window resize, or
+  added tiled pane sets `is_tiled_damaged`; the next call then only
+  re-applies (snap-folds) the current template *without advancing*
+  (`swap_layouts.rs:242-251`).
+
+Plugins see both through `TabInfo.active_swap_layout_name` /
+`TabInfo.is_swap_layout_dirty` (`data.rs:2242-2244`), so the toggle now
+issues **two** `next_swap_layout()` calls on a dirty tab and one on a clean
+tab. Caveat: zellij reports `(None, false)` for a tab with at most one
+selectable tiled pane (`tab/mod.rs:1005-1018`), so damage there is invisible
+and that tab keeps the fold-then-flip behavior.
+
+**Resident-without-swap-set detection — REFUTED.** A tiled sidebar in a tab
+without the zaphod swap set (e.g. a pre-rollout captured template) still
+dead-cycles, and `active_swap_layout_name` cannot detect the case: a
+no-swap-set tab reports `Some("BASE")` — every tab gets the BASE entry —
+which is exactly what a freshly-born or freshly-retrofitted zaphod tab
+reports before its first toggle (`set_swap_tiled_layouts` +
+`set_base_layout` reset the position to 0, `swap_layouts.rs:58-62`,
+`tab/mod.rs:923-930`). Routing "BASE" to the retrofit would fire a
+destructive override on every fresh zaphod tab. Still open.
 
 ### Permission gating (zellij v0.44.1 source, verified)
 

@@ -25,7 +25,20 @@ struct Sidebar {
     nav_selected: usize,
     return_focus: Option<u32>,
     active_tab: Option<usize>,
-    instances: Vec<(u32, usize)>, // (plugin pane id, tab position) of every sidebar instance
+    // Per-tab is_swap_layout_dirty: a damaged tab needs two next_swap_layout
+    // calls to advance. Caveat: zellij reports (None, false) for tabs with at
+    // most one selectable tiled pane, so damage there is invisible.
+    tab_swap_dirty: BTreeMap<usize, bool>,
+    own_floating: bool,
+    instances: Vec<SidebarInstance>,
+}
+
+// One sidebar plugin pane somewhere in the session, as seen in the manifest.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SidebarInstance {
+    pane_id: u32,
+    tab: usize,
+    floating: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -45,7 +58,7 @@ enum LineTarget {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ToggleAction {
-    SwapLayout,
+    SwapLayout { calls: u8 },
     Retrofit,
     Ignore,
 }
@@ -117,6 +130,10 @@ impl ZellijPlugin for Sidebar {
             }
             Event::TabUpdate(tabs) => {
                 self.active_tab = tabs.iter().find(|t| t.active).map(|t| t.position);
+                self.tab_swap_dirty = tabs
+                    .iter()
+                    .map(|t| (t.position, t.is_swap_layout_dirty))
+                    .collect();
                 false
             }
             Event::PaneUpdate(manifest) => {
@@ -132,6 +149,7 @@ impl ZellijPlugin for Sidebar {
                     .find(|p| p.is_plugin && p.id == self.plugin_id)
                 {
                     self.own_url = own.plugin_url.clone();
+                    self.own_floating = own.is_floating;
                     // If focus ever lands on us outside nav mode (launch,
                     // layout focus), hand it back — but only when the tab has
                     // another selectable pane to receive it: bouncing in the
@@ -175,37 +193,7 @@ impl ZellijPlugin for Sidebar {
         if pipe_message.name != "toggle" {
             return false;
         }
-        match decide_toggle(
-            self.own_tab,
-            self.current_active_tab(),
-            self.plugin_id,
-            &self.instances,
-        ) {
-            ToggleAction::SwapLayout => {
-                // Flip docked <-> sliver by rearranging the tab's existing
-                // panes; the plugin pane itself never hides or moves. A tab's
-                // base layout is geometrically identical to the "docked" swap
-                // state, so the first press on a tab can be visually silent:
-                // it steps base -> docked, and the next press reaches the
-                // sliver.
-                next_swap_layout();
-            }
-            ToggleAction::Retrofit => {
-                // A tab without a sidebar gets its layout replaced once,
-                // docking the sidebar and installing the swap set; every
-                // later toggle there is a pure swap cycle.
-                if let Some(url) = self.own_url.clone() {
-                    override_layout(
-                        LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
-                        true, // retain existing terminal panes
-                        true, // retain existing plugin panes
-                        true, // apply only to the active tab
-                        BTreeMap::new(),
-                    );
-                }
-            }
-            ToggleAction::Ignore => {}
-        }
+        self.perform_toggle();
         false
     }
 
@@ -219,8 +207,8 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ReadPaneContents,
             ]);
         }
-        // Header: any click flips the docked <-> sliver swap layout, same as
-        // Alt-/ (the ⇄ marks it).
+        // Header: any click runs the same dock toggle as Alt-/ (the ⇄ marks
+        // it).
         println!(
             "\u{1b}[7m▾ PANES{}⇄ \u{1b}[0m",
             " ".repeat(cols.saturating_sub(10))
@@ -277,9 +265,51 @@ impl Sidebar {
 
     fn handle_click(&mut self, line: isize) {
         match decide_click(line, &self.rows) {
-            ClickAction::ToggleDock => next_swap_layout(),
+            ClickAction::ToggleDock => self.perform_toggle(),
             ClickAction::FocusPane(id) => focus_terminal_pane(id, false, false),
             ClickAction::None => {}
+        }
+    }
+
+    fn perform_toggle(&mut self) {
+        let active_tab = self.current_active_tab();
+        let active_swap_dirty = active_tab
+            .and_then(|tab| self.tab_swap_dirty.get(&tab).copied())
+            .unwrap_or(false);
+        match decide_toggle(
+            self.own_tab,
+            self.own_floating,
+            active_tab,
+            active_swap_dirty,
+            self.plugin_id,
+            &self.instances,
+        ) {
+            ToggleAction::SwapLayout { calls } => {
+                // Flip docked <-> sliver by rearranging the tab's existing
+                // panes; the plugin pane itself never hides or moves. Zellij
+                // inserts every tab's birth layout as swap position 0, named
+                // BASE and constrained to the exact birth pane count, so the
+                // first press on a tab can be visually silent: it steps
+                // BASE -> docked, which are geometrically identical.
+                for _ in 0..calls {
+                    next_swap_layout();
+                }
+            }
+            ToggleAction::Retrofit => {
+                // A tab without a docked sidebar gets its layout replaced
+                // once, docking the sidebar and installing the swap set;
+                // every later toggle there is a pure swap cycle.
+                if let Some(url) = self.own_url.clone() {
+                    override_layout(
+                        LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
+                        true, // retain existing terminal panes
+                        true, // retain existing plugin panes
+                        true, // apply only to the active tab
+                        BTreeMap::new(),
+                    );
+                }
+            }
+            ToggleAction::Ignore => {}
         }
     }
 
@@ -301,31 +331,55 @@ impl Sidebar {
 }
 
 // The pipe broadcasts to every config-matched instance; exactly one may act.
-// - The active tab's resident instance cycles the tab's swap layout.
+// - The active tab's tiled resident cycles the tab's swap layout — with two
+//   next_swap_layout calls when the tab is damaged (manual split/resize):
+//   zellij's first call then only re-applies the current template.
+// - A floating resident (keybind bootstrap) has no swap set to cycle: it
+//   retrofits its own tab, docking itself and installing the swap set.
 // - A tab with no sidebar gets a one-time override_layout retrofit; the
 //   lowest-pane-id instance is the single actor so the override runs once.
 fn decide_toggle(
     own_tab: Option<usize>,
+    own_floating: bool,
     active_tab: Option<usize>,
+    active_swap_dirty: bool,
     own_pane_id: u32,
-    instances: &[(u32, usize)],
+    instances: &[SidebarInstance],
 ) -> ToggleAction {
     let Some(active) = active_tab else {
         return ToggleAction::Ignore;
     };
-    if own_tab == Some(active) {
-        ToggleAction::SwapLayout
-    } else if instances.iter().any(|(_, tab)| *tab == active) {
+    if own_tab == Some(active) && !own_floating {
+        ToggleAction::SwapLayout {
+            calls: if active_swap_dirty { 2 } else { 1 },
+        }
+    } else if instances.iter().any(|i| i.tab == active && !i.floating) {
+        // The tab's tiled sidebar owns the toggle; a floating instance there
+        // (e.g. left behind by a retrofit) must not fire another retrofit.
         ToggleAction::Ignore
-    } else if instances.iter().all(|(id, _)| *id >= own_pane_id) {
+    } else if own_tab == Some(active) {
+        // Own pane is floating here; the lowest-id floating resident is the
+        // single retrofit actor.
+        if instances
+            .iter()
+            .filter(|i| i.tab == active)
+            .all(|i| i.pane_id >= own_pane_id)
+        {
+            ToggleAction::Retrofit
+        } else {
+            ToggleAction::Ignore
+        }
+    } else if instances.iter().any(|i| i.tab == active) {
+        ToggleAction::Ignore
+    } else if instances.iter().all(|i| i.pane_id >= own_pane_id) {
         ToggleAction::Retrofit
     } else {
         ToggleAction::Ignore
     }
 }
 
-// Any click on the header — the ⇄ control or the title text — flips the
-// docked <-> sliver swap layout, same as Alt-/; row clicks focus their pane.
+// Any click on the header — the ⇄ control or the title text — runs the same
+// dock toggle as Alt-/; row clicks focus their pane.
 fn decide_click(line: isize, rows: &[Row]) -> ClickAction {
     match target_for_line(line, rows.len()) {
         LineTarget::Header => ClickAction::ToggleDock,
@@ -395,8 +449,8 @@ fn active_tab_for_decision(
         .or(cached_active_tab)
 }
 
-fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
-    let mut instances: Vec<(u32, usize)> = manifest
+fn sidebar_instances(manifest: &PaneManifest) -> Vec<SidebarInstance> {
+    let mut instances: Vec<SidebarInstance> = manifest
         .panes
         .iter()
         .flat_map(|(tab, panes)| {
@@ -408,10 +462,14 @@ fn sidebar_instances(manifest: &PaneManifest) -> Vec<(u32, usize)> {
                             .as_deref()
                             .is_some_and(|u| u.contains("zellij-sidebar"))
                 })
-                .map(move |p| (p.id, *tab))
+                .map(move |p| SidebarInstance {
+                    pane_id: p.id,
+                    tab: *tab,
+                    floating: p.is_floating,
+                })
         })
         .collect();
-    instances.sort_unstable();
+    instances.sort_unstable_by_key(|i| i.pane_id);
     instances
 }
 
@@ -523,6 +581,21 @@ mod tests {
             is_focused: focused,
             is_selectable: true,
             ..Default::default()
+        }
+    }
+
+    fn sidebar_pane(id: u32, floating: bool) -> PaneInfo {
+        let mut p = pane(id, true, "sidebar", 0, false);
+        p.plugin_url = Some("file:/tmp/zellij-sidebar.wasm".to_owned());
+        p.is_floating = floating;
+        p
+    }
+
+    fn inst(pane_id: u32, tab: usize, floating: bool) -> SidebarInstance {
+        SidebarInstance {
+            pane_id,
+            tab,
+            floating,
         }
     }
 
@@ -680,31 +753,43 @@ mod tests {
 
     #[test]
     fn resident_instance_in_active_tab_cycles_swap_layout() {
-        let instances = vec![(7, 1)];
+        let instances = [inst(7, 1, false)];
         assert_eq!(
-            decide_toggle(Some(1), Some(1), 7, &instances),
-            ToggleAction::SwapLayout
+            decide_toggle(Some(1), false, Some(1), false, 7, &instances),
+            ToggleAction::SwapLayout { calls: 1 }
+        );
+    }
+
+    #[test]
+    fn dirty_tab_needs_two_swap_calls_to_actually_flip() {
+        // On a damaged tab (manual split/resize) zellij's first
+        // next_swap_layout only re-applies the current template without
+        // advancing, so one press must issue two calls.
+        let instances = [inst(7, 1, false)];
+        assert_eq!(
+            decide_toggle(Some(1), false, Some(1), true, 7, &instances),
+            ToggleAction::SwapLayout { calls: 2 }
         );
     }
 
     #[test]
     fn defers_to_the_resident_instance_of_the_active_tab() {
-        let instances = vec![(7, 1), (9, 3)];
+        let instances = [inst(7, 1, false), inst(9, 3, false)];
         assert_eq!(
-            decide_toggle(Some(1), Some(3), 7, &instances),
+            decide_toggle(Some(1), false, Some(3), false, 7, &instances),
             ToggleAction::Ignore
         );
     }
 
     #[test]
     fn lowest_id_instance_retrofits_a_tab_without_a_sidebar() {
-        let instances = vec![(7, 1), (9, 2)];
+        let instances = [inst(7, 1, false), inst(9, 2, false)];
         assert_eq!(
-            decide_toggle(Some(1), Some(5), 7, &instances),
+            decide_toggle(Some(1), false, Some(5), false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(2), Some(5), 9, &instances),
+            decide_toggle(Some(2), false, Some(5), false, 9, &instances),
             ToggleAction::Ignore
         );
     }
@@ -712,8 +797,136 @@ mod tests {
     #[test]
     fn ignores_toggle_when_active_tab_is_unknown() {
         assert_eq!(
-            decide_toggle(Some(1), None, 7, &[(7, 1)]),
+            decide_toggle(Some(1), false, None, false, 7, &[inst(7, 1, false)]),
             ToggleAction::Ignore
+        );
+    }
+
+    #[test]
+    fn floating_resident_in_active_tab_retrofits_its_own_tab() {
+        // Keybind launch-if-missing bootstraps a floating sidebar into the
+        // active tab; that tab has no swap set to cycle, so the floating
+        // resident retrofits its own tab instead of dead-cycling.
+        let instances = [inst(7, 1, true)];
+        assert_eq!(
+            decide_toggle(Some(1), true, Some(1), false, 7, &instances),
+            ToggleAction::Retrofit
+        );
+    }
+
+    #[test]
+    fn floating_resident_defers_to_the_tabs_tiled_sidebar() {
+        // If a retrofit docks a fresh rail instead of seating the floating
+        // actor, the tab holds both; only the tiled one may act, otherwise
+        // every toggle would fire another retrofit.
+        let instances = [inst(7, 1, true), inst(9, 1, false)];
+        assert_eq!(
+            decide_toggle(Some(1), true, Some(1), false, 7, &instances),
+            ToggleAction::Ignore
+        );
+        assert_eq!(
+            decide_toggle(Some(1), false, Some(1), false, 9, &instances),
+            ToggleAction::SwapLayout { calls: 1 }
+        );
+    }
+
+    #[test]
+    fn lowest_id_floating_resident_is_the_single_retrofit_actor() {
+        // Two floating sidebars in one tab (stray pipe launches) must not
+        // both fire the override.
+        let instances = [inst(7, 1, true), inst(9, 1, true)];
+        assert_eq!(
+            decide_toggle(Some(1), true, Some(1), false, 7, &instances),
+            ToggleAction::Retrofit
+        );
+        assert_eq!(
+            decide_toggle(Some(1), true, Some(1), false, 9, &instances),
+            ToggleAction::Ignore
+        );
+    }
+
+    #[test]
+    fn floating_bystander_defers_to_any_active_tab_resident() {
+        // Floating bootstrap instance parked in tab 2; the active tab's own
+        // resident acts, whether tiled or floating.
+        let instances = [inst(7, 2, true), inst(9, 1, false)];
+        assert_eq!(
+            decide_toggle(Some(2), true, Some(1), false, 7, &instances),
+            ToggleAction::Ignore
+        );
+        let instances = [inst(7, 2, true), inst(9, 1, true)];
+        assert_eq!(
+            decide_toggle(Some(2), true, Some(1), false, 7, &instances),
+            ToggleAction::Ignore
+        );
+    }
+
+    #[test]
+    fn floating_bystander_joins_the_election_for_a_sidebarless_tab() {
+        // No sidebar in the active tab: the lowest-id instance session-wide
+        // retrofits it, floating or not.
+        let instances = [inst(7, 2, true), inst(9, 3, false)];
+        assert_eq!(
+            decide_toggle(Some(2), true, Some(5), false, 7, &instances),
+            ToggleAction::Retrofit
+        );
+        assert_eq!(
+            decide_toggle(Some(3), false, Some(5), false, 9, &instances),
+            ToggleAction::Ignore
+        );
+    }
+
+    #[test]
+    fn tab_update_records_swap_dirty_state_per_tab() {
+        let tab = |position: usize, active: bool, dirty: bool| TabInfo {
+            position,
+            active,
+            is_swap_layout_dirty: dirty,
+            ..Default::default()
+        };
+        let mut sidebar = Sidebar::default();
+        sidebar.update(Event::TabUpdate(vec![
+            tab(0, false, false),
+            tab(1, true, true),
+        ]));
+        assert_eq!(sidebar.active_tab, Some(1));
+        assert_eq!(sidebar.tab_swap_dirty.get(&0), Some(&false));
+        assert_eq!(sidebar.tab_swap_dirty.get(&1), Some(&true));
+    }
+
+    #[test]
+    fn pane_update_tracks_own_floating_state() {
+        let mut sidebar = Sidebar::default();
+        sidebar.plugin_id = 7;
+        let m = manifest(vec![(
+            1,
+            vec![sidebar_pane(7, true), pane(3, false, "shell", 2, false)],
+        )]);
+        sidebar.update(Event::PaneUpdate(m));
+        assert!(sidebar.own_floating);
+
+        let m = manifest(vec![(
+            1,
+            vec![sidebar_pane(7, false), pane(3, false, "shell", 2, false)],
+        )]);
+        sidebar.update(Event::PaneUpdate(m));
+        assert!(!sidebar.own_floating);
+    }
+
+    #[test]
+    fn instance_list_records_tab_and_floating_state() {
+        let mut other_plugin = pane(4, true, "tab-bar", 0, false);
+        other_plugin.plugin_url = Some("zellij:tab-bar".to_owned());
+        let m = manifest(vec![
+            (0, vec![sidebar_pane(5, false), other_plugin]),
+            (
+                2,
+                vec![sidebar_pane(9, true), pane(3, false, "shell", 2, false)],
+            ),
+        ]);
+        assert_eq!(
+            sidebar_instances(&m),
+            vec![inst(5, 0, false), inst(9, 2, true)]
         );
     }
 
