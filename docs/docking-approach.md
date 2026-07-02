@@ -267,8 +267,7 @@ The end state, mirroring yazelix's model:
 and the `⇄` header control) never creates, hides, shows, moves, or destroys a
 pane — it only cycles the tab's `swap_tiled_layout` states:
 
-- **docked** — the sidebar reserves a left column (`size=28`; the shipped layout
-  currently uses 26 — reconciled when the sliver undocked state ships);
+- **docked** — the sidebar reserves a left column (`size=28`);
 - **undocked** — the sidebar collapses to a separate `size=1` sliver
   (yazelix-style), never absorbed into the stacked main.
 
@@ -307,9 +306,10 @@ Caveats from the run:
 - **Absorption fidelity:** three pre-existing panes landed as a stack-of-2 plus
   one standalone sibling rather than one stack of three. Minor UX wart, not a
   mechanism failure.
-- **No read-back probe exists:** `dump-layout` omits `swap_tiled_layout`
-  sections (verified live), so swap-set installation can only be verified
-  behaviorally.
+- **No read-back probe exists:** `dump-layout` omits *per-tab* swap sets — both
+  installed-by-override and carried-from-`new-tab --layout` ones (verified
+  live; the session-level swap set does appear in the dump) — so per-tab
+  swap-set installation can only be verified behaviorally.
 - The run auto-granted from the cached grant — the grant cache lives at
   `~/Library/Caches/org.Zellij-Contributors.Zellij/permissions.kdl` (not
   Application Support).

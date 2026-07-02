@@ -1,7 +1,7 @@
 // Zaphod agent-tab layout: a docked pane-switcher sidebar you can toggle.
 // Two swap layouts let Alt-/ (or the header's toggle) flip between:
-//   docked   — sidebar reserves a 26-col column on the left, agents stacked right
-//   undocked — agents take the full width; the sidebar collapses into the stack
+//   docked   — sidebar reserves a 28-col column on the left, agents stacked right
+//   undocked — the sidebar collapses to a 1-col sliver; agents take the rest
 // next_swap_layout() rearranges the tab's existing panes between these states
 // without spawning shells or reloading the plugin.
 //
@@ -15,7 +15,7 @@ layout {
                 plugin location="zellij:tab-bar"
             }
             pane split_direction="vertical" {
-                pane size=26 borderless=true name="sidebar" {
+                pane size=28 borderless=true name="sidebar" {
                     plugin location="__ZAPHOD_WASM__" {
                         rail "1"
                     }
@@ -34,8 +34,15 @@ layout {
             pane size=1 borderless=true {
                 plugin location="zellij:tab-bar"
             }
-            pane stacked=true {
-                children
+            pane split_direction="vertical" {
+                pane size=1 borderless=true name="sidebar" {
+                    plugin location="__ZAPHOD_WASM__" {
+                        rail "1"
+                    }
+                }
+                pane stacked=true {
+                    children
+                }
             }
             pane size=1 borderless=true {
                 plugin location="zellij:status-bar"
@@ -47,7 +54,7 @@ layout {
             plugin location="zellij:tab-bar"
         }
         pane split_direction="vertical" {
-            pane size=26 borderless=true name="sidebar" {
+            pane size=28 borderless=true name="sidebar" {
                 plugin location="__ZAPHOD_WASM__" {
                     rail "1"
                 }
