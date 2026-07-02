@@ -16,6 +16,7 @@ struct Sidebar {
     hidden: bool,
     rendered_once: bool,
     permissions_requested: bool,
+    permissions_granted: bool,
     rail_positioned: bool,
     rail_mode: bool, // sticky: once a floating rail, always re-show as one
     own_tab: Option<usize>,
@@ -78,6 +79,7 @@ impl ZellijPlugin for Sidebar {
     fn update(&mut self, event: Event) -> bool {
         match event {
             Event::PermissionRequestResult(status) => {
+                self.permissions_granted = status == PermissionStatus::Granted;
                 // Never take focus: clicks are delivered to the plugin without
                 // focusing it (same mechanism as the built-in tab-bar). Only
                 // after the grant — the permission prompt needs a focusable pane.
@@ -197,6 +199,7 @@ impl ZellijPlugin for Sidebar {
             self.own_tab,
             self.current_active_tab(),
             self.plugin_id,
+            self.permissions_granted,
             &self.instances,
         );
         match action {
@@ -246,6 +249,7 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ReadApplicationState,
                 PermissionType::ChangeApplicationState,
                 PermissionType::ReadPaneContents,
+                PermissionType::OpenTerminalsOrPlugins,
             ]);
         }
         // A floating instance (fresh keybind launch spawns floating, centered)
@@ -297,6 +301,7 @@ impl Sidebar {
             self.own_tab,
             active_tab,
             self.plugin_id,
+            self.permissions_granted,
             &self.instances,
         ) {
             // A docked tile is already visible; nav just needs it in place.
@@ -400,6 +405,7 @@ fn decide_toggle(
     own_tab: Option<usize>,
     active_tab: Option<usize>,
     own_pane_id: u32,
+    can_spawn: bool,
     instances: &[(u32, usize)],
 ) -> ToggleAction {
     let Some(active) = active_tab else {
@@ -421,7 +427,14 @@ fn decide_toggle(
     {
         ToggleAction::Ignore
     } else if instances.iter().all(|(id, _)| *id >= own_pane_id) {
-        ToggleAction::SpawnInActive
+        // Spawning calls open_plugin_pane_floating, which requires the
+        // OpenTerminalsOrPlugins grant; without it the host writes no
+        // response and the blocking shim call panics the instance.
+        if can_spawn {
+            ToggleAction::SpawnInActive
+        } else {
+            ToggleAction::Ignore
+        }
     } else {
         ToggleAction::Ignore
     }
@@ -752,11 +765,11 @@ mod tests {
     fn floating_rail_in_own_active_tab_hides_or_shows() {
         let instances = vec![(7, 1)];
         assert_eq!(
-            decide_toggle(false, true, Some(1), Some(1), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(1), 7, true, &instances),
             ToggleAction::HideSelf
         );
         assert_eq!(
-            decide_toggle(true, true, Some(1), Some(1), 7, &instances),
+            decide_toggle(true, true, Some(1), Some(1), 7, true, &instances),
             ToggleAction::ShowHere
         );
     }
@@ -767,7 +780,7 @@ mod tests {
         // own_floating=false marks the docked layout instance: toggling flips
         // the swap layout instead of hiding the pane.
         assert_eq!(
-            decide_toggle(false, false, Some(1), Some(1), 7, &instances),
+            decide_toggle(false, false, Some(1), Some(1), 7, true, &instances),
             ToggleAction::SwapLayout
         );
     }
@@ -797,8 +810,20 @@ mod tests {
     fn solo_instance_spawns_sibling_in_active_tab() {
         let instances = vec![(7, 1)];
         assert_eq!(
-            decide_toggle(false, true, Some(1), Some(3), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(3), 7, true, &instances),
             ToggleAction::SpawnInActive
+        );
+    }
+
+    #[test]
+    fn never_spawns_before_permission_grant() {
+        // Spawning calls open_plugin_pane_floating, which needs the
+        // OpenTerminalsOrPlugins grant; an ungranted call gets no response
+        // bytes and panics the instance inside the shim.
+        let instances = vec![(7, 1)];
+        assert_eq!(
+            decide_toggle(false, true, Some(1), Some(3), 7, false, &instances),
+            ToggleAction::Ignore
         );
     }
 
@@ -806,7 +831,7 @@ mod tests {
     fn defers_to_instance_already_in_active_tab() {
         let instances = vec![(7, 1), (9, 3)];
         assert_eq!(
-            decide_toggle(false, true, Some(1), Some(3), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(3), 7, true, &instances),
             ToggleAction::Ignore
         );
     }
@@ -816,11 +841,11 @@ mod tests {
         let instances = vec![(7, 1), (9, 2)];
         // leader (7) spawns; follower (9) ignores
         assert_eq!(
-            decide_toggle(false, true, Some(1), Some(5), 7, &instances),
+            decide_toggle(false, true, Some(1), Some(5), 7, true, &instances),
             ToggleAction::SpawnInActive
         );
         assert_eq!(
-            decide_toggle(false, true, Some(2), Some(5), 9, &instances),
+            decide_toggle(false, true, Some(2), Some(5), 9, true, &instances),
             ToggleAction::Ignore
         );
     }
