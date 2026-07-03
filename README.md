@@ -109,8 +109,9 @@ zellij caches the grant.
 Working prototype (zellij 0.44.1): per-tab toggle, click/keyboard switching,
 plugin-local agent awareness, state/status lines, docked/sliver toggle. A
 tab without a sidebar gets one on its first `Alt /`: a one-time layout
-retrofit docks the rail and installs the swap set (nothing is spawned,
-hidden, or shown).
+retrofit docks the rail, installs the swap set, and preserves the tab's
+pane arrangement (falling back to stacking the panes when the tab's
+layout cannot be dumped).
 
 [SPEC.md](SPEC.md) carries the full validated spec, a 23-entry map of
 zellij-plugin landmines this prototype paid for, and the from-scratch v2

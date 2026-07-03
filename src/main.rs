@@ -357,20 +357,7 @@ impl Sidebar {
                 steer_swap(backwards);
             }
             ToggleAction::RegenerateSwaps { target } => self.regenerate_swaps(target),
-            ToggleAction::Retrofit => {
-                // A tab without a docked sidebar gets its layout replaced
-                // once, docking the sidebar and installing the swap set;
-                // every later toggle there is a pure swap cycle.
-                if let Some(url) = self.own_url.clone() {
-                    override_layout(
-                        LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
-                        true, // retain existing terminal panes
-                        true, // retain existing plugin panes
-                        true, // apply only to the active tab
-                        BTreeMap::new(),
-                    );
-                }
-            }
+            ToggleAction::Retrofit => self.retrofit(active_tab),
             ToggleAction::Ignore => {}
         }
     }
@@ -381,25 +368,58 @@ impl Sidebar {
     // zellij's first call re-applies the current template and the second
     // advances — the arrangement snap-folds, but the toggle still lands.
     fn regenerate_swaps(&mut self, target: DockState) {
-        // The dump blocks on a host response that only exists post-grant
-        // (like get_focused_pane_info, it panics in the shim pre-grant).
-        if !self.permissions_granted {
-            return fallback_swap_cycle();
+        let rebuilt = rebuild_target(self.permissions_granted, self.own_tab, &self.tab_states)
+            .and_then(|(tab, tab_id)| self.install_split_preserving_swaps(tab, tab_id, target));
+        if rebuilt.is_none() {
+            fallback_swap_cycle();
         }
-        let (Some(own_tab), Some(url)) = (self.own_tab, self.own_url.clone()) else {
-            return fallback_swap_cycle();
-        };
-        let Some(tab_id) = self.tab_states.get(&own_tab).map(|state| state.id) else {
-            return fallback_swap_cycle();
-        };
+    }
+
+    // Docks the sidebar into the active tab, which has none: rebuild the
+    // tab's swap set around its dumped arrangement — the override's base
+    // spawns the rail — and steer to docked once the override reports in,
+    // so the tab arrives with its splits intact. When the rebuild cannot
+    // run, the absorb override docks the rail alone: its base stacks the
+    // tab's panes, which is already the docked geometry, so no steer is
+    // needed. Every later toggle on the tab is a pure swap cycle.
+    fn retrofit(&mut self, active_tab: Option<usize>) {
+        let installed = rebuild_target(self.permissions_granted, active_tab, &self.tab_states)
+            .and_then(|(tab, tab_id)| {
+                self.install_split_preserving_swaps(tab, tab_id, DockState::Docked)
+            });
+        if installed.is_none() {
+            self.absorb_retrofit();
+        }
+    }
+
+    fn absorb_retrofit(&mut self) {
+        if let Some(url) = self.own_url.clone() {
+            override_layout(
+                LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
+                true, // retain existing terminal panes
+                true, // retain existing plugin panes
+                true, // apply only to the active tab
+                BTreeMap::new(),
+            );
+        }
+    }
+
+    // The shared dump → transform → override machinery behind regenerate
+    // and retrofit: rebuild the tab's swap set around its dumped
+    // arrangement and record the steer that completes the toggle once
+    // TabUpdate reports the new set installed. None means nothing was
+    // overridden and the caller runs its own degraded path.
+    fn install_split_preserving_swaps(
+        &mut self,
+        tab: usize,
+        tab_id: usize,
+        target: DockState,
+    ) -> Option<()> {
+        let url = self.own_url.clone()?;
         // In-band errors and a 1s server-side timeout; a stale tab id dumps
         // no tab node and fails the rebuild below.
-        let Ok((dump, _metadata)) = dump_session_layout_for_tab(tab_id) else {
-            return fallback_swap_cycle();
-        };
-        let Ok(layout) = split_preserving_layout_kdl(&dump, &url, &self.config) else {
-            return fallback_swap_cycle();
-        };
+        let (dump, _metadata) = dump_session_layout_for_tab(tab_id).ok()?;
+        let layout = split_preserving_layout_kdl(&dump, &url, &self.config).ok()?;
         override_layout(
             LayoutInfo::Stringified(layout),
             true, // retain existing terminal panes
@@ -409,13 +429,10 @@ impl Sidebar {
         );
         // The override leaves the tab at BASE (the absorb stack), though
         // not necessarily clean — a landed override was observed live
-        // still flagged dirty. From BASE, docked sits one step forward and
-        // undocked one step back (previous wraps position 0 to the list
-        // end). The press fires on the TabUpdate that reports BASE.
-        self.pending_steer = Some(PendingSteer {
-            tab: own_tab,
-            backwards: target == DockState::Undocked,
-        });
+        // still flagged dirty. The press fires on the TabUpdate that
+        // reports BASE.
+        self.pending_steer = Some(pending_steer_from_base(tab, target));
+        Some(())
     }
 
     // Returns whether any row's agent fields changed (i.e. a render is due).
@@ -504,6 +521,38 @@ fn decide_toggle(
     }
 }
 
+// Whether a split-preserving swap rebuild can run against a tab, and the
+// server tab id to dump from if so. The dump host call blocks on a
+// response that only exists post-grant (it panics in the shim pre-grant),
+// and it speaks the server's stable tab id, which only the
+// TabUpdate-derived states can translate a display position into. None:
+// the rebuild cannot run and the caller degrades.
+fn rebuild_target(
+    permissions_granted: bool,
+    tab: Option<usize>,
+    tab_states: &BTreeMap<usize, TabState>,
+) -> Option<(usize, usize)> {
+    if !permissions_granted {
+        return None;
+    }
+    let tab = tab?;
+    let id = tab_states.get(&tab)?.id;
+    Some((tab, id))
+}
+
+// The steer recorded alongside a swap-set override. A landed override
+// leaves the tab at BASE, position 0 of [BASE, docked, undocked]: docked
+// sits one plain forward increment away at position 1, and undocked one
+// step back — previous wraps position 0 to the list end. Both moves are
+// deterministic; only forward past the end of the list is unreliable
+// (swap_layouts.rs progress_layout!).
+fn pending_steer_from_base(tab: usize, target: DockState) -> PendingSteer {
+    PendingSteer {
+        tab,
+        backwards: target == DockState::Undocked,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SteerDisposition {
     Fire,
@@ -589,12 +638,13 @@ fn should_hand_back_focus(own_focused: bool, nav_mode: bool, has_focus_target: b
     own_focused && !nav_mode && has_focus_target
 }
 
-// One-time override for a tab without a sidebar: a full replacement layout
-// that docks the sidebar and installs the docked/undocked swap set. It must
-// carry the tab-bar/status-bar chrome and a stacked main that absorbs the
-// existing panes — override_layout replaces the whole tab, and anything the
-// KDL omits is dropped. The tab node stays unnamed so the user's tab name
-// survives the override.
+// The absorb override for a tab without a sidebar, used when the
+// split-preserving rebuild cannot run: a full replacement layout that docks
+// the sidebar and installs the docked/undocked swap set, stacking the tab's
+// panes. It must carry the tab-bar/status-bar chrome and a stacked main
+// that absorbs the existing panes — override_layout replaces the whole tab,
+// and anything the KDL omits is dropped. The tab node stays unnamed so the
+// user's tab name survives the override.
 fn retrofit_layout_kdl(plugin_url: &str, config: &BTreeMap<String, String>) -> String {
     let tab_body = |sidebar_cols: usize| {
         format!(
@@ -1491,6 +1541,49 @@ mod tests {
     }
 
     #[test]
+    fn rebuild_targets_a_tab_by_server_id_only_when_dumpable() {
+        // The dump host call is only safe post-grant, and it speaks the
+        // server's stable tab id — not the display position the rest of
+        // the plugin uses. A position TabUpdate has not reported has no
+        // id to dump.
+        let mut tab_states = BTreeMap::new();
+        tab_states.insert(
+            5,
+            TabState {
+                id: 42,
+                ..Default::default()
+            },
+        );
+        assert_eq!(rebuild_target(true, Some(5), &tab_states), Some((5, 42)));
+        assert_eq!(rebuild_target(false, Some(5), &tab_states), None);
+        assert_eq!(rebuild_target(true, Some(6), &tab_states), None);
+        assert_eq!(rebuild_target(true, None, &tab_states), None);
+    }
+
+    #[test]
+    fn steer_from_base_moves_forward_to_docked_and_back_to_undocked() {
+        // A landed override leaves the tab at BASE (position 0 of
+        // [BASE, docked, undocked]). Docked is a plain forward increment
+        // to position 1; undocked is one step back, wrapping position 0
+        // to the list end. Both are the deterministic moves — only
+        // forward past the end of the list is unreliable.
+        assert_eq!(
+            pending_steer_from_base(5, DockState::Docked),
+            PendingSteer {
+                tab: 5,
+                backwards: false,
+            }
+        );
+        assert_eq!(
+            pending_steer_from_base(5, DockState::Undocked),
+            PendingSteer {
+                tab: 5,
+                backwards: true,
+            }
+        );
+    }
+
+    #[test]
     fn tab_update_fires_the_pending_steer_once_the_override_lands() {
         let mut sidebar = Sidebar::default();
         sidebar.pending_steer = Some(PendingSteer {
@@ -1978,6 +2071,50 @@ mod tests {
         assert_eq!(kdl.matches("cwd=\"/a\"").count(), 2);
         assert_eq!(kdl.matches("expanded=true").count(), 2);
         assert!(!kdl.contains("pane borderless=true"));
+    }
+
+    #[test]
+    fn status_bar_absorbed_into_a_stack_is_reemitted_as_the_bottom_row() {
+        // Observed live on a hand-split tab after an absorb: the status-bar
+        // seated INSIDE the stack as its last pane, with no tab-level
+        // bottom row and the tab-bar row intact. A rebuild dump arrives
+        // with that damage and must leave it repaired: exactly one
+        // canonical status-bar row per tab body, and the stack keeps only
+        // the user panes.
+        let dump = r#"layout {
+    tab name="Tab #2" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane stacked=true {
+            pane cwd="/a"
+            pane cwd="/b"
+            pane cwd="/c"
+            pane cwd="/d" expanded=true
+            pane borderless=true {
+                plugin location="zellij:status-bar"
+            }
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/x.wasm", &jit_config()).unwrap();
+        let status_bar_row =
+            "pane size=1 borderless=true {\nplugin location=\"zellij:status-bar\"\n}\n";
+        let tab_bar_row = "pane size=1 borderless=true {\nplugin location=\"zellij:tab-bar\"\n}\n";
+        assert_eq!(kdl.matches(status_bar_row).count(), 3);
+        assert_eq!(kdl.matches("zellij:status-bar").count(), 3);
+        assert_eq!(kdl.matches(tab_bar_row).count(), 3);
+        assert_eq!(kdl.matches("zellij:tab-bar").count(), 3);
+        // The stack survives with its four user panes and nothing else
+        // (plus the base's absorb stack); its status-bar seat is gone.
+        assert_eq!(kdl.matches("pane stacked=true").count(), 3);
+        assert_eq!(kdl.matches("cwd=\"/a\"").count(), 2);
+        assert_eq!(kdl.matches("cwd=\"/d\" expanded=true").count(), 2);
+        assert!(!kdl.contains("pane borderless=true {"));
+        // Chrome frames the user region: tab-bar above, status-bar below.
+        assert!(kdl.find("zellij:tab-bar").unwrap() < kdl.find("cwd=\"/a\"").unwrap());
+        assert!(kdl.find("cwd=\"/a\"").unwrap() < kdl.find("zellij:status-bar").unwrap());
     }
 
     #[test]

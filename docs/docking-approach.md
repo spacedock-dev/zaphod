@@ -496,9 +496,21 @@ clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
   equal until any tab is closed or moved. The plugin records
   `TabInfo.tab_id` per position from `TabUpdate` and translates in both
   directions; a stale id fails safe (the dump returns no tab node → fallback).
-- **Retrofit unchanged.** Floating residents and sidebar-less tabs keep the
-  v2 retrofit; its KDL keeps the `stacked { children }` main (proven three
-  times — do not change).
+- **Retrofit = the same rebuild, aimed at the active tab.** Floating
+  residents and sidebar-less tabs run the identical dump → transform →
+  override → deferred-steer machinery against the *active* tab (its server
+  id translated from the TabUpdate states): the override's base spawns the
+  rail while absorbing the tab's panes, and the deferred press steers
+  forward from BASE to docked — a plain position 0→1 increment, never the
+  flaky next-past-end zone — so the tab arrives docked with its splits
+  intact. Chrome an earlier absorb ate (status-bar inside the stack,
+  observed live) arrives in the dump and leaves repaired: the transform
+  extracts chrome from wherever the dump seats it and re-emits canonical
+  rows. When the rebuild cannot run — permission not granted, no tab id,
+  dump or transform error — the v2 absorb override runs instead, with no
+  steer: its base lands directly on the docked geometry (the arrangement
+  stacks, the toggle still docks). The absorb KDL keeps the
+  `stacked { children }` main (proven three times — do not change).
 
 **Open anomaly (unresolved, 2026-07-03).** CLI
 `override-layout --apply-only-to-active-tab` silently **no-oped twice** on
