@@ -269,6 +269,27 @@ these as laws.
     and the plugin host-call override has always worked. Conditions not
     understood; live validation of anything override-based must watch for
     this failure class.
+34. **A crashed instance stays in the `PaneManifest` and can eat an elected
+    role forever.** `decide_toggle`'s session-wide election for a
+    sidebar-less tab picks the lowest pane id across every
+    `SidebarInstance` the manifest reports (`src/main.rs`, the
+    `instances.iter().all(|i| i.pane_id >= own_pane_id)` branch); a wasm
+    panic halts the instance's event loop but does not remove its pane from
+    the manifest, so a crashed instance holding the session's lowest pane id
+    permanently wins every election while never acting on it. Observed
+    live: one tab's tiled rail crashed, and every sidebar-less tab across
+    the session went dead to the toggle — both the keybind and a clean CLI
+    pipe — while tabs that already had a live resident were unaffected
+    (they short-circuit before reaching the election). No event or manifest
+    field distinguishes "crashed" from "alive but momentarily quiet" —
+    there is no plugin-side liveness signal, only the pane's continued
+    presence — so `decide_toggle` cannot detect this case from its current
+    inputs without inventing a heuristic (e.g. staleness timers) fragile
+    enough to misfire on a merely slow instance. This is one instance of a
+    broader upstream limitation class: nothing signals plugin crash/reload
+    to other plugins or to the manifest. Recovery is manual: close the
+    crashed pane (or restart the session) to drop it from the manifest and
+    let the next-lowest live instance win the election.
 
 ## If building v2 from scratch
 

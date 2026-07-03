@@ -32,6 +32,7 @@ struct Sidebar {
     own_floating: bool,
     instances: Vec<SidebarInstance>,
     pending_steer: Option<PendingSteer>,
+    close_requested: bool,
 }
 
 // A swap step recorded by regenerate_swaps and deferred until TabUpdate
@@ -217,8 +218,12 @@ impl ZellijPlugin for Sidebar {
                 // A retrofit that installed a tiled rail leaves this
                 // floating bootstrap instance behind as an invisible
                 // pipe-eating zombie; it closes itself (fire-and-forget,
-                // no permission gate on CloseSelf).
-                if is_stray_floating_bootstrap(self.own_floating, self.own_tab, &self.instances) {
+                // no permission gate on CloseSelf). close_self does not
+                // remove the pane from the very next manifest snapshot, so
+                // the flag makes the call one-shot rather than re-firing on
+                // every PaneUpdate until the manifest catches up.
+                if should_close_self(self.close_requested, self.own_floating, self.own_tab, &self.instances) {
+                    self.close_requested = true;
                     close_self();
                     return false;
                 }
@@ -515,7 +520,19 @@ fn decide_toggle(
     } else if instances.iter().any(|i| i.tab == active) {
         ToggleAction::Ignore
     } else if instances.iter().all(|i| i.pane_id >= own_pane_id) {
-        ToggleAction::Retrofit
+        // The manifest shows no instance in the active tab at all, but
+        // PaneUpdate can lag TabUpdate — a swap name already ours means the
+        // tab has, or very recently had, an installed rail (an earlier
+        // retrofit, or an instance that crashed/closed there). Retrofit is
+        // a full-tab override; firing it on a tab that already carries our
+        // swap set is the corruption seeder, so the election steers the
+        // existing set instead.
+        match active_swap_name {
+            Some("docked") | Some("undocked") => ToggleAction::SteerSwap {
+                backwards: active_swap_name != Some("docked"),
+            },
+            _ => ToggleAction::Retrofit,
+        }
     } else {
         ToggleAction::Ignore
     }
@@ -631,6 +648,19 @@ fn is_stray_floating_bootstrap(
     own_floating && instances.iter().any(|i| i.tab == tab && !i.floating)
 }
 
+// Gates close_self to one call per instance lifetime: the manifest can still
+// show the stray-floater shape on the PaneUpdate right after the call, since
+// the host has not yet dropped the pane, and a second close_self would fire
+// on every such snapshot until it does.
+fn should_close_self(
+    already_requested: bool,
+    own_floating: bool,
+    own_tab: Option<usize>,
+    instances: &[SidebarInstance],
+) -> bool {
+    !already_requested && is_stray_floating_bootstrap(own_floating, own_tab, instances)
+}
+
 // Handing focus back with nowhere to send it panics the server in the
 // session-birth window (get_active_pane_id unwraps None); only bounce when
 // the manifest shows another selectable pane in our tab.
@@ -715,10 +745,15 @@ fn split_preserving_layout_kdl(
         .map(|block| {
             block
                 .iter()
-                .map(|line| remove_prop(&remove_prop(line, "focus"), "name"))
+                .map(|line| {
+                    remove_prop(
+                        &remove_prop(&remove_prop(line, "focus"), "name"),
+                        "borderless",
+                    )
+                })
                 .collect()
         })
-        .filter_map(|block| extract_chrome_panes(block, &mut chrome))
+        .filter_map(|block| extract_chrome_panes(block, plugin_url, &mut chrome))
         .collect();
     if region.is_empty() {
         return Err("dumped tab has no panes besides chrome".to_owned());
@@ -807,19 +842,32 @@ fn top_level_blocks(body: &[String]) -> Vec<Vec<String>> {
     blocks
 }
 
-// Removes every built-in `zellij:*` plugin pane from a dumped pane block,
-// wherever zellij's absorb seated it, recording each removed plugin
-// location. A container emptied by the removal is dropped with it; a
-// container left with a single child is replaced by that child, which
-// takes over the container's slot.
-fn extract_chrome_panes(block: Vec<String>, removed: &mut Vec<String>) -> Option<Vec<String>> {
+// Removes every built-in `zellij:*` plugin pane and every copy of the
+// sidebar's own rail from a dumped pane block, wherever zellij's absorb
+// seated them, recording each removed chrome location (rail copies are
+// dropped without recording: rail_pane_kdl always contributes the
+// canonical slot, so a dumped copy is never re-emitted). A container
+// emptied by the removal is dropped with it; a container left with a
+// single child is replaced by that child, which takes over the
+// container's slot. A pane wrapping a third-party plugin is left intact.
+fn extract_chrome_panes(
+    block: Vec<String>,
+    own_plugin_url: &str,
+    removed: &mut Vec<String>,
+) -> Option<Vec<String>> {
     if block.len() < 2 {
         return Some(block);
     }
     let children = top_level_blocks(&block[1..block.len() - 1]);
-    if let Some(location) = children.iter().find_map(|child| zellij_plugin_location(child)) {
-        removed.push(location);
-        return None;
+    if let Some(location) = children.iter().find_map(|child| plugin_location(child)) {
+        return match classify_plugin_location(&location, own_plugin_url) {
+            PluginRole::Chrome => {
+                removed.push(location);
+                None
+            }
+            PluginRole::Rail => None,
+            PluginRole::ThirdParty => Some(block),
+        };
     }
     if children.is_empty() {
         return Some(block);
@@ -827,7 +875,7 @@ fn extract_chrome_panes(block: Vec<String>, removed: &mut Vec<String>) -> Option
     let child_count = children.len();
     let kept: Vec<Vec<String>> = children
         .into_iter()
-        .filter_map(|child| extract_chrome_panes(child, removed))
+        .filter_map(|child| extract_chrome_panes(child, own_plugin_url, removed))
         .collect();
     if kept.is_empty() {
         return None;
@@ -843,8 +891,9 @@ fn extract_chrome_panes(block: Vec<String>, removed: &mut Vec<String>) -> Option
     Some(rebuilt)
 }
 
-// The location of a built-in `zellij:*` plugin node, when the block is one.
-fn zellij_plugin_location(block: &[String]) -> Option<String> {
+// The location of a plugin node, when the block is one directly (its first
+// line is a bare `plugin location="..."` node, not a pane wrapping one).
+fn plugin_location(block: &[String]) -> Option<String> {
     let first = block.first()?;
     let trimmed = first.trim_start();
     if trimmed != "plugin" && !trimmed.starts_with("plugin ") {
@@ -852,7 +901,33 @@ fn zellij_plugin_location(block: &[String]) -> Option<String> {
     }
     let token = prop_token(first, "location")?;
     let location = token.strip_prefix("location=\"")?.strip_suffix('"')?;
-    location.starts_with("zellij:").then(|| location.to_owned())
+    Some(location.to_owned())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PluginRole {
+    // A zellij built-in (tab-bar/status-bar): extracted and re-emitted as a
+    // canonical chrome row.
+    Chrome,
+    // A copy of the sidebar's own rail, wherever it landed in the region:
+    // dropped outright, since rail_pane_kdl always supplies the canonical
+    // slot.
+    Rail,
+    // Some other plugin the user placed: not ours to remove.
+    ThirdParty,
+}
+
+// A defensive substring match backs up the exact-URL check: a rail built
+// from a different path or an older/newer configuration (same plugin,
+// different identity string) must still be recognized.
+fn classify_plugin_location(location: &str, own_plugin_url: &str) -> PluginRole {
+    if location.starts_with("zellij:") {
+        PluginRole::Chrome
+    } else if location == own_plugin_url || location.contains("zellij-sidebar") {
+        PluginRole::Rail
+    } else {
+        PluginRole::ThirdParty
+    }
 }
 
 // Rewrites a hoisted child's header to occupy its old container's slot:
@@ -1462,6 +1537,37 @@ mod tests {
     }
 
     #[test]
+    fn remote_election_steers_a_tab_that_already_carries_our_swap_names() {
+        // Manifest lag: TabUpdate can report a tab's swap name (docked or
+        // undocked) before PaneUpdate reflects an instance living there
+        // again (or after one crashed/closed there) — the session-wide
+        // election then sees no instance in that tab and would elect a
+        // Retrofit. A tab already flying one of our swap names has, or very
+        // recently had, an installed rail; overriding it fresh is the
+        // corruption seeder (a full replacement of the tab's arrangement).
+        // Steering is always safe once a swap name is confirmed ours.
+        let instances = [inst(7, 2, false)];
+        assert_eq!(
+            decide_toggle(Some(2), false, Some(5), Some("docked"), false, 7, &instances),
+            ToggleAction::SteerSwap { backwards: false }
+        );
+        assert_eq!(
+            decide_toggle(Some(2), false, Some(5), Some("undocked"), false, 7, &instances),
+            ToggleAction::SteerSwap { backwards: true }
+        );
+        // BASE, a foreign name, or no name at all: no rail is confirmed
+        // installed there, so the election still retrofits.
+        assert_eq!(
+            decide_toggle(Some(2), false, Some(5), Some("BASE"), false, 7, &instances),
+            ToggleAction::Retrofit
+        );
+        assert_eq!(
+            decide_toggle(Some(2), false, Some(5), None, false, 7, &instances),
+            ToggleAction::Retrofit
+        );
+    }
+
+    #[test]
     fn tab_update_records_swap_state_per_tab() {
         let mut sidebar = Sidebar::default();
         sidebar.update(Event::TabUpdate(vec![
@@ -1649,6 +1755,38 @@ mod tests {
         ));
         // Transient manifest without an own tab yet: never fire.
         assert!(!is_stray_floating_bootstrap(true, None, &[inst(9, 1, false)]));
+    }
+
+    #[test]
+    fn close_self_fires_only_once_per_instance_lifetime() {
+        // close_self does not remove the pane from the very next manifest
+        // snapshot the plugin sees (observed live: one instance logged four
+        // "Bye" lines), so is_stray_floating_bootstrap can still read true
+        // afterward; a fired flag must suppress every call after the first.
+        let instances = [inst(7, 1, true), inst(9, 1, false)];
+        assert!(should_close_self(false, true, Some(1), &instances));
+        assert!(!should_close_self(true, true, Some(1), &instances));
+        // A one-shot never re-arms, even once the manifest catches up and
+        // the underlying condition reads false again.
+        assert!(!should_close_self(true, false, Some(1), &[inst(9, 1, false)]));
+    }
+
+    #[test]
+    fn stray_floater_sets_the_close_requested_flag_once() {
+        let mut sidebar = Sidebar::default();
+        sidebar.plugin_id = 7;
+        let m = manifest(vec![(
+            1,
+            vec![sidebar_pane(7, true), sidebar_pane(9, false)],
+        )]);
+        assert!(!sidebar.close_requested);
+        sidebar.update(Event::PaneUpdate(m.clone()));
+        assert!(sidebar.close_requested);
+        // A second PaneUpdate with the same stray shape (the pane has not
+        // been dropped from the manifest yet) must not panic or re-fire —
+        // the flag alone gates it.
+        sidebar.update(Event::PaneUpdate(m));
+        assert!(sidebar.close_requested);
     }
 
     #[test]
@@ -2149,6 +2287,83 @@ mod tests {
         assert!(!kdl.contains("size=\"70%\""));
     }
 
+    // The docked tab body of a generated layout, sliced from the marker
+    // onward and parsed with extract_tab_body itself — the swap's inner
+    // content is a `tab { ... }` node, the same shape extract_tab_body
+    // expects from a real dump.
+    fn docked_tab_body(kdl: &str) -> Vec<String> {
+        let idx = kdl
+            .find("swap_tiled_layout name=\"docked\"")
+            .expect("docked swap present");
+        extract_tab_body(&kdl[idx..]).expect("docked swap wraps a tab node")
+    }
+
+    fn normalize(lines: &[String]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| line.trim().to_owned())
+            .filter(|line| !line.is_empty())
+            .collect()
+    }
+
+    #[test]
+    fn regenerating_from_the_transforms_own_output_is_a_fixed_point() {
+        // A tab wearing the transform's own output can be dumped and
+        // rebuilt again mid-session — a later toggle, or a remote election
+        // (F4) retrofitting a tab that already carries another instance's
+        // rail. The dump then shows exactly the E1/E2 costumed shape: a
+        // genuine rail pane plus shells wearing rail-like borderless/size
+        // dressing from earlier regenerations. Regenerating from that shape
+        // must reproduce the same docked body — any accretion here
+        // compounds on every toggle.
+        let dump = r#"layout {
+    tab name="Tab #3" focus=true hide_floating_panes=true {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane size=28 borderless=true name="sidebar" {
+                plugin location="file:/tmp/zellij-sidebar.wasm" {
+                    rail "1"
+                }
+            }
+            pane size=28 borderless=true {
+                pane cwd="/a" size="33%"
+                pane borderless=true cwd="/b" size="33%"
+                pane borderless=true cwd="/c" size="34%"
+            }
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let url = "file:/tmp/zellij-sidebar.wasm";
+        let config = jit_config();
+        let first = split_preserving_layout_kdl(dump, url, &config).unwrap();
+        let docked1 = docked_tab_body(&first);
+
+        // Exactly one rail slot, and only chrome/rail borderless, in the
+        // first generation already.
+        assert_eq!(docked1.iter().filter(|l| l.contains(url)).count(), 1);
+        assert_eq!(
+            docked1.iter().filter(|l| l.contains("borderless")).count(),
+            3 // tab-bar + rail + status-bar
+        );
+
+        let redump = format!("layout {{\n tab {{\n{}\n }}\n}}\n", docked1.join("\n"));
+        let second = split_preserving_layout_kdl(&redump, url, &config).unwrap();
+        let docked2 = docked_tab_body(&second);
+
+        assert_eq!(docked2.iter().filter(|l| l.contains(url)).count(), 1);
+        assert_eq!(
+            docked2.iter().filter(|l| l.contains("borderless")).count(),
+            3
+        );
+        assert_eq!(normalize(&docked1), normalize(&docked2));
+    }
+
     #[test]
     fn chromeless_tabs_regenerate_without_inventing_chrome() {
         // Swaps must carry exactly the chrome the tab actually has — adding
@@ -2164,6 +2379,141 @@ mod tests {
         let kdl = split_preserving_layout_kdl(dump, "file:/x.wasm", &jit_config()).unwrap();
         assert!(!kdl.contains("zellij:"));
         assert_eq!(kdl.matches("cwd=\"/only\"").count(), 2);
+    }
+
+    #[test]
+    fn stray_rail_pane_in_the_region_is_dropped_not_reemitted() {
+        // A prior retrofit's rail can ride along in the dump as a genuine
+        // plugin pane (not just borderless dressing) — e.g. seated in a
+        // sibling's slot after an absorb. rail_pane_kdl always contributes
+        // the canonical slot, so any copy found in the region must be
+        // dropped outright, not folded in as a second sidebar pane.
+        let dump = r#"layout {
+    tab name="Tab #1" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane size=28 borderless=true name="sidebar" {
+                plugin location="file:/tmp/zellij-sidebar.wasm" {
+                    rail "1"
+                }
+            }
+            pane cwd="/a" size="72%"
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/tmp/zellij-sidebar.wasm", &jit_config())
+            .unwrap();
+        // Exactly one rail slot per tab body (docked, undocked, base) —
+        // contributed solely by rail_pane_kdl.
+        assert_eq!(
+            kdl.matches("plugin location=\"file:/tmp/zellij-sidebar.wasm\"")
+                .count(),
+            3
+        );
+        assert_eq!(kdl.matches("rail \"1\"").count(), 3);
+        assert_eq!(kdl.matches("cwd=\"/a\"").count(), 2);
+    }
+
+    #[test]
+    fn stray_rail_is_recognized_defensively_by_location_substring() {
+        // The exact-URL match cannot be the only net: a differently
+        // configured or differently pathed copy of the sidebar plugin must
+        // still be recognized and dropped.
+        let dump = r#"layout {
+    tab name="t" {
+        pane split_direction="vertical" {
+            pane size=28 borderless=true {
+                plugin location="file:/other/path/zellij-sidebar.wasm" {
+                    rail "2"
+                }
+            }
+            pane cwd="/shell"
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/tmp/zellij-sidebar.wasm", &jit_config())
+            .unwrap();
+        assert!(!kdl.contains("/other/path/zellij-sidebar.wasm"));
+        assert!(!kdl.contains("rail \"2\""));
+        assert_eq!(
+            kdl.matches("plugin location=\"file:/tmp/zellij-sidebar.wasm\"")
+                .count(),
+            3
+        );
+        assert_eq!(kdl.matches("cwd=\"/shell\"").count(), 2);
+    }
+
+    #[test]
+    fn third_party_plugin_pane_survives_extraction() {
+        // A user's non-builtin, non-sidebar plugin pane must ride along into
+        // both swaps: dropping it would delete the pane from the swap story
+        // (swaps never spawn) and orphan it on application.
+        let dump = r#"layout {
+    tab name="t" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane cwd="/shell" size="60%"
+        pane size="40%" {
+            plugin location="file:/other/statusdeck.wasm"
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/tmp/zellij-sidebar.wasm", &jit_config())
+            .unwrap();
+        assert_eq!(
+            kdl.matches("plugin location=\"file:/other/statusdeck.wasm\"")
+                .count(),
+            2
+        );
+        assert_eq!(kdl.matches("cwd=\"/shell\"").count(), 2);
+    }
+
+    #[test]
+    fn borderless_costume_is_stripped_from_region_panes() {
+        // Observed live: repeated toggles left ordinary shells and
+        // containers costumed with borderless=true from a stale rail slot.
+        // User panes are never borderless; the only rows that legitimately
+        // carry it are chrome and the rail, and those are regenerated from
+        // scratch regardless of what the dump says. Sizes are left intact:
+        // guessing them wrong corrupts real layouts, while a stray fixed
+        // size is merely ugly and user-correctable.
+        let dump = r#"layout {
+    tab name="Tab #3" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane cwd="/a" size="50%" borderless=true
+        pane size="50%" borderless=true {
+            pane cwd="/b" size="60%"
+            pane cwd="/c" size="40%" borderless=true
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/x.wasm", &jit_config()).unwrap();
+        // Sizes survive untouched at every level; only borderless is gone.
+        assert_eq!(kdl.matches("cwd=\"/a\" size=\"50%\"").count(), 2);
+        assert_eq!(kdl.matches("pane size=\"50%\" {").count(), 2);
+        assert_eq!(kdl.matches("cwd=\"/b\" size=\"60%\"").count(), 2);
+        assert_eq!(kdl.matches("cwd=\"/c\" size=\"40%\"").count(), 2);
+        // Only the canonical chrome (2 rows) and rail (1 row) per tab body
+        // carry borderless — none of it belongs to the region.
+        assert_eq!(kdl.matches("borderless=true").count(), 9);
     }
 
     #[test]
