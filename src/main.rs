@@ -2,6 +2,7 @@
 // ABOUTME: last terminal line; Alt-/ flips it between a docked rail and a 1-col sliver.
 
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 use zellij_tile::prelude::*;
 
 mod agent;
@@ -10,6 +11,11 @@ const STATUS_POLL_SECS: f64 = 2.0;
 // Sidebar widths in the two swap-layout states (mirrors layouts/zaphod.kdl).
 const DOCKED_COLS: usize = 28;
 const UNDOCKED_COLS: usize = 1;
+// How long after a deferred steer fires that repeat presses for its tab are
+// still swallowed: the steered collapse becomes visible a beat after the
+// steer itself, and a press inside that gap would instantly undo the toggle
+// the user is still watching land.
+const TOGGLE_COOLDOWN: Duration = Duration::from_millis(600);
 
 #[derive(Default)]
 struct Sidebar {
@@ -33,6 +39,14 @@ struct Sidebar {
     instances: Vec<SidebarInstance>,
     pending_steer: Option<PendingSteer>,
     close_requested: bool,
+    // The tab whose deferred steer last fired, and when: repeat presses for
+    // it inside TOGGLE_COOLDOWN are swallowed as bounce.
+    toggle_cooldown: Option<(usize, Instant)>,
+    // A toggle pipe that reached this instance before any manifest named it
+    // (the keybind's launch-if-missing pipes the just-launched instance
+    // immediately): the press waits for the first PaneUpdate that fills
+    // own_url/own_tab and fires exactly once.
+    pending_bootstrap_toggle: bool,
 }
 
 // A swap step recorded by regenerate_swaps and deferred until TabUpdate
@@ -184,6 +198,7 @@ impl ZellijPlugin for Sidebar {
                     {
                         SteerDisposition::Fire => {
                             self.pending_steer = None;
+                            self.toggle_cooldown = Some((pending.tab, Instant::now()));
                             steer_swap(pending.backwards);
                         }
                         SteerDisposition::Drop => self.pending_steer = None,
@@ -227,6 +242,16 @@ impl ZellijPlugin for Sidebar {
                     close_self();
                     return false;
                 }
+                if should_fire_bootstrap_toggle(
+                    self.pending_bootstrap_toggle,
+                    &self.own_url,
+                    self.own_tab,
+                    self.active_tab,
+                ) {
+                    // Consumed exactly once; perform_toggle never re-arms it.
+                    self.pending_bootstrap_toggle = false;
+                    self.perform_toggle();
+                }
                 // PaneUpdate fires constantly in agent-heavy tabs; re-rendering
                 // a pinned overlay on every one makes the underlying panes
                 // flicker. Only render when the derived view changed.
@@ -259,6 +284,14 @@ impl ZellijPlugin for Sidebar {
             return false;
         }
         if pipe_message.name != "toggle" {
+            return false;
+        }
+        // The keybind's launch-if-missing races its own pipe: the toggle
+        // that launched this instance can arrive before the first PaneUpdate
+        // names it, when every decision input is still unknown. Park the
+        // press; the manifest fires it.
+        if !own_pane_known(&self.own_url, self.own_tab) {
+            self.pending_bootstrap_toggle = true;
             return false;
         }
         self.perform_toggle();
@@ -341,9 +374,17 @@ impl Sidebar {
     }
 
     fn perform_toggle(&mut self) {
-        // A fresh press supersedes any steer still waiting on an override.
-        self.pending_steer = None;
         let active_tab = self.current_active_tab();
+        if should_swallow_toggle(
+            active_tab,
+            self.pending_steer,
+            self.toggle_cooldown,
+            Instant::now(),
+        ) {
+            return;
+        }
+        // A press that is not the parked steer's own bounce supersedes it.
+        self.pending_steer = None;
         let active_state = active_tab.and_then(|tab| self.tab_states.get(&tab));
         let active_swap_name = active_state.and_then(|state| state.swap_name.clone());
         let active_swap_dirty = active_state.is_some_and(|state| state.swap_dirty);
@@ -393,11 +434,11 @@ impl Sidebar {
                 self.install_split_preserving_swaps(tab, tab_id, DockState::Docked)
             });
         if installed.is_none() {
-            self.absorb_retrofit();
+            self.absorb_retrofit(active_tab);
         }
     }
 
-    fn absorb_retrofit(&mut self) {
+    fn absorb_retrofit(&mut self, active_tab: Option<usize>) {
         if let Some(url) = self.own_url.clone() {
             override_layout(
                 LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
@@ -406,6 +447,13 @@ impl Sidebar {
                 true, // apply only to the active tab
                 BTreeMap::new(),
             );
+            // This override records no PendingSteer (its base is already the
+            // docked geometry), so it arms the repeat-press cooldown itself:
+            // its visible docking lags the issue like the JIT pipeline's
+            // steer does.
+            if let Some(tab) = active_tab {
+                self.toggle_cooldown = Some((tab, Instant::now()));
+            }
         }
     }
 
@@ -601,6 +649,47 @@ fn pending_steer_disposition(
             None => SteerDisposition::Keep,
         },
     }
+}
+
+// Whether any manifest has named this instance yet: pre-manifest, own_url
+// and own_tab are unknown and no toggle decision can be made.
+fn own_pane_known(own_url: &Option<String>, own_tab: Option<usize>) -> bool {
+    own_url.is_some() && own_tab.is_some()
+}
+
+// A parked bootstrap press fires on the first manifest that names this
+// instance — but only once the active tab is also known, since
+// decide_toggle ignores a press without one and the parked press would die
+// the same way the piped one did. The caller consumes the press on fire.
+fn should_fire_bootstrap_toggle(
+    parked: bool,
+    own_url: &Option<String>,
+    own_tab: Option<usize>,
+    active_tab: Option<usize>,
+) -> bool {
+    parked && own_pane_known(own_url, own_tab) && active_tab.is_some()
+}
+
+// A toggle press bounces when it repeats into the same tab's JIT window:
+// the pipeline (dump → override → deferred steer) makes its collapse
+// visible only a beat after the press, so a quick second press reads the
+// tab as needing another toggle and undoes the one still landing. Swallow
+// a press for the tab whose steer is still parked, and for the tab whose
+// steer fired less than TOGGLE_COOLDOWN ago; a press for any other tab is
+// a fresh intent.
+fn should_swallow_toggle(
+    active_tab: Option<usize>,
+    pending_steer: Option<PendingSteer>,
+    cooldown: Option<(usize, Instant)>,
+    now: Instant,
+) -> bool {
+    let Some(tab) = active_tab else {
+        return false;
+    };
+    pending_steer.is_some_and(|steer| steer.tab == tab)
+        || cooldown.is_some_and(|(cooled, fired)| {
+            cooled == tab && now.duration_since(fired) < TOGGLE_COOLDOWN
+        })
 }
 
 fn steer_swap(backwards: bool) {
@@ -1726,6 +1815,116 @@ mod tests {
     }
 
     #[test]
+    fn press_for_the_in_flight_tab_is_swallowed_others_supersede() {
+        let now = Instant::now();
+        let in_flight = Some(PendingSteer {
+            tab: 1,
+            backwards: false,
+        });
+        // Tab 1's pipeline is still waiting on its override: a repeat press
+        // there is the bounce, not a new intent.
+        assert!(should_swallow_toggle(Some(1), in_flight, None, now));
+        // A press for another tab is a fresh intent and must act.
+        assert!(!should_swallow_toggle(Some(2), in_flight, None, now));
+        // No known active tab: nothing to debounce against.
+        assert!(!should_swallow_toggle(None, in_flight, None, now));
+        // Nothing armed at all.
+        assert!(!should_swallow_toggle(Some(1), None, None, now));
+    }
+
+    #[test]
+    fn press_within_the_cooldown_window_is_swallowed() {
+        let fired = Instant::now();
+        let cooldown = Some((1, fired));
+        assert!(should_swallow_toggle(Some(1), None, cooldown, fired));
+        assert!(should_swallow_toggle(
+            Some(1),
+            None,
+            cooldown,
+            fired + TOGGLE_COOLDOWN / 2
+        ));
+        // The window closes exactly at the cooldown bound.
+        assert!(!should_swallow_toggle(
+            Some(1),
+            None,
+            cooldown,
+            fired + TOGGLE_COOLDOWN
+        ));
+        // Another tab is never held back by tab 1's cooldown.
+        assert!(!should_swallow_toggle(
+            Some(2),
+            None,
+            cooldown,
+            fired + TOGGLE_COOLDOWN / 2
+        ));
+    }
+
+    #[test]
+    fn steer_fire_arms_the_cooldown_for_its_tab() {
+        let mut sidebar = Sidebar::default();
+        sidebar.pending_steer = Some(PendingSteer {
+            tab: 1,
+            backwards: true,
+        });
+        sidebar.update(Event::TabUpdate(vec![tab_info(1, 7, true, Some("BASE"), false)]));
+        assert!(sidebar.pending_steer.is_none());
+        assert_eq!(sidebar.toggle_cooldown.map(|(tab, _)| tab), Some(1));
+
+        // A dropped press arms nothing: no collapse is about to happen.
+        let mut sidebar = Sidebar::default();
+        sidebar.pending_steer = Some(PendingSteer {
+            tab: 9,
+            backwards: false,
+        });
+        sidebar.update(Event::TabUpdate(vec![tab_info(1, 7, true, Some("BASE"), false)]));
+        assert!(sidebar.pending_steer.is_none());
+        assert!(sidebar.toggle_cooldown.is_none());
+    }
+
+    #[test]
+    fn absorb_retrofit_arms_the_cooldown_for_the_active_tab() {
+        // The absorb override records no PendingSteer, so without its own
+        // cooldown a repeat press inside its visible lag would fire a second
+        // override at the same tab.
+        let mut sidebar = Sidebar::default();
+        sidebar.plugin_id = 7;
+        sidebar.active_tab = Some(1);
+        sidebar.own_tab = Some(1);
+        sidebar.own_floating = true;
+        sidebar.own_url = Some("file:/tmp/zellij-sidebar.wasm".to_owned());
+        sidebar.instances = vec![inst(7, 1, true)];
+        sidebar.perform_toggle();
+        assert_eq!(sidebar.toggle_cooldown.map(|(tab, _)| tab), Some(1));
+
+        // Without a URL nothing is overridden: no cooldown to arm.
+        let mut sidebar = Sidebar::default();
+        sidebar.plugin_id = 7;
+        sidebar.active_tab = Some(1);
+        sidebar.own_tab = Some(1);
+        sidebar.own_floating = true;
+        sidebar.instances = vec![inst(7, 1, true)];
+        sidebar.perform_toggle();
+        assert!(sidebar.toggle_cooldown.is_none());
+    }
+
+    #[test]
+    fn repeat_press_keeps_the_in_flight_steer_armed() {
+        let mut sidebar = Sidebar::default();
+        sidebar.active_tab = Some(1);
+        let steer = PendingSteer {
+            tab: 1,
+            backwards: true,
+        };
+        sidebar.pending_steer = Some(steer);
+        sidebar.perform_toggle();
+        assert_eq!(sidebar.pending_steer, Some(steer));
+        // A press for another tab supersedes the parked steer.
+        sidebar.active_tab = Some(2);
+        sidebar.perform_toggle();
+        assert!(sidebar.pending_steer.is_none());
+    }
+
+    #[test]
     fn floating_instance_closes_once_its_tab_holds_a_tiled_sidebar() {
         // After a retrofit installs a tiled rail, the floating bootstrap
         // actor lingers as an invisible config-matched zombie that keeps
@@ -1917,6 +2116,80 @@ mod tests {
         bystander.active_tab = Some(1);
         assert!(!bystander.pipe(navigate()));
         assert!(!bystander.nav_mode);
+    }
+
+    fn toggle() -> PipeMessage {
+        PipeMessage {
+            source: PipeSource::Keybind,
+            name: "toggle".to_owned(),
+            payload: None,
+            args: BTreeMap::new(),
+            is_private: false,
+        }
+    }
+
+    #[test]
+    fn toggle_pipe_before_the_first_manifest_parks_the_press() {
+        // Keybind launch-if-missing: the toggle pipe that launched this
+        // instance arrives before any PaneUpdate has named it, so every
+        // decision input is unknown and an immediate perform_toggle dies.
+        let mut sidebar = Sidebar::default();
+        sidebar.active_tab = Some(0);
+        assert!(!sidebar.pending_bootstrap_toggle);
+        sidebar.pipe(toggle());
+        assert!(sidebar.pending_bootstrap_toggle);
+        // Nothing acted yet.
+        assert!(sidebar.pending_steer.is_none());
+    }
+
+    #[test]
+    fn bootstrap_press_fires_only_when_manifest_and_tab_are_known() {
+        let url = Some("file:/x.wasm".to_owned());
+        assert!(should_fire_bootstrap_toggle(true, &url, Some(1), Some(1)));
+        // No parked press: nothing to fire.
+        assert!(!should_fire_bootstrap_toggle(false, &url, Some(1), Some(1)));
+        // The manifest has not named us yet.
+        assert!(!should_fire_bootstrap_toggle(true, &None, Some(1), Some(1)));
+        assert!(!should_fire_bootstrap_toggle(true, &url, None, Some(1)));
+        // Without an active tab decide_toggle ignores the press; keep it
+        // parked instead of wasting it.
+        assert!(!should_fire_bootstrap_toggle(true, &url, Some(1), None));
+    }
+
+    #[test]
+    fn first_manifest_consumes_the_parked_press_exactly_once() {
+        let mut sidebar = Sidebar::default();
+        sidebar.plugin_id = 7;
+        sidebar.update(Event::TabUpdate(vec![tab_info(1, 4, true, None, false)]));
+        sidebar.pipe(toggle());
+        assert!(sidebar.pending_bootstrap_toggle);
+        // First manifest names the instance (floating, in the active tab):
+        // the parked press fires through perform_toggle — its own state is
+        // clean, so the debounce gate passes it — and is consumed.
+        let m = manifest(vec![(
+            1,
+            vec![sidebar_pane(7, true), pane(3, false, "shell", 2, false)],
+        )]);
+        sidebar.update(Event::PaneUpdate(m.clone()));
+        assert!(!sidebar.pending_bootstrap_toggle);
+        // Later manifests never re-fire it.
+        sidebar.update(Event::PaneUpdate(m));
+        assert!(!sidebar.pending_bootstrap_toggle);
+    }
+
+    #[test]
+    fn parked_press_dies_with_a_superseded_floater() {
+        // The manifest that would fire the parked press can simultaneously
+        // show this floating instance superseded by a tiled rail; the
+        // instance is closing, so the press must not retrofit from it.
+        let mut sidebar = Sidebar::default();
+        sidebar.plugin_id = 7;
+        sidebar.update(Event::TabUpdate(vec![tab_info(1, 4, true, None, false)]));
+        sidebar.pipe(toggle());
+        let m = manifest(vec![(1, vec![sidebar_pane(7, true), sidebar_pane(9, false)])]);
+        sidebar.update(Event::PaneUpdate(m));
+        assert!(sidebar.close_requested);
+        assert!(sidebar.pending_bootstrap_toggle);
     }
 
     #[test]
