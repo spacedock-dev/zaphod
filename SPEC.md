@@ -225,8 +225,11 @@ these as laws.
     chrome plugins' 1-row borderless slots, destroying the
     tab-bar/status-bar panes — after which every swap was unfittable forever,
     because swaps never spawn and the chrome plugin nodes had no surviving
-    panes to match. Layouts generated at runtime must reproduce verbatim
-    whatever chrome the tab actually has.
+    panes to match. Layouts generated at runtime must carry exactly one
+    canonical chrome node per chrome pane the tab actually has — extracted
+    from wherever the dump seats it, because absorb can bake chrome into
+    the user region (observed live: tab-bar inside a quadrant, inside a
+    stack), and a baked copy carried verbatim mangles the tab permanently.
 29. **Steer swap layouts by name; never blind-cycle.** `next` past the last
     entry resets the position to 0 *without applying* (live: next-spam stuck
     around the list end), while `previous` from 0 wraps deterministically to
@@ -255,7 +258,9 @@ these as laws.
     (`run_action`, `zellij_exports.rs:1421`) while
     `next/previous_swap_layout` route synchronously, so an immediate press
     can cycle the *old* swap set. Defer the press until `TabUpdate` reports
-    the override's signature: position 0 ("BASE") with the damage consumed.
+    the override's signature: position 0 ("BASE"). The damage flag is no
+    part of the signature — a landed override was observed live still
+    reporting the tab dirty, and a press deferred on it never fired.
 
     Unresolved (2026-07-03): CLI `override-layout --apply-only-to-active-tab`
     silently no-oped twice on a chrome-only-template tab — client attached

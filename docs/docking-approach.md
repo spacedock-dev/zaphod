@@ -427,8 +427,11 @@ swaps never spawn, and the plugin nodes had no surviving panes to match.
 Fold-to-BASE also ignores pane-count fit (it crammed three panes into a
 one-slot base) and is destructive. Law: **the base must carry exactly the
 same chrome as the swaps.** The implementation goes one further: generated
-layouts carry verbatim whatever chrome the dump shows the tab actually has,
-so base, swaps, and live tab are chrome-consistent by construction. The
+layouts carry exactly one canonical chrome row per chrome pane the dump
+shows the tab actually has — extracted from wherever absorb seated it,
+since a baked-in copy carried verbatim rides into the swaps as a user pane
+(observed live: tab-bar inside a quadrant, inside a stack) — so base,
+swaps, and live tab are chrome-consistent by construction. The
 server logged non-fatal "Can't combine fixed panes" / "Failed to find
 position of flexible pane" (`tiled_pane_grid.rs:2153`) during the wedge —
 fingerprints of a chrome-destroyed fold, harmless but noisy.
@@ -448,9 +451,11 @@ clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
 **The v3 toggle (implemented in `src/main.rs`, wasm not yet rebuilt/validated live):**
 
 - **Clean tab, tiled resident** — one steered press by name, per the rule
-  above. A foreign or absent swap name steps forward (BASE is geometrically
-  identical to docked on template-born tabs, so the first press on a fresh
-  tab is still visually silent).
+  above. Only "docked" steps forward (to undocked); everything else —
+  undocked, BASE, foreign, absent — steps backward. BASE is geometrically
+  identical to docked on template-born tabs, so a forward step from BASE
+  is a dead press (observed live); backward from position 0 wraps
+  deterministically to undocked, a visible collapse.
 - **Dirty tab, tiled resident** — `dump_session_layout_for_tab(tab_id)`
   (response-carrying, in-band errors, 1s server-side timeout,
   `ReadApplicationState`), then a pure transform
@@ -470,12 +475,16 @@ clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
   (`run_action`, `zellij_exports.rs:1421`), while `next/previous_swap_layout`
   route synchronously — an immediate press can race the override and cycle
   the *old* swap set. The press is therefore recorded and fired on the
-  `TabUpdate` that reports the override's signature: position 0 ("BASE")
-  with the damage consumed (`Tab::override_layout` resets the position,
-  sets damage, and relayouts once, `tab/mod.rs:909-1004`). Because swap
-  presses act on the client's *active* tab, the recorded press is abandoned
-  if the tab closes or loses focus first — the regenerated set stays
-  installed, and a later press steers from BASE.
+  `TabUpdate` that reports the override's signature: position 0 ("BASE").
+  The damage flag is no part of the signature — a landed override was
+  observed live still reporting the tab dirty, and a press deferred on
+  "BASE and clean" never fired. Because swap presses act on the client's
+  *active* tab, the recorded press is abandoned if the tab closes or loses
+  focus first — the regenerated set stays installed, and a later press
+  steers from BASE. A `TabUpdate` reporting any *other* name likewise
+  abandons the press (the override failed or raced) rather than keeping it
+  armed forever; only a nameless report (the one-selectable-pane blind
+  spot) keeps it waiting.
 - **Fallback.** Any missing input — permissions not yet granted, no tab id,
   dump error/timeout, un-rebuildable dump (no tab node, chrome-only tab) —
   degrades to the v2 two-call cycle: the arrangement snap-folds, but the
