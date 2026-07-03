@@ -49,14 +49,15 @@ struct Sidebar {
     pending_bootstrap_toggle: bool,
 }
 
-// A swap step recorded by regenerate_swaps and deferred until TabUpdate
-// confirms the overridden swap set is installed: the server dispatches the
-// override on its own thread, so a press fired immediately after could
-// still cycle the old swap set.
+// The dock state a swap-set override is driving its tab toward, deferred
+// until TabUpdate reports the overridden set installed: the server
+// dispatches the override on its own thread, so a step fired immediately
+// after could still cycle the old swap set. The direction of the step is
+// decided at fire time from the entry the override actually landed on.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct PendingSteer {
     tab: usize,
-    backwards: bool,
+    target: DockState,
 }
 
 // One tab's swap-layout state from TabUpdate. `id` is the server's stable
@@ -68,6 +69,10 @@ struct TabState {
     id: usize,
     swap_name: Option<String>,
     swap_dirty: bool,
+    // While a tab's floating panes are visible, swap_name speaks for the
+    // FLOATING layer (tab/mod.rs swap_layout_info) — every tab's floating
+    // list carries a birth "BASE" — so the tiled layer's state is unreadable.
+    floating_visible: bool,
 }
 
 // One sidebar plugin pane somewhere in the session, as seen in the manifest.
@@ -189,17 +194,17 @@ impl ZellijPlugin for Sidebar {
                                 id: t.tab_id,
                                 swap_name: t.active_swap_layout_name.clone(),
                                 swap_dirty: t.is_swap_layout_dirty,
+                                floating_visible: t.are_floating_panes_visible,
                             },
                         )
                     })
                     .collect();
                 if let Some(pending) = self.pending_steer {
-                    match pending_steer_disposition(pending.tab, self.active_tab, &self.tab_states)
-                    {
-                        SteerDisposition::Fire => {
+                    match pending_steer_disposition(pending, self.active_tab, &self.tab_states) {
+                        SteerDisposition::Fire { backwards } => {
                             self.pending_steer = None;
                             self.toggle_cooldown = Some((pending.tab, Instant::now()));
-                            steer_swap(pending.backwards);
+                            steer_swap(backwards);
                         }
                         SteerDisposition::Drop => self.pending_steer = None,
                         SteerDisposition::Keep => {}
@@ -480,11 +485,13 @@ impl Sidebar {
             true, // apply only to the active tab
             BTreeMap::new(),
         );
-        // The override leaves the tab at BASE (the absorb stack), though
-        // not necessarily clean — a landed override was observed live
-        // still flagged dirty. The press fires on the TabUpdate that
-        // reports BASE.
-        self.pending_steer = Some(pending_steer_from_base(tab, target));
+        // Where the override lands is zellij's call, not ours: the server
+        // relayouts the tab right after installing the set, advancing it
+        // to the first fitting entry — BASE only when the absorb base's
+        // exact pane count matches (single-shell tabs), "docked"
+        // otherwise. The recorded target lets the TabUpdate handler finish
+        // the toggle from whichever entry is reported.
+        self.pending_steer = Some(PendingSteer { tab, target });
         Some(())
     }
 
@@ -605,49 +612,56 @@ fn rebuild_target(
     Some((tab, id))
 }
 
-// The steer recorded alongside a swap-set override. A landed override
-// leaves the tab at BASE, position 0 of [BASE, docked, undocked]: docked
-// sits one plain forward increment away at position 1, and undocked one
-// step back — previous wraps position 0 to the list end. Both moves are
-// deterministic; only forward past the end of the list is unreliable
-// (swap_layouts.rs progress_layout!).
-fn pending_steer_from_base(tab: usize, target: DockState) -> PendingSteer {
-    PendingSteer {
-        tab,
-        backwards: target == DockState::Undocked,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SteerDisposition {
-    Fire,
+    // One swap step in the given direction through the installed
+    // [BASE, docked, undocked] order; previous wraps position 0 to the
+    // list end deterministically, only forward past the end is unreliable
+    // (swap_layouts.rs progress_layout!).
+    Fire { backwards: bool },
     Keep,
     Drop,
 }
 
-// A steered press recorded by regenerate_swaps waits for the server to
-// report the regenerated swap set installed on the tab: position 0
-// ("BASE"). The dirty flag is no part of the signature — a landed
+// A steered press recorded alongside a swap-set override waits for the
+// server to report where the override landed. zellij relayouts the tab
+// right after installing the set, so the report is "BASE" only when the
+// absorb base's exact pane count matches (single-shell tabs); multi-pane
+// tabs arrive already at "docked". The steer converts the reported entry
+// into the one deliberate step that reaches the target — or stands down
+// when the relayout already landed there, since one more step would
+// overshoot it (the live one-step-off arrival). While floating panes are
+// visible the reported name speaks for the floating layer, whose birth
+// entry is also "BASE"; the tiled outcome is unreadable, so the press
+// stays armed. The dirty flag is no part of the signature — a landed
 // override was observed live still flagged dirty. Swap presses act on the
 // client's active tab, so the press is abandoned when the tab is gone or
-// no longer active — the regenerated set stays installed and a later press
-// on the tab steers from BASE. Any other reported name means the override
+// no longer active — the regenerated set stays installed and a later
+// press on the tab steers by name. A foreign name means the override
 // failed or raced, and the press is abandoned rather than kept armed
 // forever; only a nameless report (the one-selectable-pane blind spot)
 // keeps it waiting.
 fn pending_steer_disposition(
-    tab: usize,
+    steer: PendingSteer,
     active_tab: Option<usize>,
     tab_states: &BTreeMap<usize, TabState>,
 ) -> SteerDisposition {
-    match tab_states.get(&tab) {
-        None => SteerDisposition::Drop,
-        Some(_) if active_tab != Some(tab) => SteerDisposition::Drop,
-        Some(state) => match state.swap_name.as_deref() {
-            Some("BASE") => SteerDisposition::Fire,
-            Some(_) => SteerDisposition::Drop,
-            None => SteerDisposition::Keep,
-        },
+    let Some(state) = tab_states.get(&steer.tab) else {
+        return SteerDisposition::Drop;
+    };
+    if active_tab != Some(steer.tab) {
+        return SteerDisposition::Drop;
+    }
+    if state.floating_visible {
+        return SteerDisposition::Keep;
+    }
+    match (state.swap_name.as_deref(), steer.target) {
+        (Some("BASE"), DockState::Docked) => SteerDisposition::Fire { backwards: false },
+        (Some("BASE"), DockState::Undocked) => SteerDisposition::Fire { backwards: true },
+        (Some("docked"), DockState::Undocked) => SteerDisposition::Fire { backwards: false },
+        (Some("undocked"), DockState::Docked) => SteerDisposition::Fire { backwards: true },
+        (Some(_), _) => SteerDisposition::Drop,
+        (None, _) => SteerDisposition::Keep,
     }
 }
 
@@ -1657,6 +1671,23 @@ mod tests {
     }
 
     #[test]
+    fn tab_update_records_floating_pane_visibility() {
+        // While a tab's floating panes are visible, TabInfo's swap name
+        // reports the FLOATING layer (tab/mod.rs swap_layout_info), so the
+        // tiled override outcome is unreadable; the state must carry the
+        // visibility bit for the steer to know whose name it is reading.
+        let mut sidebar = Sidebar::default();
+        let mut with_floats = tab_info(1, 7, true, Some("BASE"), false);
+        with_floats.are_floating_panes_visible = true;
+        sidebar.update(Event::TabUpdate(vec![
+            tab_info(0, 5, false, Some("BASE"), false),
+            with_floats,
+        ]));
+        assert!(!sidebar.tab_states.get(&0).unwrap().floating_visible);
+        assert!(sidebar.tab_states.get(&1).unwrap().floating_visible);
+    }
+
+    #[test]
     fn tab_update_records_swap_state_per_tab() {
         let mut sidebar = Sidebar::default();
         sidebar.update(Event::TabUpdate(vec![
@@ -1670,6 +1701,7 @@ mod tests {
                 id: 5,
                 swap_name: Some("BASE".to_owned()),
                 swap_dirty: false,
+                floating_visible: false,
             })
         );
         assert_eq!(
@@ -1678,61 +1710,134 @@ mod tests {
                 id: 7,
                 swap_name: Some("docked".to_owned()),
                 swap_dirty: true,
+                floating_visible: false,
             })
         );
     }
 
+    fn steer_states(name: Option<&str>, floating_visible: bool) -> BTreeMap<usize, TabState> {
+        let mut map = BTreeMap::new();
+        map.insert(
+            1,
+            TabState {
+                id: 4,
+                swap_name: name.map(str::to_owned),
+                // A landed override was observed live still flagged dirty;
+                // the damage flag is no part of the signature.
+                swap_dirty: true,
+                floating_visible,
+            },
+        );
+        map
+    }
+
+    fn steer_to(target: DockState) -> PendingSteer {
+        PendingSteer { tab: 1, target }
+    }
+
     #[test]
-    fn pending_steer_fires_only_once_the_regenerated_swap_set_reports_in() {
-        // After the swap-set override the server reports the tab at BASE —
-        // observed live still flagged dirty, so the damage flag is no part
-        // of the signature; only then may the steered press fire, since
-        // earlier it would cycle the old swap set (the override is
-        // dispatched on its own server thread).
-        let states = |name: Option<&str>, dirty: bool| {
-            let mut map = BTreeMap::new();
-            map.insert(
-                1,
-                TabState {
-                    id: 4,
-                    swap_name: name.map(str::to_owned),
-                    swap_dirty: dirty,
-                },
-            );
-            map
-        };
+    fn pending_steer_completes_the_toggle_from_wherever_the_override_landed() {
+        // A landed override does not leave the tab at BASE unconditionally:
+        // zellij relayouts the tab right after installing the set, so the
+        // report is BASE only when the absorb base's exact pane count
+        // matches (single-shell tabs); multi-pane tabs arrive already at
+        // "docked". The steer turns the reported entry into the one
+        // deliberate step that reaches the target.
         assert_eq!(
-            pending_steer_disposition(1, Some(1), &states(Some("BASE"), false)),
-            SteerDisposition::Fire
+            pending_steer_disposition(steer_to(DockState::Docked), Some(1), &steer_states(Some("BASE"), false)),
+            SteerDisposition::Fire { backwards: false }
         );
         assert_eq!(
-            pending_steer_disposition(1, Some(1), &states(Some("BASE"), true)),
-            SteerDisposition::Fire
+            pending_steer_disposition(steer_to(DockState::Undocked), Some(1), &steer_states(Some("BASE"), false)),
+            SteerDisposition::Fire { backwards: true }
         );
-        // Any other reported name means the override failed or raced; the
-        // press is abandoned rather than kept armed forever.
+        // The relayout stopped one entry short of the target: step onward.
         assert_eq!(
-            pending_steer_disposition(1, Some(1), &states(Some("docked"), true)),
+            pending_steer_disposition(steer_to(DockState::Undocked), Some(1), &steer_states(Some("docked"), false)),
+            SteerDisposition::Fire { backwards: false }
+        );
+        assert_eq!(
+            pending_steer_disposition(steer_to(DockState::Docked), Some(1), &steer_states(Some("undocked"), false)),
+            SteerDisposition::Fire { backwards: true }
+        );
+        // The relayout already landed on the target: the toggle is done and
+        // one more step would overshoot it (the live one-step-off arrival).
+        assert_eq!(
+            pending_steer_disposition(steer_to(DockState::Docked), Some(1), &steer_states(Some("docked"), false)),
+            SteerDisposition::Drop
+        );
+        assert_eq!(
+            pending_steer_disposition(steer_to(DockState::Undocked), Some(1), &steer_states(Some("undocked"), false)),
+            SteerDisposition::Drop
+        );
+        // A foreign name means the override failed or raced; the press is
+        // abandoned rather than kept armed forever.
+        assert_eq!(
+            pending_steer_disposition(steer_to(DockState::Docked), Some(1), &steer_states(Some("stacked"), false)),
             SteerDisposition::Drop
         );
         // No name at all is the one-selectable-pane blind spot; the
         // override's outcome is still unreadable, so the press stays armed.
         assert_eq!(
-            pending_steer_disposition(1, Some(1), &states(None, false)),
+            pending_steer_disposition(steer_to(DockState::Docked), Some(1), &steer_states(None, false)),
             SteerDisposition::Keep
         );
         // The tab vanished (closed) — the press has nowhere to go.
         assert_eq!(
-            pending_steer_disposition(2, Some(1), &states(Some("BASE"), false)),
+            pending_steer_disposition(
+                PendingSteer { tab: 2, target: DockState::Docked },
+                Some(1),
+                &steer_states(Some("BASE"), false)
+            ),
             SteerDisposition::Drop
         );
         // The user switched away: swap presses act on the client's active
         // tab, so firing now would steer the wrong tab. The regenerated
-        // set stays installed; a later press on the tab steers from BASE.
+        // set stays installed; a later press on the tab steers by name.
         assert_eq!(
-            pending_steer_disposition(1, Some(3), &states(Some("BASE"), false)),
+            pending_steer_disposition(steer_to(DockState::Docked), Some(3), &steer_states(Some("BASE"), false)),
             SteerDisposition::Drop
         );
+    }
+
+    #[test]
+    fn steer_waits_while_floating_panes_obscure_the_swap_report() {
+        // While floating panes are visible the reported name speaks for the
+        // floating layer, whose birth entry is also "BASE" — during a
+        // bootstrap retrofit the floater itself keeps the tab in that
+        // state, and firing on it steers before the override lands.
+        assert_eq!(
+            pending_steer_disposition(steer_to(DockState::Docked), Some(1), &steer_states(Some("BASE"), true)),
+            SteerDisposition::Keep
+        );
+        assert_eq!(
+            pending_steer_disposition(steer_to(DockState::Docked), Some(1), &steer_states(Some("docked"), true)),
+            SteerDisposition::Keep
+        );
+    }
+
+    #[test]
+    fn bootstrap_arrival_stays_docked_despite_floating_base_reports() {
+        // The live E2 failure: retrofit override in flight, the floating
+        // bootstrap pane still visible. Gap TabUpdates report the floating
+        // layer's "BASE"; firing there adds a stray forward step on top of
+        // the relayout's own docked arrival and the tab lands one entry
+        // past it, on the undocked sliver.
+        let mut sidebar = Sidebar::default();
+        sidebar.pending_steer = Some(PendingSteer {
+            tab: 1,
+            target: DockState::Docked,
+        });
+        let mut gap = tab_info(1, 7, true, Some("BASE"), true);
+        gap.are_floating_panes_visible = true;
+        sidebar.update(Event::TabUpdate(vec![gap]));
+        assert!(sidebar.pending_steer.is_some());
+        assert!(sidebar.toggle_cooldown.is_none());
+        // The override landed and hid the floater; the relayout already
+        // reached docked, so the steer stands down without a stray step.
+        sidebar.update(Event::TabUpdate(vec![tab_info(1, 7, true, Some("docked"), false)]));
+        assert!(sidebar.pending_steer.is_none());
+        assert!(sidebar.toggle_cooldown.is_none());
     }
 
     #[test]
@@ -1756,34 +1861,11 @@ mod tests {
     }
 
     #[test]
-    fn steer_from_base_moves_forward_to_docked_and_back_to_undocked() {
-        // A landed override leaves the tab at BASE (position 0 of
-        // [BASE, docked, undocked]). Docked is a plain forward increment
-        // to position 1; undocked is one step back, wrapping position 0
-        // to the list end. Both are the deterministic moves — only
-        // forward past the end of the list is unreliable.
-        assert_eq!(
-            pending_steer_from_base(5, DockState::Docked),
-            PendingSteer {
-                tab: 5,
-                backwards: false,
-            }
-        );
-        assert_eq!(
-            pending_steer_from_base(5, DockState::Undocked),
-            PendingSteer {
-                tab: 5,
-                backwards: true,
-            }
-        );
-    }
-
-    #[test]
     fn tab_update_fires_the_pending_steer_once_the_override_lands() {
         let mut sidebar = Sidebar::default();
         sidebar.pending_steer = Some(PendingSteer {
             tab: 1,
-            backwards: true,
+            target: DockState::Undocked,
         });
         // The tab reports no swap name (one-selectable-pane blind spot):
         // the override's outcome is unreadable, the press stays armed.
@@ -1802,7 +1884,7 @@ mod tests {
         // A press for a tab that no longer exists is abandoned.
         sidebar.pending_steer = Some(PendingSteer {
             tab: 9,
-            backwards: false,
+            target: DockState::Docked,
         });
         sidebar.update(Event::TabUpdate(vec![tab_info(
             1,
@@ -1819,7 +1901,7 @@ mod tests {
         let now = Instant::now();
         let in_flight = Some(PendingSteer {
             tab: 1,
-            backwards: false,
+            target: DockState::Docked,
         });
         // Tab 1's pipeline is still waiting on its override: a repeat press
         // there is the bounce, not a new intent.
@@ -1864,7 +1946,7 @@ mod tests {
         let mut sidebar = Sidebar::default();
         sidebar.pending_steer = Some(PendingSteer {
             tab: 1,
-            backwards: true,
+            target: DockState::Undocked,
         });
         sidebar.update(Event::TabUpdate(vec![tab_info(1, 7, true, Some("BASE"), false)]));
         assert!(sidebar.pending_steer.is_none());
@@ -1874,7 +1956,7 @@ mod tests {
         let mut sidebar = Sidebar::default();
         sidebar.pending_steer = Some(PendingSteer {
             tab: 9,
-            backwards: false,
+            target: DockState::Docked,
         });
         sidebar.update(Event::TabUpdate(vec![tab_info(1, 7, true, Some("BASE"), false)]));
         assert!(sidebar.pending_steer.is_none());
@@ -1913,7 +1995,7 @@ mod tests {
         sidebar.active_tab = Some(1);
         let steer = PendingSteer {
             tab: 1,
-            backwards: true,
+            target: DockState::Undocked,
         };
         sidebar.pending_steer = Some(steer);
         sidebar.perform_toggle();

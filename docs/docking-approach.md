@@ -474,17 +474,38 @@ clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
 - **Deferred press.** The override is dispatched on a spawned server thread
   (`run_action`, `zellij_exports.rs:1421`), while `next/previous_swap_layout`
   route synchronously — an immediate press can race the override and cycle
-  the *old* swap set. The press is therefore recorded and fired on the
-  `TabUpdate` that reports the override's signature: position 0 ("BASE").
-  The damage flag is no part of the signature — a landed override was
-  observed live still reporting the tab dirty, and a press deferred on
-  "BASE and clean" never fired. Because swap presses act on the client's
-  *active* tab, the recorded press is abandoned if the tab closes or loses
-  focus first — the regenerated set stays installed, and a later press
-  steers from BASE. A `TabUpdate` reporting any *other* name likewise
-  abandons the press (the override failed or raced) rather than keeping it
-  armed forever; only a nameless report (the one-selectable-pane blind
-  spot) keeps it waiting.
+  the *old* swap set. The press is therefore recorded with its **target
+  dock state** and resolved on a later `TabUpdate`, honoring two laws
+  learned live (drill 7) and confirmed in source:
+  - **A landed override does not sit at BASE.** `tab.override_layout`
+    installs the set, applies the base, then immediately relayouts with
+    the damage flag set (`tab/mod.rs:978-981`): the tab advances to the
+    first *fitting* entry. BASE's constraint is
+    `ExactPanes(base template leaf count)` — chrome 2 + rail 1 +
+    children-stub 1 = 4 (`swap_layouts.rs:38-57`, `layout.rs:923-933`) —
+    so single-shell tabs re-fit BASE, while multi-pane tabs skip it and
+    arrive already at "docked" (unconstrained swap tabs parse to
+    `NoConstraint`, `kdl_layout_parser.rs:2052`).
+  - **A visible floating pane shadows the name.** `TabInfo`'s swap name
+    reports the FLOATING layer whenever floating panes are visible
+    (`tab/mod.rs:1005-1017`), and every tab's floating list carries a
+    birth "BASE" (`swap_layouts.rs:52-54`). During a bootstrap retrofit
+    the floating actor itself keeps the tab reporting "BASE", one hop
+    before the override lands.
+  The steer therefore fires **by reported entry, toward the target**:
+  from "BASE" docked is one forward step and undocked one deterministic
+  backward wrap; from "docked" toward undocked one forward step (and the
+  mirror backward); a report already *at* the target stands the press
+  down — one more step would overshoot (observed live: the bootstrap tab
+  landed one entry past docked, on the undocked sliver). While floating
+  panes are visible the press stays armed. The damage flag is no part of
+  the signature — a landed override was observed live still reporting the
+  tab dirty. Because swap presses act on the client's *active* tab, the
+  recorded press is abandoned if the tab closes or loses focus first —
+  the regenerated set stays installed, and a later press steers by name.
+  A foreign name likewise abandons the press (the override failed or
+  raced); only a nameless report (the one-selectable-pane blind spot)
+  keeps it waiting.
 - **Fallback.** Any missing input — permissions not yet granted, no tab id,
   dump error/timeout, un-rebuildable dump (no tab node, chrome-only tab) —
   degrades to the v2 two-call cycle: the arrangement snap-folds, but the
@@ -500,10 +521,11 @@ clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
   residents and sidebar-less tabs run the identical dump → transform →
   override → deferred-steer machinery against the *active* tab (its server
   id translated from the TabUpdate states): the override's base spawns the
-  rail while absorbing the tab's panes, and the deferred press steers
-  forward from BASE to docked — a plain position 0→1 increment, never the
-  flaky next-past-end zone — so the tab arrives docked with its splits
-  intact. Chrome an earlier absorb ate (status-bar inside the stack,
+  rail while absorbing the tab's panes, and the post-override relayout plus
+  the deferred press land the tab docked — single-shell tabs re-fit BASE
+  (already the docked geometry), multi-pane tabs arrive at "docked"
+  directly, and the steer only adds the step the relayout left missing —
+  so the tab arrives docked with its splits intact. Chrome an earlier absorb ate (status-bar inside the stack,
   observed live) arrives in the dump and leaves repaired: the transform
   extracts chrome from wherever the dump seats it and re-emits canonical
   rows. When the rebuild cannot run — permission not granted, no tab id,
@@ -512,21 +534,26 @@ clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
   stacks, the toggle still docks). The absorb KDL keeps the
   `stacked { children }` main (proven three times — do not change).
 
-**Open anomaly (unresolved, 2026-07-03).** CLI
-`override-layout --apply-only-to-active-tab` silently **no-oped twice** on
-a chrome-only-template tab: client verified attached and focused
-(`list-clients`), KDL parse-clean (accepted by `new-tab`), exit 0, zero
-server log lines, tab byte-identical after. The same CLI form worked twice
-on 2026-07-02 (different tabs, different KDLs), and the **plugin host-call
-override has always worked** (the shipped v2 retrofit). Difference not
-understood — candidates: swap-section content (concrete percent panes,
-`focus=true` in a swap), tab born from a chrome-only template, session
-state. v3's regeneration uses the plugin host call, so it is not known to
-be affected — but its live validation must watch for this failure class.
-Related ground-truth caveat: a dump's `focus=true` does **not** identify
-the acting client's focused tab (the first override that morning hit Tab #1
-while the dump claimed Tab #2 focused); `list-clients`' ZELLIJ_PANE_ID is
-the authority on where `--apply-only-to-active-tab` lands.
+**Anomaly resolved (2026-07-04, v0.44.1 source trace).** The 2026-07-03
+CLI no-op and the 2026-07-02 mistarget are one law: **a CLI
+`override-layout --apply-only-to-active-tab` cannot be aimed.** A CLI
+action runs as the *last client to have sent a Key message*
+(`route.rs:2316-2332` → `get_last_active_client`, `lib.rs:511`, set only
+by Key messages at `lib.rs:641-643`, cleared on that client's disconnect
+at `lib.rs:547-549`), falling back to the CLI client's own id. The screen
+then resolves `active_tab_ids[that client]` (`screen.rs:6883-6923` →
+`get_active_tab_mut`, `screen.rs:2238-2246`). With no key-active client,
+the CLI's own id has no active-tab entry: one screen-thread error line,
+an empty tab list flows through the rest of the pipeline, exit 0, tab
+untouched — the observed silent no-op. With one, the override lands on
+*that client's* focused tab, which is what `list-clients` (not the dump's
+`focus=true`) reports — the Tab #1-instead-of-#2 morning result. The
+**plugin host-call path is different and sound**: `run_action` acts as
+`env.client_id` (`zellij_exports.rs:1421-1447`), the connected client the
+instance was loaded for (`wasm_bridge.rs:292-318`), so a plugin override —
+from *any* tab's instance — targets the attached user's true focused tab.
+Proven live in drill 7 (2026-07-04): two remote-election retrofits from a
+background tab's rail installed rails on the user's focused tabs.
 
 ### Permission gating (zellij v0.44.1 source, verified)
 

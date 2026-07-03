@@ -241,7 +241,17 @@ these as laws.
     `dump-layout` marked a tab focused while the attached client sat on
     another (observed live: an `--apply-only-to-active-tab` override landed
     on the *other* tab). `list-clients`' ZELLIJ_PANE_ID is the ground truth
-    for which tab "active" means.
+    for which tab "active" means. Root law (v0.44.1 source, resolves the
+    2026-07-03 CLI no-op): "active tab" is `active_tab_ids[acting client]`
+    (`screen.rs:6883-6923`), and the acting client differs by caller — a
+    **CLI action** runs as the last client to have sent a *Key* message
+    (`route.rs:2316-2332`, `lib.rs:511`), falling back to the CLI's own
+    unregistered id (one screen error line, empty apply, exit 0 — a silent
+    no-op); a **plugin host call** runs as `env.client_id`, the connected
+    client the instance was loaded for (`zellij_exports.rs:1421-1447`,
+    `wasm_bridge.rs:292-318`), so plugin overrides from any tab's instance
+    land on the attached user's true focused tab (proven live: two
+    remote-election retrofits, 2026-07-04).
 31. **Fold-to-BASE ignores pane-count fit and is destructive.** The
     dirty-tab first press re-applies the current template regardless of how
     many panes fit it (live: three panes crammed into a one-slot base); it
@@ -257,18 +267,27 @@ these as laws.
     The override dispatches on a spawned server thread
     (`run_action`, `zellij_exports.rs:1421`) while
     `next/previous_swap_layout` route synchronously, so an immediate press
-    can cycle the *old* swap set. Defer the press until `TabUpdate` reports
-    the override's signature: position 0 ("BASE"). The damage flag is no
-    part of the signature — a landed override was observed live still
-    reporting the tab dirty, and a press deferred on it never fired.
+    can cycle the *old* swap set. Defer the press to a later `TabUpdate` —
+    but **a landed override does not report "BASE" unconditionally**:
+    `tab.override_layout` relayouts immediately after installing the set
+    (`tab/mod.rs:978-981`), advancing the tab to the first *fitting* entry.
+    BASE's constraint is `ExactPanes(base template leaf count)` (4 for the
+    chrome+rail+children absorb base), so single-shell tabs re-fit BASE
+    while multi-pane tabs arrive already at "docked". And **while floating
+    panes are visible the reported name speaks for the floating layer**
+    (`tab/mod.rs:1005-1017`), whose birth entry is also "BASE" — during a
+    bootstrap retrofit the floating actor itself keeps the tab reporting
+    "BASE" before the override lands, and firing on it lands the tab one
+    entry past the target (observed live: undocked sliver instead of
+    docked). Resolve the deferred press by reported entry, toward the
+    recorded target; stand down when the report *is* the target; stay
+    armed while floating panes are visible. The damage flag is no part of
+    the signature — a landed override was observed live still reporting
+    the tab dirty.
 
-    Unresolved (2026-07-03): CLI `override-layout --apply-only-to-active-tab`
-    silently no-oped twice on a chrome-only-template tab — client attached
-    and focused, KDL parse-clean, exit 0, zero server log lines, tab
-    byte-identical — while the same CLI form worked twice the previous day
-    and the plugin host-call override has always worked. Conditions not
-    understood; live validation of anything override-based must watch for
-    this failure class.
+    The 2026-07-03 CLI no-op is resolved — see #30: a CLI override cannot
+    be aimed; it acts as the last key-active client, or silently applies
+    nothing under the CLI's own id.
 34. **A crashed instance stays in the `PaneManifest` and can eat an elected
     role forever.** `decide_toggle`'s session-wide election for a
     sidebar-less tab picks the lowest pane id across every
