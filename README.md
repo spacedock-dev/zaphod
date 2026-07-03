@@ -31,9 +31,10 @@ tab and what does it want from me?**
   line and details in the dimmed second line
 - **Keyboard navigation mode**: `j/k`/arrows move a highlight, `Enter` jumps,
   `Esc` returns focus where it was
-- Floating "rail" mode (pinned, left edge, exact placement at runtime) and
-  docked tile mode (reserves space; placed via layouts); `⇄` in the header
-  toggles between them
+- `Alt /` (or the `⇄` header) toggles the docked 28-col rail down to a
+  1-col sliver and back by cycling the tab's swap layouts — panes are
+  rearranged in place, never spawned or hidden, and a manually re-split tab
+  keeps its arrangement (the swap set is regenerated from the live layout)
 - Per-tab instances that toggle independently
 
 ## Build
@@ -106,11 +107,10 @@ zellij caches the grant.
 ## Status
 
 Working prototype (zellij 0.44.1): per-tab toggle, click/keyboard switching,
-plugin-local agent awareness, state/status lines, rail and docked modes. Known broken: lazily
-spawning an instance into a tab that never had one (crashes the spawning
-instance — a response-reading shim call inside a pipe handler; see SPEC.md
-law #4). Workaround: open the sidebar via the layout, or press `Alt /` in a
-fresh tab before instances exist elsewhere.
+plugin-local agent awareness, state/status lines, docked/sliver toggle. A
+tab without a sidebar gets one on its first `Alt /`: a one-time layout
+retrofit docks the rail and installs the swap set (nothing is spawned,
+hidden, or shown).
 
 [SPEC.md](SPEC.md) carries the full validated spec, a 23-entry map of
 zellij-plugin landmines this prototype paid for, and the from-scratch v2

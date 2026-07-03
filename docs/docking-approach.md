@@ -338,7 +338,10 @@ cycling (made deterministic below), and the retrofit KDL keeps its
 proven three times. Positive datum from the same run: the floating sidebar
 instance seated cleanly into a config-matched floating slot of an override
 KDL (no duplicate) — the retain flags plus exact configuration identity do
-re-seat plugin panes.
+re-seat plugin panes. The "deterministic re-stack is the ceiling"
+conclusion this implied is superseded: concrete pane nodes spawn only under
+*override/tab* application, while **swap** application re-seats them — the
+mechanism Toggle v3 (below) is built on.
 
 **Retrofit arm — VERIFIED.** With the session's sole sidebar instance
 floating in another tab, `Alt /` on a sidebar-less tab ran the cross-tab
@@ -376,7 +379,10 @@ Plugins see both through `TabInfo.active_swap_layout_name` /
 issues **two** `next_swap_layout()` calls on a dirty tab and one on a clean
 tab. Caveat: zellij reports `(None, false)` for a tab with at most one
 selectable tiled pane (`tab/mod.rs:1005-1018`), so damage there is invisible
-and that tab keeps the fold-then-flip behavior.
+and that tab keeps the fold-then-flip behavior. Toggle v3 (below) demotes
+the dirty-tab two-call cycle to a fallback: the primary dirty-tab path
+regenerates the swap set around the tab's current arrangement, so manual
+splits survive the toggle instead of snap-folding.
 
 **Resident-without-swap-set detection — REFUTED.** A tiled sidebar in a tab
 without the zaphod swap set (e.g. a pre-rollout captured template) still
@@ -387,6 +393,119 @@ reports before its first toggle (`set_swap_tiled_layouts` +
 `set_base_layout` reset the position to 0, `swap_layouts.rs:58-62`,
 `tab/mod.rs:923-930`). Routing "BASE" to the retrofit would fire a
 destructive override on every fresh zaphod tab. Still open.
+
+### Toggle v3 — split-preserving swaps regenerated at toggle time (mechanism validated live 2026-07-03, ztest; plugin implementation awaiting live validation)
+
+CL's design idea removes the re-stack ceiling: generate the docked/undocked
+swap templates **from the tab's current arrangement at toggle time**, so
+cycling re-seats the user's own layout with only the rail width changed.
+The core bet — concrete-slot **swap** layouts re-seat existing panes,
+unlike override/tab application, which spawns new panes for concrete nodes
+(the 2026-07-02 refutation above) — was confirmed live.
+
+**The falsifiable rig.** A first rig with a single fitting swap was
+unfalsifiable: zellij auto-applies the only fitting swap whenever a pane
+opens, so every press looked like a no-op. The proving rig used a
+layout-born tab whose base was chrome + `stacked { children }` plus two
+chrome-carrying *concrete* swaps — "expanded" (left pane 75%) and
+"collapsed" (left pane 25%), both with a 50/50 right column — and three
+shells running `while true` echo loops. Cycling visibly flipped the left
+pane 75↔25 with the **same panes re-seated** each time: same cwds, all
+three loops printing through multiple cycles, and zero pty spawn events in
+the server log across every press (each spawn line mapped to a tab
+creation, none to a swap). Swap application never spawns (PR #2167
+semantics, now witnessed), and re-seating never respawns terminals — agent
+processes survive toggling. Unconfirmed: whether scrollback survives the
+fold/1-row transitions; shell-history correctness is *not* process-survival
+evidence (fresh shells read `~/.zsh_history` too).
+
+**The chrome-wedge lesson.** A control tab with a bare `tab { pane }` base
+under chrome-carrying swaps wedged permanently: fold-to-BASE re-seated the
+shells into the chrome plugins' 1-row borderless slots (destroying the
+tab-bar/status-bar panes), after which both swaps were unfittable forever —
+swaps never spawn, and the plugin nodes had no surviving panes to match.
+Fold-to-BASE also ignores pane-count fit (it crammed three panes into a
+one-slot base) and is destructive. Law: **the base must carry exactly the
+same chrome as the swaps.** The implementation goes one further: generated
+layouts carry verbatim whatever chrome the dump shows the tab actually has,
+so base, swaps, and live tab are chrome-consistent by construction. The
+server logged non-fatal "Can't combine fixed panes" / "Failed to find
+position of flexible pane" (`tiled_pane_grid.rs:2153`) during the wedge —
+fingerprints of a chrome-destroyed fold, harmless but noisy.
+
+**The position quirk → steer, never blind-cycle.** With
+[BASE (unfittable), expanded, collapsed] installed, next-spam stuck/no-oped
+around the end of the list, while a later next and a previous both stepped
+cleanly. Source explains it: `next` past the last entry resets the position
+to 0 *without applying*, while `previous` from 0 wraps deterministically to
+the last entry (`swap_layouts.rs` `swap_tiled_panes` progress macro). Design
+rule: read `TabInfo.active_swap_layout_name` and issue **one deliberate
+next or previous per press**. With the installed order
+[BASE, docked, undocked], every steering move — docked→undocked (next),
+undocked→docked (previous), BASE→docked (next), BASE→undocked (previous,
+clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
+
+**The v3 toggle (implemented in `src/main.rs`, wasm not yet rebuilt/validated live):**
+
+- **Clean tab, tiled resident** — one steered press by name, per the rule
+  above. A foreign or absent swap name steps forward (BASE is geometrically
+  identical to docked on template-born tabs, so the first press on a fresh
+  tab is still visually silent).
+- **Dirty tab, tiled resident** — `dump_session_layout_for_tab(tab_id)`
+  (response-carrying, in-band errors, 1s server-side timeout,
+  `ReadApplicationState`), then a pure transform
+  (`split_preserving_layout_kdl`) builds the override KDL: base = dumped
+  chrome + rail slot + `stacked { children }` (the only
+  retained-pane-correct override shape), swaps docked/undocked = dumped
+  chrome + rail (28/1) + the dumped arrangement with `focus=true` and
+  `name` attributes stripped, sizes/`split_direction`/stack flags/cwds
+  kept, and `floating_panes` dropped. The server strips the requesting
+  plugin's own pane from the dump (`remove_plugin_from_layout`), so the
+  rail arrives pre-removed. Then
+  `override_layout(Stringified, retain, retain, active-tab-only)` and one
+  steered press to the target state. Cost: a momentary stack flash while
+  the base applies. Count drift after the toggle: stale generated swaps
+  stop fitting and are skipped; the next dirty toggle regenerates.
+- **Deferred press.** The override is dispatched on a spawned server thread
+  (`run_action`, `zellij_exports.rs:1421`), while `next/previous_swap_layout`
+  route synchronously — an immediate press can race the override and cycle
+  the *old* swap set. The press is therefore recorded and fired on the
+  `TabUpdate` that reports the override's signature: position 0 ("BASE")
+  with the damage consumed (`Tab::override_layout` resets the position,
+  sets damage, and relayouts once, `tab/mod.rs:909-1004`). Because swap
+  presses act on the client's *active* tab, the recorded press is abandoned
+  if the tab closes or loses focus first — the regenerated set stays
+  installed, and a later press steers from BASE.
+- **Fallback.** Any missing input — permissions not yet granted, no tab id,
+  dump error/timeout, un-rebuildable dump (no tab node, chrome-only tab) —
+  degrades to the v2 two-call cycle: the arrangement snap-folds, but the
+  toggle still lands.
+- **Tab ids vs positions.** `dump_session_layout_for_tab` and
+  `get_focused_pane_info` speak the server's stable tab **id**
+  (`screen.tabs` is keyed by `tab.id`; `active_tab_ids` stores ids), while
+  `PaneManifest` keys and `TabInfo.position` are display **positions** —
+  equal until any tab is closed or moved. The plugin records
+  `TabInfo.tab_id` per position from `TabUpdate` and translates in both
+  directions; a stale id fails safe (the dump returns no tab node → fallback).
+- **Retrofit unchanged.** Floating residents and sidebar-less tabs keep the
+  v2 retrofit; its KDL keeps the `stacked { children }` main (proven three
+  times — do not change).
+
+**Open anomaly (unresolved, 2026-07-03).** CLI
+`override-layout --apply-only-to-active-tab` silently **no-oped twice** on
+a chrome-only-template tab: client verified attached and focused
+(`list-clients`), KDL parse-clean (accepted by `new-tab`), exit 0, zero
+server log lines, tab byte-identical after. The same CLI form worked twice
+on 2026-07-02 (different tabs, different KDLs), and the **plugin host-call
+override has always worked** (the shipped v2 retrofit). Difference not
+understood — candidates: swap-section content (concrete percent panes,
+`focus=true` in a swap), tab born from a chrome-only template, session
+state. v3's regeneration uses the plugin host call, so it is not known to
+be affected — but its live validation must watch for this failure class.
+Related ground-truth caveat: a dump's `focus=true` does **not** identify
+the acting client's focused tab (the first override that morning hit Tab #1
+while the dump claimed Tab #2 focused); `list-clients`' ZELLIJ_PANE_ID is
+the authority on where `--apply-only-to-active-tab` lands.
 
 ### Permission gating (zellij v0.44.1 source, verified)
 

@@ -196,7 +196,9 @@ these as laws.
     Deterministic toggling must read `TabInfo.is_swap_layout_dirty` and issue
     two calls on a dirty tab — but zellij reports `(None, false)` for a tab
     with at most one selectable tiled pane (`tab/mod.rs:1005-1018`), so
-    damage there is invisible.
+    damage there is invisible. (The two-call answer is the fallback; the
+    primary dirty-tab path regenerates the swap set from a dump — see #28-31
+    and `docs/docking-approach.md`, Toggle v3.)
 25. **Every tab gets a hidden BASE swap layout**: `set_base_layout` inserts
     the tab's birth layout at swap position 0, named "BASE", constrained
     `ExactPanes(birth pane count)` (`swap_layouts.rs:38-57`) — whether or not
@@ -217,20 +219,68 @@ these as laws.
     template-only layout (no `tab` node), or a bare `tab` whose template
     holds `children` inside a nested split, births zero terminals and the
     session exits immediately ("Bye from Zellij!") — both observed live.
+28. **The base layout must carry exactly the same chrome as the swaps.** A
+    bare `tab { pane }` base under chrome-carrying swaps wedged a tab
+    permanently (observed live): fold-to-BASE re-seated the shells into the
+    chrome plugins' 1-row borderless slots, destroying the
+    tab-bar/status-bar panes — after which every swap was unfittable forever,
+    because swaps never spawn and the chrome plugin nodes had no surviving
+    panes to match. Layouts generated at runtime must reproduce verbatim
+    whatever chrome the tab actually has.
+29. **Steer swap layouts by name; never blind-cycle.** `next` past the last
+    entry resets the position to 0 *without applying* (live: next-spam stuck
+    around the list end), while `previous` from 0 wraps deterministically to
+    the last entry (`swap_layouts.rs`, `swap_tiled_panes` progress macro).
+    Read `TabInfo.active_swap_layout_name` and issue one deliberate
+    next/previous per press; with [BASE, docked, undocked] installed, every
+    docked↔undocked and BASE→either move avoids the next-past-end zone.
+30. **A dump's `focus=true` is not the acting client's focus.**
+    `dump-layout` marked a tab focused while the attached client sat on
+    another (observed live: an `--apply-only-to-active-tab` override landed
+    on the *other* tab). `list-clients`' ZELLIJ_PANE_ID is the ground truth
+    for which tab "active" means.
+31. **Fold-to-BASE ignores pane-count fit and is destructive.** The
+    dirty-tab first press re-applies the current template regardless of how
+    many panes fit it (live: three panes crammed into a one-slot base); it
+    folds to the *template*, not to the current arrangement.
+32. **Tab ids and tab positions are different index spaces.**
+    `PaneManifest` keys and `TabInfo.position` are display positions;
+    `dump_session_layout_for_tab` and `get_focused_pane_info` speak the
+    server's stable tab id (`screen.tabs` is keyed by `tab.id`,
+    `active_tab_ids` stores ids — v0.44.1 source). They match until any tab
+    is closed or moved. `TabInfo.tab_id` carries the id; translate at every
+    boundary.
+33. **`override_layout` and swap presses race when fired back-to-back.**
+    The override dispatches on a spawned server thread
+    (`run_action`, `zellij_exports.rs:1421`) while
+    `next/previous_swap_layout` route synchronously, so an immediate press
+    can cycle the *old* swap set. Defer the press until `TabUpdate` reports
+    the override's signature: position 0 ("BASE") with the damage consumed.
+
+    Unresolved (2026-07-03): CLI `override-layout --apply-only-to-active-tab`
+    silently no-oped twice on a chrome-only-template tab — client attached
+    and focused, KDL parse-clean, exit 0, zero server log lines, tab
+    byte-identical — while the same CLI form worked twice the previous day
+    and the plugin host-call override has always worked. Conditions not
+    understood; live validation of anything override-based must watch for
+    this failure class.
 
 ## If building v2 from scratch
 
 1. **Manifest-derived state machine.** One `State` struct recomputed from
    `PaneUpdate`/`TabUpdate`; the only persistent fields are user intent
-   (nav mode). All decisions as pure functions
-   (`decide_toggle` + tests worked well — extend the pattern).
+   (nav mode, an in-flight toggle's deferred swap step). All decisions as
+   pure functions (`decide_toggle` + tests worked well — extend the
+   pattern).
 2. **Two-phase commands.** Event/pipe handlers only *record* intended side
    effects; a drain step executes them from a safe context, never calling
    response-reading shims from `pipe()`/`load()`. No `unwrap` anywhere near
    shim responses.
 3. **Layout-first placement.** The sidebar pane lives in every toggled tab's
    layout, with docked and undocked (`size=1` sliver) `swap_tiled_layout`
-   states; toggling cycles swap layouts only. The default layout stays
+   states; toggling steers swap layouts by name (see #29), and a damaged tab
+   first regenerates its swap set around the current arrangement
+   (`docs/docking-approach.md`, Toggle v3). The default layout stays
    chrome-only with an explicit `tab { pane }` (see #27); tabs get the
    sidebar + swap set from `new-tab --layout zaphod` at birth or from a
    one-time `override_layout` retrofit on first toggle — complete KDL:

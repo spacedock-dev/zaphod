@@ -25,12 +25,34 @@ struct Sidebar {
     nav_selected: usize,
     return_focus: Option<u32>,
     active_tab: Option<usize>,
-    // Per-tab is_swap_layout_dirty: a damaged tab needs two next_swap_layout
-    // calls to advance. Caveat: zellij reports (None, false) for tabs with at
-    // most one selectable tiled pane, so damage there is invisible.
-    tab_swap_dirty: BTreeMap<usize, bool>,
+    // Per-tab swap-layout state keyed by display position. Caveat: zellij
+    // reports (None, false) for tabs with at most one selectable tiled pane,
+    // so swap damage there is invisible.
+    tab_states: BTreeMap<usize, TabState>,
     own_floating: bool,
     instances: Vec<SidebarInstance>,
+    pending_steer: Option<PendingSteer>,
+}
+
+// A swap step recorded by regenerate_swaps and deferred until TabUpdate
+// confirms the overridden swap set is installed: the server dispatches the
+// override on its own thread, so a press fired immediately after could
+// still cycle the old swap set.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct PendingSteer {
+    tab: usize,
+    backwards: bool,
+}
+
+// One tab's swap-layout state from TabUpdate. `id` is the server's stable
+// tab id — the key dump_session_layout_for_tab and get_focused_pane_info
+// speak — which diverges from the display position once any tab is closed
+// or reordered.
+#[derive(Debug, Clone, PartialEq, Default)]
+struct TabState {
+    id: usize,
+    swap_name: Option<String>,
+    swap_dirty: bool,
 }
 
 // One sidebar plugin pane somewhere in the session, as seen in the manifest.
@@ -56,9 +78,22 @@ enum LineTarget {
     None,
 }
 
+// The two sidebar presentation states a tab's swap set encodes: a 28-col
+// rail or a 1-col sliver.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum DockState {
+    Docked,
+    Undocked,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ToggleAction {
-    SwapLayout { calls: u8 },
+    // One deliberate swap step: forwards (next) or backwards (previous)
+    // through the installed [BASE, docked, undocked] order.
+    SteerSwap { backwards: bool },
+    // Rebuild the tab's swap set around its current pane arrangement, then
+    // steer to the target state.
+    RegenerateSwaps { target: DockState },
     Retrofit,
     Ignore,
 }
@@ -130,10 +165,30 @@ impl ZellijPlugin for Sidebar {
             }
             Event::TabUpdate(tabs) => {
                 self.active_tab = tabs.iter().find(|t| t.active).map(|t| t.position);
-                self.tab_swap_dirty = tabs
+                self.tab_states = tabs
                     .iter()
-                    .map(|t| (t.position, t.is_swap_layout_dirty))
+                    .map(|t| {
+                        (
+                            t.position,
+                            TabState {
+                                id: t.tab_id,
+                                swap_name: t.active_swap_layout_name.clone(),
+                                swap_dirty: t.is_swap_layout_dirty,
+                            },
+                        )
+                    })
                     .collect();
+                if let Some(pending) = self.pending_steer {
+                    match pending_steer_disposition(pending.tab, self.active_tab, &self.tab_states)
+                    {
+                        SteerDisposition::Fire => {
+                            self.pending_steer = None;
+                            steer_swap(pending.backwards);
+                        }
+                        SteerDisposition::Drop => self.pending_steer = None,
+                        SteerDisposition::Keep => {}
+                    }
+                }
                 false
             }
             Event::PaneUpdate(manifest) => {
@@ -235,7 +290,8 @@ impl Sidebar {
         if !self.permissions_granted {
             return self.active_tab;
         }
-        let active_tab = active_tab_for_decision(self.active_tab, get_focused_pane_info());
+        let active_tab =
+            active_tab_for_decision(self.active_tab, get_focused_pane_info(), &self.tab_states);
         self.active_tab = active_tab;
         active_tab
     }
@@ -272,29 +328,27 @@ impl Sidebar {
     }
 
     fn perform_toggle(&mut self) {
+        // A fresh press supersedes any steer still waiting on an override.
+        self.pending_steer = None;
         let active_tab = self.current_active_tab();
-        let active_swap_dirty = active_tab
-            .and_then(|tab| self.tab_swap_dirty.get(&tab).copied())
-            .unwrap_or(false);
+        let active_state = active_tab.and_then(|tab| self.tab_states.get(&tab));
+        let active_swap_name = active_state.and_then(|state| state.swap_name.clone());
+        let active_swap_dirty = active_state.is_some_and(|state| state.swap_dirty);
         match decide_toggle(
             self.own_tab,
             self.own_floating,
             active_tab,
+            active_swap_name.as_deref(),
             active_swap_dirty,
             self.plugin_id,
             &self.instances,
         ) {
-            ToggleAction::SwapLayout { calls } => {
+            ToggleAction::SteerSwap { backwards } => {
                 // Flip docked <-> sliver by rearranging the tab's existing
-                // panes; the plugin pane itself never hides or moves. Zellij
-                // inserts every tab's birth layout as swap position 0, named
-                // BASE and constrained to the exact birth pane count, so the
-                // first press on a tab can be visually silent: it steps
-                // BASE -> docked, which are geometrically identical.
-                for _ in 0..calls {
-                    next_swap_layout();
-                }
+                // panes; the plugin pane itself never hides or moves.
+                steer_swap(backwards);
             }
+            ToggleAction::RegenerateSwaps { target } => self.regenerate_swaps(target),
             ToggleAction::Retrofit => {
                 // A tab without a docked sidebar gets its layout replaced
                 // once, docking the sidebar and installing the swap set;
@@ -311,6 +365,48 @@ impl Sidebar {
             }
             ToggleAction::Ignore => {}
         }
+    }
+
+    // Rebuild the tab's swap set around its current pane arrangement so the
+    // toggle preserves the user's manual splits, then steer to the target
+    // state. Any missing input degrades to plain cycling: on a damaged tab
+    // zellij's first call re-applies the current template and the second
+    // advances — the arrangement snap-folds, but the toggle still lands.
+    fn regenerate_swaps(&mut self, target: DockState) {
+        // The dump blocks on a host response that only exists post-grant
+        // (like get_focused_pane_info, it panics in the shim pre-grant).
+        if !self.permissions_granted {
+            return fallback_swap_cycle();
+        }
+        let (Some(own_tab), Some(url)) = (self.own_tab, self.own_url.clone()) else {
+            return fallback_swap_cycle();
+        };
+        let Some(tab_id) = self.tab_states.get(&own_tab).map(|state| state.id) else {
+            return fallback_swap_cycle();
+        };
+        // In-band errors and a 1s server-side timeout; a stale tab id dumps
+        // no tab node and fails the rebuild below.
+        let Ok((dump, _metadata)) = dump_session_layout_for_tab(tab_id) else {
+            return fallback_swap_cycle();
+        };
+        let Ok(layout) = split_preserving_layout_kdl(&dump, &url, &self.config) else {
+            return fallback_swap_cycle();
+        };
+        override_layout(
+            LayoutInfo::Stringified(layout),
+            true, // retain existing terminal panes
+            true, // retain existing plugin panes
+            true, // apply only to the active tab
+            BTreeMap::new(),
+        );
+        // The override leaves the tab at BASE (the absorb stack) with its
+        // damage consumed; from there docked sits one step forward and
+        // undocked one step back (previous wraps position 0 to the list
+        // end). The press fires on the TabUpdate that reports that state.
+        self.pending_steer = Some(PendingSteer {
+            tab: own_tab,
+            backwards: target == DockState::Undocked,
+        });
     }
 
     // Returns whether any row's agent fields changed (i.e. a render is due).
@@ -331,9 +427,12 @@ impl Sidebar {
 }
 
 // The pipe broadcasts to every config-matched instance; exactly one may act.
-// - The active tab's tiled resident cycles the tab's swap layout — with two
-//   next_swap_layout calls when the tab is damaged (manual split/resize):
-//   zellij's first call then only re-applies the current template.
+// - The active tab's tiled resident steers the tab's swap layout one step
+//   toward the other dock state, by name — never by blind cycling, whose
+//   position semantics around BASE and the list end are unreliable.
+// - When the tab is damaged (manual split/resize), a swap step would
+//   snap-fold the user's arrangement into a stale template; the resident
+//   instead rebuilds the swap set around the current arrangement.
 // - A floating resident (keybind bootstrap) has no swap set to cycle: it
 //   retrofits its own tab, docking itself and installing the swap set.
 // - A tab with no sidebar gets a one-time override_layout retrofit; the
@@ -342,6 +441,7 @@ fn decide_toggle(
     own_tab: Option<usize>,
     own_floating: bool,
     active_tab: Option<usize>,
+    active_swap_name: Option<&str>,
     active_swap_dirty: bool,
     own_pane_id: u32,
     instances: &[SidebarInstance],
@@ -350,8 +450,22 @@ fn decide_toggle(
         return ToggleAction::Ignore;
     };
     if own_tab == Some(active) && !own_floating {
-        ToggleAction::SwapLayout {
-            calls: if active_swap_dirty { 2 } else { 1 },
+        // "undocked" is position 2 of [BASE, docked, undocked]: one step
+        // back reaches docked. From docked, BASE (geometrically docked on
+        // template-born tabs), or any foreign name, one step forward
+        // reaches the next fitting state without crossing the list end.
+        if active_swap_dirty {
+            ToggleAction::RegenerateSwaps {
+                target: if active_swap_name == Some("undocked") {
+                    DockState::Docked
+                } else {
+                    DockState::Undocked
+                },
+            }
+        } else {
+            ToggleAction::SteerSwap {
+                backwards: active_swap_name == Some("undocked"),
+            }
         }
     } else if instances.iter().any(|i| i.tab == active && !i.floating) {
         // The tab's tiled sidebar owns the toggle; a floating instance there
@@ -376,6 +490,50 @@ fn decide_toggle(
     } else {
         ToggleAction::Ignore
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SteerDisposition {
+    Fire,
+    Keep,
+    Drop,
+}
+
+// A steered press recorded by regenerate_swaps waits for the server to
+// report the regenerated swap set installed on the tab: position 0
+// ("BASE") with the override's damage consumed. Swap presses act on the
+// client's active tab, so the press is abandoned when the tab is gone or
+// no longer active — the regenerated set stays installed and a later press
+// on the tab steers from BASE.
+fn pending_steer_disposition(
+    tab: usize,
+    active_tab: Option<usize>,
+    tab_states: &BTreeMap<usize, TabState>,
+) -> SteerDisposition {
+    match tab_states.get(&tab) {
+        None => SteerDisposition::Drop,
+        Some(_) if active_tab != Some(tab) => SteerDisposition::Drop,
+        Some(state) if state.swap_name.as_deref() == Some("BASE") && !state.swap_dirty => {
+            SteerDisposition::Fire
+        }
+        Some(_) => SteerDisposition::Keep,
+    }
+}
+
+fn steer_swap(backwards: bool) {
+    if backwards {
+        previous_swap_layout();
+    } else {
+        next_swap_layout();
+    }
+}
+
+// Dirty-tab cycling without a regenerated swap set: zellij's first call
+// only re-applies the current template (consuming the damage), the second
+// advances.
+fn fallback_swap_cycle() {
+    next_swap_layout();
+    next_swap_layout();
 }
 
 // Any click on the header — the ⇄ control or the title text — runs the same
@@ -405,10 +563,6 @@ fn should_hand_back_focus(own_focused: bool, nav_mode: bool, has_focus_target: b
 // KDL omits is dropped. The tab node stays unnamed so the user's tab name
 // survives the override.
 fn retrofit_layout_kdl(plugin_url: &str, config: &BTreeMap<String, String>) -> String {
-    let config_lines: String = config
-        .iter()
-        .map(|(key, value)| format!("                {key} \"{value}\"\n"))
-        .collect();
     let tab_body = |sidebar_cols: usize| {
         format!(
             r#"  tab {{
@@ -416,11 +570,7 @@ fn retrofit_layout_kdl(plugin_url: &str, config: &BTreeMap<String, String>) -> S
         plugin location="zellij:tab-bar"
     }}
     pane split_direction="vertical" {{
-        pane size={sidebar_cols} borderless=true name="sidebar" {{
-            plugin location="{plugin_url}" {{
-{config_lines}            }}
-        }}
-        pane stacked=true {{
+{rail}        pane stacked=true {{
             children
         }}
     }}
@@ -428,7 +578,8 @@ fn retrofit_layout_kdl(plugin_url: &str, config: &BTreeMap<String, String>) -> S
         plugin location="zellij:status-bar"
     }}
   }}
-"#
+"#,
+            rail = rail_pane_kdl(plugin_url, config, sidebar_cols)
         )
     };
     format!(
@@ -439,13 +590,249 @@ fn retrofit_layout_kdl(plugin_url: &str, config: &BTreeMap<String, String>) -> S
     )
 }
 
+// The sidebar's own slot in a generated layout. The plugin block repeats
+// the live instance's URL and configuration exactly, so layout application
+// re-seats the existing pane instead of spawning a second instance.
+fn rail_pane_kdl(plugin_url: &str, config: &BTreeMap<String, String>, cols: usize) -> String {
+    let config_lines: String = config
+        .iter()
+        .map(|(key, value)| format!("                {key} \"{value}\"\n"))
+        .collect();
+    format!(
+        r#"        pane size={cols} borderless=true name="sidebar" {{
+            plugin location="{plugin_url}" {{
+{config_lines}            }}
+        }}
+"#
+    )
+}
+
+// Builds the layout regenerate_swaps overrides a damaged tab with: the base
+// absorbs every pane into a rail + stacked children tab (the only
+// retained-pane-correct shape for an override), while the docked/undocked
+// swaps carry the tab's dumped arrangement so the follow-up steer re-seats
+// the user's splits with only the rail width changed. The dump arrives with
+// the requesting plugin's own rail already removed by the server; the
+// dumped chrome rows ride along verbatim so base and swaps stay
+// chrome-consistent with the live tab (a chrome mismatch destroys the
+// chrome panes on fold and wedges the tab, since swaps never spawn).
+fn split_preserving_layout_kdl(
+    dump: &str,
+    plugin_url: &str,
+    config: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    let body = extract_tab_body(dump)?;
+    let blocks: Vec<Vec<String>> = top_level_blocks(&body)
+        .into_iter()
+        .filter(|block| !is_floating_panes_block(block))
+        .map(|block| {
+            block
+                .iter()
+                .map(|line| remove_prop(&remove_prop(line, "focus"), "name"))
+                .collect()
+        })
+        .collect();
+    let first = blocks
+        .iter()
+        .position(|block| !is_chrome_block(block))
+        .ok_or_else(|| "dumped tab has no panes besides chrome".to_owned())?;
+    let last = blocks.iter().rposition(|block| !is_chrome_block(block)).unwrap();
+    let (chrome_top, rest) = blocks.split_at(first);
+    let (region, chrome_bottom) = rest.split_at(last - first + 1);
+
+    let region_kdl = if region.len() == 1 {
+        // A single container fills whatever remains next to the rail; its
+        // dumped size described the tab before the rail was removed.
+        let mut lines = region[0].clone();
+        lines[0] = remove_prop(&lines[0], "size");
+        lines.join("\n") + "\n"
+    } else {
+        // Sibling rows keep their relative sizes inside one flexible
+        // container (default split direction: top-to-bottom, as in the tab).
+        format!(
+            "pane {{\n{}\n}}\n",
+            region.iter().flatten().cloned().collect::<Vec<_>>().join("\n")
+        )
+    };
+    let chrome_kdl = |chrome: &[Vec<String>]| {
+        if chrome.is_empty() {
+            String::new()
+        } else {
+            chrome.iter().flatten().cloned().collect::<Vec<_>>().join("\n") + "\n"
+        }
+    };
+    let chrome_top = chrome_kdl(chrome_top);
+    let chrome_bottom = chrome_kdl(chrome_bottom);
+    let tab_kdl = |cols: usize, main: &str| {
+        format!(
+            "tab {{\n{chrome_top}pane split_direction=\"vertical\" {{\n{rail}{main}}}\n{chrome_bottom}}}\n",
+            rail = rail_pane_kdl(plugin_url, config, cols),
+        )
+    };
+    Ok(format!(
+        "layout {{\nswap_tiled_layout name=\"docked\" {{\n{docked}}}\nswap_tiled_layout name=\"undocked\" {{\n{undocked}}}\n{base}}}\n",
+        docked = tab_kdl(DOCKED_COLS, &region_kdl),
+        undocked = tab_kdl(UNDOCKED_COLS, &region_kdl),
+        base = tab_kdl(DOCKED_COLS, "pane stacked=true {\nchildren\n}\n"),
+    ))
+}
+
+// Lines between the first depth-1 `tab` node's braces in a dumped layout.
+// The dump is machine-generated multi-line KDL, so tracking brace depth per
+// line (ignoring braces inside quoted strings) is structure-exact.
+fn extract_tab_body(dump: &str) -> Result<Vec<String>, String> {
+    let mut depth = 0isize;
+    let mut capturing = false;
+    let mut body = Vec::new();
+    for line in dump.lines() {
+        let trimmed = line.trim();
+        let delta = brace_delta(line);
+        if capturing {
+            if depth + delta <= 1 {
+                return Ok(body);
+            }
+            body.push(line.to_owned());
+        } else if depth == 1 && (trimmed == "tab" || trimmed.starts_with("tab ")) {
+            if delta != 1 {
+                return Err("unsupported tab node shape in dump".to_owned());
+            }
+            capturing = true;
+        }
+        depth += delta;
+    }
+    Err("no tab node in dump".to_owned())
+}
+
+// Splits a node body into its immediate child nodes, each a run of lines.
+fn top_level_blocks(body: &[String]) -> Vec<Vec<String>> {
+    let mut blocks = Vec::new();
+    let mut current = Vec::new();
+    let mut depth = 0isize;
+    for line in body {
+        current.push(line.clone());
+        depth += brace_delta(line);
+        if depth <= 0 {
+            blocks.push(std::mem::take(&mut current));
+            depth = 0;
+        }
+    }
+    if !current.is_empty() {
+        blocks.push(current);
+    }
+    blocks
+}
+
+// Chrome rows — fixed-height borderless built-in plugins like the tab-bar
+// and status-bar — frame the user's panes at the tab's top and bottom.
+fn is_chrome_block(block: &[String]) -> bool {
+    block.first().is_some_and(|l| l.contains("borderless=true"))
+        && block
+            .iter()
+            .any(|l| l.contains("plugin location=\"zellij:"))
+}
+
+fn is_floating_panes_block(block: &[String]) -> bool {
+    block
+        .first()
+        .is_some_and(|l| l.trim().split_whitespace().next() == Some("floating_panes"))
+}
+
+// Net brace-depth change of one KDL line; braces inside quoted strings
+// (pane titles, cwds) do not count.
+fn brace_delta(line: &str) -> isize {
+    let mut delta = 0;
+    let mut in_string = false;
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if in_string => {
+                chars.next();
+            }
+            '"' => in_string = !in_string,
+            '{' if !in_string => delta += 1,
+            '}' if !in_string => delta -= 1,
+            _ => {}
+        }
+    }
+    delta
+}
+
+// Removes every `key=value` property from a KDL line — quoted or bare
+// values — matching only outside quoted strings, so a cwd or title that
+// happens to contain `key=` is left alone.
+fn remove_prop(line: &str, key: &str) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let pattern: Vec<char> = format!("{key}=").chars().collect();
+    let mut out = String::new();
+    let mut in_string = false;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_string {
+            out.push(c);
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        let at_token_start = i > 0 && chars[i - 1].is_whitespace();
+        if at_token_start && chars[i..].starts_with(&pattern[..]) {
+            let mut j = i + pattern.len();
+            if chars.get(j) == Some(&'"') {
+                j += 1;
+                while j < chars.len() {
+                    match chars[j] {
+                        '\\' => j += 2,
+                        '"' => {
+                            j += 1;
+                            break;
+                        }
+                        _ => j += 1,
+                    }
+                }
+            } else {
+                while j < chars.len() && !chars[j].is_whitespace() && chars[j] != '{' && chars[j] != '}' {
+                    j += 1;
+                }
+            }
+            if out.ends_with(' ') {
+                out.pop();
+            }
+            i = j;
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
+// get_focused_pane_info reports the server's stable tab id; everything else
+// in the plugin (own_tab, instance tabs) speaks display positions, so the
+// id is translated through the TabUpdate-derived states. An id with no
+// position yet (stale TabUpdate) falls back to the cached position.
 fn active_tab_for_decision(
     cached_active_tab: Option<usize>,
     focused_pane_info: Result<(usize, PaneId), String>,
+    tab_states: &BTreeMap<usize, TabState>,
 ) -> Option<usize> {
     focused_pane_info
-        .map(|(tab, _)| tab)
         .ok()
+        .and_then(|(tab_id, _)| {
+            tab_states
+                .iter()
+                .find(|(_, state)| state.id == tab_id)
+                .map(|(position, _)| *position)
+        })
         .or(cached_active_tab)
 }
 
@@ -596,6 +983,23 @@ mod tests {
             pane_id,
             tab,
             floating,
+        }
+    }
+
+    fn tab_info(
+        position: usize,
+        tab_id: usize,
+        active: bool,
+        swap_name: Option<&str>,
+        swap_dirty: bool,
+    ) -> TabInfo {
+        TabInfo {
+            position,
+            tab_id,
+            active,
+            active_swap_layout_name: swap_name.map(str::to_owned),
+            is_swap_layout_dirty: swap_dirty,
+            ..Default::default()
         }
     }
 
@@ -752,23 +1156,57 @@ mod tests {
     }
 
     #[test]
-    fn resident_instance_in_active_tab_cycles_swap_layout() {
+    fn clean_tab_steers_between_docked_and_undocked_by_swap_name() {
+        // Installed order is [BASE, docked, undocked]; steering by the
+        // reported name avoids the position quirks of blind cycling around
+        // BASE and the end of the list.
         let instances = [inst(7, 1, false)];
+        let steer = |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, false, 7, &instances);
         assert_eq!(
-            decide_toggle(Some(1), false, Some(1), false, 7, &instances),
-            ToggleAction::SwapLayout { calls: 1 }
+            steer(Some("docked")),
+            ToggleAction::SteerSwap { backwards: false }
+        );
+        assert_eq!(
+            steer(Some("undocked")),
+            ToggleAction::SteerSwap { backwards: true }
+        );
+        // BASE is geometrically identical to docked on template-born tabs;
+        // stepping forward reaches docked without crossing the list end.
+        assert_eq!(
+            steer(Some("BASE")),
+            ToggleAction::SteerSwap { backwards: false }
+        );
+        assert_eq!(steer(None), ToggleAction::SteerSwap { backwards: false });
+        assert_eq!(
+            steer(Some("vertical")),
+            ToggleAction::SteerSwap { backwards: false }
         );
     }
 
     #[test]
-    fn dirty_tab_needs_two_swap_calls_to_actually_flip() {
-        // On a damaged tab (manual split/resize) zellij's first
-        // next_swap_layout only re-applies the current template without
-        // advancing, so one press must issue two calls.
+    fn dirty_tab_regenerates_swaps_toward_the_other_state() {
+        // A damaged tab (manual split/resize) would snap-fold to a stale
+        // template on the next swap; instead the swap set is rebuilt around
+        // the current arrangement and steered to the opposite state.
         let instances = [inst(7, 1, false)];
+        let regen = |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, true, 7, &instances);
         assert_eq!(
-            decide_toggle(Some(1), false, Some(1), true, 7, &instances),
-            ToggleAction::SwapLayout { calls: 2 }
+            regen(Some("docked")),
+            ToggleAction::RegenerateSwaps {
+                target: DockState::Undocked
+            }
+        );
+        assert_eq!(
+            regen(Some("undocked")),
+            ToggleAction::RegenerateSwaps {
+                target: DockState::Docked
+            }
+        );
+        assert_eq!(
+            regen(Some("BASE")),
+            ToggleAction::RegenerateSwaps {
+                target: DockState::Undocked
+            }
         );
     }
 
@@ -776,7 +1214,7 @@ mod tests {
     fn defers_to_the_resident_instance_of_the_active_tab() {
         let instances = [inst(7, 1, false), inst(9, 3, false)];
         assert_eq!(
-            decide_toggle(Some(1), false, Some(3), false, 7, &instances),
+            decide_toggle(Some(1), false, Some(3), None, false, 7, &instances),
             ToggleAction::Ignore
         );
     }
@@ -785,11 +1223,11 @@ mod tests {
     fn lowest_id_instance_retrofits_a_tab_without_a_sidebar() {
         let instances = [inst(7, 1, false), inst(9, 2, false)];
         assert_eq!(
-            decide_toggle(Some(1), false, Some(5), false, 7, &instances),
+            decide_toggle(Some(1), false, Some(5), None, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(2), false, Some(5), false, 9, &instances),
+            decide_toggle(Some(2), false, Some(5), None, false, 9, &instances),
             ToggleAction::Ignore
         );
     }
@@ -797,7 +1235,7 @@ mod tests {
     #[test]
     fn ignores_toggle_when_active_tab_is_unknown() {
         assert_eq!(
-            decide_toggle(Some(1), false, None, false, 7, &[inst(7, 1, false)]),
+            decide_toggle(Some(1), false, None, None, false, 7, &[inst(7, 1, false)]),
             ToggleAction::Ignore
         );
     }
@@ -809,7 +1247,7 @@ mod tests {
         // resident retrofits its own tab instead of dead-cycling.
         let instances = [inst(7, 1, true)];
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), false, 7, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, 7, &instances),
             ToggleAction::Retrofit
         );
     }
@@ -821,12 +1259,12 @@ mod tests {
         // every toggle would fire another retrofit.
         let instances = [inst(7, 1, true), inst(9, 1, false)];
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), false, 7, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, 7, &instances),
             ToggleAction::Ignore
         );
         assert_eq!(
-            decide_toggle(Some(1), false, Some(1), false, 9, &instances),
-            ToggleAction::SwapLayout { calls: 1 }
+            decide_toggle(Some(1), false, Some(1), Some("docked"), false, 9, &instances),
+            ToggleAction::SteerSwap { backwards: false }
         );
     }
 
@@ -836,11 +1274,11 @@ mod tests {
         // both fire the override.
         let instances = [inst(7, 1, true), inst(9, 1, true)];
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), false, 7, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), false, 9, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, 9, &instances),
             ToggleAction::Ignore
         );
     }
@@ -851,12 +1289,12 @@ mod tests {
         // resident acts, whether tiled or floating.
         let instances = [inst(7, 2, true), inst(9, 1, false)];
         assert_eq!(
-            decide_toggle(Some(2), true, Some(1), false, 7, &instances),
+            decide_toggle(Some(2), true, Some(1), None, false, 7, &instances),
             ToggleAction::Ignore
         );
         let instances = [inst(7, 2, true), inst(9, 1, true)];
         assert_eq!(
-            decide_toggle(Some(2), true, Some(1), false, 7, &instances),
+            decide_toggle(Some(2), true, Some(1), None, false, 7, &instances),
             ToggleAction::Ignore
         );
     }
@@ -867,31 +1305,124 @@ mod tests {
         // retrofits it, floating or not.
         let instances = [inst(7, 2, true), inst(9, 3, false)];
         assert_eq!(
-            decide_toggle(Some(2), true, Some(5), false, 7, &instances),
+            decide_toggle(Some(2), true, Some(5), None, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(3), false, Some(5), false, 9, &instances),
+            decide_toggle(Some(3), false, Some(5), None, false, 9, &instances),
             ToggleAction::Ignore
         );
     }
 
     #[test]
-    fn tab_update_records_swap_dirty_state_per_tab() {
-        let tab = |position: usize, active: bool, dirty: bool| TabInfo {
-            position,
-            active,
-            is_swap_layout_dirty: dirty,
-            ..Default::default()
-        };
+    fn tab_update_records_swap_state_per_tab() {
         let mut sidebar = Sidebar::default();
         sidebar.update(Event::TabUpdate(vec![
-            tab(0, false, false),
-            tab(1, true, true),
+            tab_info(0, 5, false, Some("BASE"), false),
+            tab_info(1, 7, true, Some("docked"), true),
         ]));
         assert_eq!(sidebar.active_tab, Some(1));
-        assert_eq!(sidebar.tab_swap_dirty.get(&0), Some(&false));
-        assert_eq!(sidebar.tab_swap_dirty.get(&1), Some(&true));
+        assert_eq!(
+            sidebar.tab_states.get(&0),
+            Some(&TabState {
+                id: 5,
+                swap_name: Some("BASE".to_owned()),
+                swap_dirty: false,
+            })
+        );
+        assert_eq!(
+            sidebar.tab_states.get(&1),
+            Some(&TabState {
+                id: 7,
+                swap_name: Some("docked".to_owned()),
+                swap_dirty: true,
+            })
+        );
+    }
+
+    #[test]
+    fn pending_steer_fires_only_once_the_regenerated_swap_set_reports_in() {
+        // After the swap-set override the server reports the tab at BASE
+        // with the damage consumed; only then may the steered press fire —
+        // earlier it would cycle the old swap set (the override is
+        // dispatched on its own server thread).
+        let states = |name: Option<&str>, dirty: bool| {
+            let mut map = BTreeMap::new();
+            map.insert(
+                1,
+                TabState {
+                    id: 4,
+                    swap_name: name.map(str::to_owned),
+                    swap_dirty: dirty,
+                },
+            );
+            map
+        };
+        assert_eq!(
+            pending_steer_disposition(1, Some(1), &states(Some("BASE"), false)),
+            SteerDisposition::Fire
+        );
+        assert_eq!(
+            pending_steer_disposition(1, Some(1), &states(Some("docked"), true)),
+            SteerDisposition::Keep
+        );
+        assert_eq!(
+            pending_steer_disposition(1, Some(1), &states(Some("BASE"), true)),
+            SteerDisposition::Keep
+        );
+        // The tab vanished (closed) — the press has nowhere to go.
+        assert_eq!(
+            pending_steer_disposition(2, Some(1), &states(Some("BASE"), false)),
+            SteerDisposition::Drop
+        );
+        // The user switched away: swap presses act on the client's active
+        // tab, so firing now would steer the wrong tab. The regenerated
+        // set stays installed; a later press on the tab steers from BASE.
+        assert_eq!(
+            pending_steer_disposition(1, Some(3), &states(Some("BASE"), false)),
+            SteerDisposition::Drop
+        );
+    }
+
+    #[test]
+    fn tab_update_fires_the_pending_steer_once_the_override_lands() {
+        let mut sidebar = Sidebar::default();
+        sidebar.pending_steer = Some(PendingSteer {
+            tab: 1,
+            backwards: true,
+        });
+        // Override not yet applied: the tab still reports its old state.
+        sidebar.update(Event::TabUpdate(vec![tab_info(
+            1,
+            7,
+            true,
+            Some("docked"),
+            true,
+        )]));
+        assert!(sidebar.pending_steer.is_some());
+        // Override landed (BASE, damage consumed): the steer fires and
+        // clears.
+        sidebar.update(Event::TabUpdate(vec![tab_info(
+            1,
+            7,
+            true,
+            Some("BASE"),
+            false,
+        )]));
+        assert!(sidebar.pending_steer.is_none());
+        // A press for a tab that no longer exists is abandoned.
+        sidebar.pending_steer = Some(PendingSteer {
+            tab: 9,
+            backwards: false,
+        });
+        sidebar.update(Event::TabUpdate(vec![tab_info(
+            1,
+            7,
+            true,
+            Some("BASE"),
+            false,
+        )]));
+        assert!(sidebar.pending_steer.is_none());
     }
 
     #[test]
@@ -932,12 +1463,29 @@ mod tests {
 
     #[test]
     fn live_focused_tab_overrides_stale_cached_active_tab() {
-        assert_eq!(
-            active_tab_for_decision(Some(1), Ok((3, PaneId::Terminal(9)))),
-            Some(3)
+        // get_focused_pane_info reports the server's stable tab id, which
+        // only matches the display position until a tab is closed or moved;
+        // the TabUpdate-derived states translate id -> position.
+        let mut tab_states = BTreeMap::new();
+        tab_states.insert(0, TabState::default());
+        tab_states.insert(
+            2,
+            TabState {
+                id: 3,
+                ..Default::default()
+            },
         );
         assert_eq!(
-            active_tab_for_decision(Some(1), Err("unavailable".to_owned())),
+            active_tab_for_decision(Some(1), Ok((3, PaneId::Terminal(9))), &tab_states),
+            Some(2)
+        );
+        assert_eq!(
+            active_tab_for_decision(Some(1), Err("unavailable".to_owned()), &tab_states),
+            Some(1)
+        );
+        // An id the TabUpdate has not caught up with falls back to the cache.
+        assert_eq!(
+            active_tab_for_decision(Some(1), Ok((9, PaneId::Terminal(9))), &tab_states),
             Some(1)
         );
     }
@@ -1016,6 +1564,257 @@ mod tests {
         let m = manifest(vec![(0, vec![pane(7, true, "sidebar", 0, true)])]);
         let rows = rows_for_own_tab(&m, 7);
         assert!(!should_hand_back_focus(true, false, !rows.is_empty()));
+    }
+
+    // A dump_session_layout_for_tab result as zellij v0.44 serializes it:
+    // the requesting plugin's own rail already removed by the server, chrome
+    // present, nested percent containers, cwds, focus on the focused pane,
+    // a floating_panes section, and the session's default-layout template
+    // and swap sections trailing the tab node.
+    fn dump_fixture() -> &'static str {
+        r#"layout {
+    tab name="Tab #1" focus=true hide_floating_panes=true {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane size="96%" split_direction="vertical" {
+            pane name="build" cwd="/Users/clkao/git/zaphod" focus=true size="62%"
+            pane size="38%" {
+                pane cwd="/tmp" size="50%"
+                pane command="claude" cwd="/Users/clkao" size="50%" {
+                    args "--continue"
+                }
+            }
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+        floating_panes {
+            pane {
+                x 10
+                y 5
+                width 86
+                height 22
+            }
+        }
+    }
+    new_tab_template {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+    swap_tiled_layout name="stacked" {
+        tab min_panes=5 {
+            pane stacked=true {
+                children
+            }
+        }
+    }
+}
+"#
+    }
+
+    fn jit_config() -> BTreeMap<String, String> {
+        let mut config = BTreeMap::new();
+        config.insert("rail".to_owned(), "1".to_owned());
+        config
+    }
+
+    #[test]
+    fn split_preserving_layout_wraps_the_dumped_arrangement_in_both_swaps() {
+        let kdl = split_preserving_layout_kdl(
+            dump_fixture(),
+            "file:/tmp/zellij-sidebar.wasm",
+            &jit_config(),
+        )
+        .unwrap();
+        assert!(kdl.contains("swap_tiled_layout name=\"docked\""));
+        assert!(kdl.contains("swap_tiled_layout name=\"undocked\""));
+        // Rail slot: 28 cols in the docked swap and the base tab, 1 col in
+        // the undocked swap; the plugin block carries the config identity.
+        assert_eq!(
+            kdl.matches("pane size=28 borderless=true name=\"sidebar\"")
+                .count(),
+            2
+        );
+        assert_eq!(
+            kdl.matches("pane size=1 borderless=true name=\"sidebar\"")
+                .count(),
+            1
+        );
+        assert_eq!(
+            kdl.matches("plugin location=\"file:/tmp/zellij-sidebar.wasm\"")
+                .count(),
+            3
+        );
+        assert_eq!(kdl.matches("rail \"1\"").count(), 3);
+        // The dumped chrome rides along verbatim in all three tab bodies,
+        // so base and swaps stay chrome-consistent with the live tab.
+        assert_eq!(kdl.matches("zellij:tab-bar").count(), 3);
+        assert_eq!(kdl.matches("zellij:status-bar").count(), 3);
+        // The user's arrangement appears in both swaps with splits, sizes,
+        // cwds and running commands intact.
+        assert_eq!(kdl.matches("size=\"62%\"").count(), 2);
+        assert_eq!(kdl.matches("size=\"38%\"").count(), 2);
+        assert_eq!(kdl.matches("cwd=\"/tmp\"").count(), 2);
+        assert_eq!(kdl.matches("command=\"claude\"").count(), 2);
+        assert_eq!(kdl.matches("args \"--continue\"").count(), 2);
+        // The base absorbs every pane into a stack; swaps re-seat from it.
+        assert!(kdl.contains("pane stacked=true"));
+        assert!(kdl.contains("children"));
+        // The rail is the left column of the vertical split.
+        assert!(kdl.find("name=\"sidebar\"").unwrap() < kdl.find("size=\"62%\"").unwrap());
+    }
+
+    #[test]
+    fn split_preserving_layout_strips_volatile_dump_attributes() {
+        let kdl = split_preserving_layout_kdl(
+            dump_fixture(),
+            "file:/tmp/zellij-sidebar.wasm",
+            &jit_config(),
+        )
+        .unwrap();
+        // focus in an override races the client's real focus; names would
+        // pin user titles; the tab name would overwrite the user's on apply
+        // (generated tab nodes stay unnamed so the live name survives).
+        assert!(!kdl.contains("focus=true"));
+        assert!(!kdl.contains("name=\"build\""));
+        assert!(!kdl.contains("tab name="));
+        assert!(!kdl.contains("hide_floating_panes"));
+        // The region container fills whatever remains next to the rail; its
+        // dumped size spoke for the pre-rail-removal geometry.
+        assert!(!kdl.contains("size=\"96%\""));
+        // Floating panes are never part of the tiled swap story.
+        assert!(!kdl.contains("floating_panes"));
+        assert!(!kdl.contains("width 86"));
+        // The session's own template and swap sections do not ride along.
+        assert!(!kdl.contains("new_tab_template"));
+        assert!(!kdl.contains("min_panes=5"));
+        assert!(!kdl.contains("swap_tiled_layout name=\"stacked\""));
+    }
+
+    #[test]
+    fn split_preserving_layout_rejects_dumps_it_cannot_rebuild_from() {
+        let config = jit_config();
+        // No tab node at all (e.g. a stale tab id matched nothing).
+        assert!(split_preserving_layout_kdl("layout {\n}\n", "file:/x.wasm", &config).is_err());
+        // Chrome-only tab: nothing of the user's to preserve.
+        let chrome_only = r#"layout {
+    tab name="Tab #2" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        assert!(split_preserving_layout_kdl(chrome_only, "file:/x.wasm", &config).is_err());
+    }
+
+    #[test]
+    fn sibling_region_rows_stay_ordered_inside_one_flexible_container() {
+        // A tab whose root splits top-to-bottom dumps the rows as siblings
+        // of the chrome; they must land next to the rail as one container
+        // keeping their order and relative sizes.
+        let dump = r#"layout {
+    tab name="Tab #3" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane cwd="/upper" size="55%"
+        pane cwd="/lower" size="43%"
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/x.wasm", &jit_config()).unwrap();
+        assert_eq!(kdl.matches("cwd=\"/upper\" size=\"55%\"").count(), 2);
+        assert_eq!(kdl.matches("cwd=\"/lower\" size=\"43%\"").count(), 2);
+        assert!(kdl.find("/upper").unwrap() < kdl.find("/lower").unwrap());
+        // Wrapped, not spliced bare into the vertical split: the two rows
+        // would otherwise become columns.
+        let docked = &kdl[..kdl.find("undocked").unwrap()];
+        let wrapper = docked.find("pane {").expect("row wrapper");
+        assert!(wrapper > docked.find("split_direction=\"vertical\"").unwrap());
+    }
+
+    #[test]
+    fn stacked_arrangements_keep_their_stack_flags() {
+        let dump = r#"layout {
+    tab name="Tab #4" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane stacked=true {
+            pane cwd="/a"
+            pane cwd="/b" expanded=true
+            pane cwd="/c"
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/x.wasm", &jit_config()).unwrap();
+        // Both swaps carry the stack (plus the base's absorb stack).
+        assert_eq!(kdl.matches("pane stacked=true").count(), 3);
+        assert_eq!(kdl.matches("expanded=true").count(), 2);
+    }
+
+    #[test]
+    fn chromeless_tabs_regenerate_without_inventing_chrome() {
+        // Swaps must carry exactly the chrome the tab actually has — adding
+        // chrome the tab lacks leaves the swap unfittable (swaps never
+        // spawn) and wedges the tab.
+        let dump = r#"layout {
+    tab name="bare" {
+        pane cwd="/only" size="50%"
+        pane cwd="/other" size="50%"
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/x.wasm", &jit_config()).unwrap();
+        assert!(!kdl.contains("zellij:"));
+        assert_eq!(kdl.matches("cwd=\"/only\"").count(), 2);
+    }
+
+    #[test]
+    fn quoted_strings_do_not_confuse_structure_or_attribute_stripping() {
+        // Titles and cwds may contain braces and attr-lookalike text; only
+        // real properties outside strings may be touched.
+        let dump = r#"layout {
+    tab name="Tab {5}" focus=true {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane name="build {debug}" cwd="/tmp/name=weird{dir" focus=true size="70%"
+        pane cwd="/plain" size="28%"
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/x.wasm", &jit_config()).unwrap();
+        assert!(!kdl.contains("build {debug}"));
+        assert!(!kdl.contains("focus=true"));
+        assert_eq!(kdl.matches("cwd=\"/tmp/name=weird{dir\"").count(), 2);
+        assert_eq!(kdl.matches("cwd=\"/plain\"").count(), 2);
+        // Structure survived: three tab bodies, all balanced.
+        assert_eq!(kdl.matches("zellij:status-bar").count(), 3);
+        assert_eq!(
+            kdl.matches('{').count(),
+            kdl.matches('}').count() + kdl.matches("weird{dir").count()
+        );
     }
 
     #[test]
