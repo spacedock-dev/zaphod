@@ -310,6 +310,24 @@ these as laws.
     crashed pane (or restart the session) to drop it from the manifest and
     let the next-lowest live instance win the election.
 
+    **v3.8 relaxation.** The lowest-id election above was removed: any
+    instance that observes a sidebar-less active tab now retrofits it, so a
+    crashed instance can no longer starve the role — the dead-tab symptom
+    above is cured, because a live instance docks the tab regardless of a
+    crashed pane's id. Concurrent retrofits (instances disagree on the active
+    tab under pipe-flood staleness, so several may act on one press) are
+    deduped by the JIT dump abort, and a redundant tiled rail — a lower
+    pane-id sidebar sharing the tab — closes itself. That cleanup could in
+    principle close a *live* rail if a crashed sidebar's dead pane lingered
+    with a lower id, but the window is unreachable: `handle_plugin_crash`
+    (`zellij-server` `wasm_bridge.rs`) only paints a panic indicator, it does
+    not remove the pane or unregister the plugin, so a crashed sidebar is
+    serialized into the layout dump with its `plugin location` exactly as it
+    appears in the manifest. A retrofit into such a tab therefore aborts on
+    the dump (it already carries a sidebar) before installing any rail, so a
+    live rail is never seated beside the dead one and the cleanup never
+    observes two sidebars — no manifest liveness signal is needed.
+
 ## If building v2 from scratch
 
 1. **Manifest-derived state machine.** One `State` struct recomputed from

@@ -271,7 +271,7 @@ impl ZellijPlugin for Sidebar {
                 // remove the pane from the very next manifest snapshot, so
                 // the flag makes the call one-shot rather than re-firing on
                 // every PaneUpdate until the manifest catches up.
-                if should_close_self(self.close_requested, self.own_floating, self.own_tab, &self.instances) {
+                if should_close_self(self.close_requested, self.plugin_id, self.own_floating, self.own_tab, &self.instances) {
                     self.close_requested = true;
                     trace!(self, "close_self firing own_tab={:?}", self.own_tab);
                     close_self();
@@ -621,8 +621,10 @@ impl Sidebar {
 //   instead rebuilds the swap set around the current arrangement.
 // - A floating resident (keybind bootstrap) has no swap set to cycle: it
 //   retrofits its own tab, docking itself and installing the swap set.
-// - A tab with no sidebar gets a one-time override_layout retrofit; the
-//   lowest-pane-id instance is the single actor so the override runs once.
+// - A tab with no sidebar gets an override_layout retrofit from any instance
+//   that observes it active — the lowest-pane-id election was dropped because
+//   instances disagree on the active tab under load. The dump abort dedupes
+//   concurrent retrofits and a redundant rail closes itself.
 fn decide_toggle(
     own_tab: Option<usize>,
     own_floating: bool,
@@ -674,22 +676,22 @@ fn decide_toggle(
         }
     } else if instances.iter().any(|i| i.tab == active) {
         ToggleAction::Ignore
-    } else if instances.iter().all(|i| i.pane_id >= own_pane_id) {
-        // The manifest shows no instance in the active tab at all, but
-        // PaneUpdate can lag TabUpdate — a swap name already ours means the
-        // tab has, or very recently had, an installed rail (an earlier
-        // retrofit, or an instance that crashed/closed there). Retrofit is
-        // a full-tab override; firing it on a tab that already carries our
-        // swap set is the corruption seeder, so the election steers the
-        // existing set instead.
-        match active_swap_name {
-            Some("docked") | Some("undocked") => ToggleAction::SteerSwap {
-                backwards: active_swap_name != Some("docked"),
-            },
-            _ => ToggleAction::Retrofit,
-        }
     } else {
-        ToggleAction::Ignore
+        // No sidebar sits in the active tab, per this instance's manifest
+        // view. Any instance that observes this retrofits it — the
+        // lowest-pane-id session election was dropped because pipe-flood
+        // staleness makes instances disagree on which tab is active, so the
+        // single permitted actor often cannot see the tab that needs docking
+        // while the instances that do see it defer (a deadlock). Concurrent
+        // retrofits are deduped by the dump abort in
+        // install_split_preserving_swaps — a loser's fresh dump sees the
+        // winner's rail — and a redundant tiled rail closes itself. Always
+        // retrofit, never a remote swap step: the dump abort covers a tab
+        // that already carries our set (the case the old steer branch
+        // guarded), and next/previous_swap_layout act on the client's active
+        // tab, so several instances steering the same reported tab would
+        // overshoot.
+        ToggleAction::Retrofit
     }
 }
 
@@ -869,17 +871,43 @@ fn is_stray_floating_bootstrap(
     own_floating && instances.iter().any(|i| i.tab == tab && !i.floating)
 }
 
+// The relaxed retrofit election can let two instances both dock a rail into
+// the same tab in one flood window (the dump abort dedupes only once a rail
+// has landed). When a tab ends up with two tiled sidebars, the higher-id one
+// is redundant and closes itself, leaving the single lowest-id resident.
+// Both read the same manifest snapshot, so the choice is deterministic. A
+// floating sidebar takes the stray-bootstrap path instead.
+fn is_redundant_tiled_sidebar(
+    own_pane_id: u32,
+    own_tab: Option<usize>,
+    own_floating: bool,
+    instances: &[SidebarInstance],
+) -> bool {
+    let Some(tab) = own_tab else {
+        return false;
+    };
+    !own_floating
+        && instances
+            .iter()
+            .any(|i| i.tab == tab && !i.floating && i.pane_id < own_pane_id)
+}
+
 // Gates close_self to one call per instance lifetime: the manifest can still
-// show the stray-floater shape on the PaneUpdate right after the call, since
-// the host has not yet dropped the pane, and a second close_self would fire
-// on every such snapshot until it does.
+// show the closing shape on the PaneUpdate right after the call, since the
+// host has not yet dropped the pane, and a second close_self would fire on
+// every such snapshot until it does. An instance closes when it is a stray
+// floating bootstrap superseded by a tiled rail, or a redundant tiled rail
+// behind a lower-id sibling.
 fn should_close_self(
     already_requested: bool,
+    own_pane_id: u32,
     own_floating: bool,
     own_tab: Option<usize>,
     instances: &[SidebarInstance],
 ) -> bool {
-    !already_requested && is_stray_floating_bootstrap(own_floating, own_tab, instances)
+    !already_requested
+        && (is_stray_floating_bootstrap(own_floating, own_tab, instances)
+            || is_redundant_tiled_sidebar(own_pane_id, own_tab, own_floating, instances))
 }
 
 // Handing focus back with nowhere to send it panics the server in the
@@ -1716,7 +1744,14 @@ mod tests {
     }
 
     #[test]
-    fn lowest_id_instance_retrofits_a_tab_without_a_sidebar() {
+    fn any_instance_retrofits_a_sidebar_less_active_tab_it_observes() {
+        // The lowest-id session election was dropped: pipe-flood staleness
+        // makes instances disagree on the active tab, so gating retrofit on a
+        // single lowest-id actor deadlocks a fresh tab when that actor's
+        // active_tab perception is stale (drill 11). Now every instance that
+        // observes a sidebar-less active tab retrofits it, regardless of pane
+        // id; concurrent retrofits are deduped by the dump abort and a
+        // redundant rail closes itself.
         let instances = [inst(7, 1, false), inst(9, 2, false)];
         assert_eq!(
             decide_toggle(Some(1), false, Some(5), None, false, 7, &instances),
@@ -1724,7 +1759,22 @@ mod tests {
         );
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), None, false, 9, &instances),
-            ToggleAction::Ignore
+            ToggleAction::Retrofit
+        );
+    }
+
+    #[test]
+    fn perception_divergence_no_longer_deadlocks_a_fresh_tab() {
+        // Drill 11: on a press for a brand-new sidebar-less tab (6), the
+        // lowest-id instance saw a STALE active tab and retrofitted the wrong
+        // one, while the instances that correctly saw tab 6 were barred by
+        // the lowest-id gate → deadlock. With the gate gone, an instance that
+        // perceives tab 6 as the sidebar-less active tab retrofits it even
+        // when a lower-id instance lives elsewhere.
+        let instances = [inst(14, 2, false), inst(16, 5, false)];
+        assert_eq!(
+            decide_toggle(Some(5), false, Some(6), None, false, 16, &instances),
+            ToggleAction::Retrofit
         );
     }
 
@@ -1796,9 +1846,9 @@ mod tests {
     }
 
     #[test]
-    fn floating_bystander_joins_the_election_for_a_sidebarless_tab() {
-        // No sidebar in the active tab: the lowest-id instance session-wide
-        // retrofits it, floating or not.
+    fn floating_bystander_retrofits_a_sidebarless_tab_too() {
+        // No sidebar in the active tab: any instance retrofits it, floating
+        // or not, regardless of pane id.
         let instances = [inst(7, 2, true), inst(9, 3, false)];
         assert_eq!(
             decide_toggle(Some(2), true, Some(5), None, false, 7, &instances),
@@ -1806,31 +1856,32 @@ mod tests {
         );
         assert_eq!(
             decide_toggle(Some(3), false, Some(5), None, false, 9, &instances),
-            ToggleAction::Ignore
+            ToggleAction::Retrofit
         );
     }
 
     #[test]
-    fn remote_election_steers_a_tab_that_already_carries_our_swap_names() {
+    fn remote_election_retrofits_even_when_the_swap_name_looks_ours() {
         // Manifest lag: TabUpdate can report a tab's swap name (docked or
-        // undocked) before PaneUpdate reflects an instance living there
-        // again (or after one crashed/closed there) — the session-wide
-        // election then sees no instance in that tab and would elect a
-        // Retrofit. A tab already flying one of our swap names has, or very
-        // recently had, an installed rail; overriding it fresh is the
-        // corruption seeder (a full replacement of the tab's arrangement).
-        // Steering is always safe once a swap name is confirmed ours.
+        // undocked) before PaneUpdate shows an instance living there again
+        // (or after one crashed there). The old election steered such a tab
+        // to dodge a corrupting fresh override. That guard is now redundant:
+        // install_split_preserving_swaps dumps the tab and aborts when the
+        // dump already carries a sidebar, so a remote instance safely
+        // retrofits — the dump catches the "already ours" case at runtime and
+        // the tab's own resident owns the steer. A remote swap step would be
+        // wrong regardless: next/previous_swap_layout act on the client's
+        // active tab, so several instances steering the same reported tab
+        // would overshoot. So every swap-name reads Retrofit now.
         let instances = [inst(7, 2, false)];
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), Some("docked"), false, 7, &instances),
-            ToggleAction::SteerSwap { backwards: false }
+            ToggleAction::Retrofit
         );
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), Some("undocked"), false, 7, &instances),
-            ToggleAction::SteerSwap { backwards: true }
+            ToggleAction::Retrofit
         );
-        // BASE, a foreign name, or no name at all: no rail is confirmed
-        // installed there, so the election still retrofits.
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), Some("BASE"), false, 7, &instances),
             ToggleAction::Retrofit
@@ -2216,11 +2267,42 @@ mod tests {
         // "Bye" lines), so is_stray_floating_bootstrap can still read true
         // afterward; a fired flag must suppress every call after the first.
         let instances = [inst(7, 1, true), inst(9, 1, false)];
-        assert!(should_close_self(false, true, Some(1), &instances));
-        assert!(!should_close_self(true, true, Some(1), &instances));
+        assert!(should_close_self(false, 7, true, Some(1), &instances));
+        assert!(!should_close_self(true, 7, true, Some(1), &instances));
         // A one-shot never re-arms, even once the manifest catches up and
         // the underlying condition reads false again.
-        assert!(!should_close_self(true, false, Some(1), &[inst(9, 1, false)]));
+        assert!(!should_close_self(true, 9, false, Some(1), &[inst(9, 1, false)]));
+    }
+
+    #[test]
+    fn redundant_tiled_sidebar_is_the_higher_id_of_two_in_a_tab() {
+        // The relaxed election can let two instances both dock a rail into
+        // the same fresh tab in one flood window (the dump abort dedupes only
+        // once a rail lands). If a tab ends up with two tiled rails, the
+        // higher-id one is redundant and closes itself, leaving the lowest-id
+        // resident. Both read the same manifest, so the choice is
+        // deterministic.
+        let two = [inst(7, 1, false), inst(9, 1, false)];
+        assert!(is_redundant_tiled_sidebar(9, Some(1), false, &two), "higher id closes");
+        assert!(!is_redundant_tiled_sidebar(7, Some(1), false, &two), "lowest id stays");
+        // A lone rail is never redundant (the common single-rail case — the
+        // regression guard).
+        assert!(!is_redundant_tiled_sidebar(7, Some(1), false, &[inst(7, 1, false)]));
+        // A floating sibling does not make a tiled rail redundant — that is
+        // the stray-floater path, and the floater is the one that closes.
+        let with_floater = [inst(7, 1, true), inst(9, 1, false)];
+        assert!(!is_redundant_tiled_sidebar(9, Some(1), false, &with_floater));
+        // A floating self uses the stray-floater path, not this one.
+        assert!(!is_redundant_tiled_sidebar(9, Some(1), true, &[inst(7, 1, false), inst(9, 1, true)]));
+    }
+
+    #[test]
+    fn close_self_also_fires_for_a_redundant_tiled_rail() {
+        let two = [inst(7, 1, false), inst(9, 1, false)];
+        assert!(should_close_self(false, 9, false, Some(1), &two), "higher-id rail closes");
+        assert!(!should_close_self(false, 7, false, Some(1), &two), "lowest-id rail stays");
+        // Still one-shot.
+        assert!(!should_close_self(true, 9, false, Some(1), &two));
     }
 
     #[test]
