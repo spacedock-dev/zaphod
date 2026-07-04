@@ -48,6 +48,13 @@ struct Sidebar {
     nav_selected: usize,
     return_focus: Option<u32>,
     active_tab: Option<usize>,
+    // The active tab as last reported by TabUpdate (server-authoritative
+    // position + active flag). Unlike active_tab — which perform_toggle
+    // overwrites with the get_focused_pane_info tab_id→position translation
+    // that diverges across instances — this is never touched by the toggle
+    // path, so it is the reliable signal the status-poll visibility gate uses
+    // to decide "is my tab the one on screen".
+    reported_active_tab: Option<usize>,
     // Per-tab swap-layout state keyed by display position. Caveat: zellij
     // reports (None, false) for tabs with at most one selectable tiled pane,
     // so swap damage there is invisible.
@@ -245,7 +252,8 @@ impl ZellijPlugin for Sidebar {
                 true
             }
             Event::TabUpdate(tabs) => {
-                self.active_tab = tabs.iter().find(|t| t.active).map(|t| t.position);
+                self.reported_active_tab = tabs.iter().find(|t| t.active).map(|t| t.position);
+                self.active_tab = self.reported_active_tab;
                 self.tab_states = tabs
                     .iter()
                     .map(|t| {
@@ -346,7 +354,7 @@ impl ZellijPlugin for Sidebar {
             }
             Event::Timer(_) => {
                 let changed =
-                    if should_poll_statuses(self.own_tab, self.active_tab, self.last_cols) {
+                    if should_poll_statuses(self.own_tab, self.reported_active_tab, self.last_cols) {
                         self.refresh_statuses()
                     } else {
                         false
@@ -2005,6 +2013,21 @@ mod tests {
         ]));
         assert!(!sidebar.tab_states.get(&0).unwrap().floating_visible);
         assert!(sidebar.tab_states.get(&1).unwrap().floating_visible);
+    }
+
+    #[test]
+    fn tab_update_records_the_reported_active_tab_for_the_poll_gate() {
+        // The poll gate reads reported_active_tab, sourced only from
+        // TabUpdate's server-authoritative t.active — not active_tab, which
+        // the toggle path overwrites with the flaky get_focused_pane_info
+        // translation.
+        let mut sidebar = Sidebar::default();
+        sidebar.update(Event::TabUpdate(vec![
+            tab_info(0, 5, false, None, false),
+            tab_info(2, 20, true, None, false),
+        ]));
+        assert_eq!(sidebar.reported_active_tab, Some(2));
+        assert_eq!(sidebar.active_tab, Some(2));
     }
 
     #[test]
