@@ -559,10 +559,23 @@ impl Sidebar {
         // relayouts the tab right after installing the set, advancing it
         // to the first fitting entry — BASE only when the absorb base's
         // exact pane count matches (single-shell tabs), "docked"
-        // otherwise. The recorded target lets the TabUpdate handler finish
-        // the toggle from whichever entry is reported.
-        self.pending_steer = Some(PendingSteer { tab, target });
-        trace!(self, "pending_steer recorded tab={} target={:?}", tab, target);
+        // otherwise. On the tab this actor lives in, the recorded target
+        // lets the TabUpdate handler finish the toggle from whichever entry
+        // is reported. On a remote tab the steer is dropped: it would act
+        // on the wrong tab (swap steps follow the client's active tab), the
+        // relayout already lands the tab docked, and the resident installed
+        // here owns every later toggle.
+        if steer_completes_locally(self.own_tab, tab) {
+            self.pending_steer = Some(PendingSteer { tab, target });
+            trace!(self, "pending_steer recorded tab={} target={:?}", tab, target);
+        } else {
+            trace!(
+                self,
+                "remote rebuild tab={} target={:?}: no steer armed (resident owns arrival)",
+                tab,
+                target
+            );
+        }
         Some(())
     }
 
@@ -740,6 +753,18 @@ fn pending_steer_disposition(
 // with a non-empty value.
 fn debug_enabled(config: &BTreeMap<String, String>) -> bool {
     config.get("debug").is_some_and(|value| !value.is_empty())
+}
+
+// A deferred steer completes only for the actor that lives in the tab it
+// rebuilt: previous/next_swap_layout act on the client's active tab, so a
+// remote actor (the election leader rebuilding a sidebar-less tab it does
+// not live in) can never fire the steer on the right tab. The override's
+// own relayout lands that tab docked with its splits preserved, and the
+// freshly installed resident owns every later toggle — so a remote actor
+// arms no steer. A held one only jams it: should_swallow_toggle then eats
+// its presses for that tab until a press on another tab supersedes it.
+fn steer_completes_locally(own_tab: Option<usize>, rebuilt_tab: usize) -> bool {
+    own_tab == Some(rebuilt_tab)
 }
 
 // Whether any manifest has named this instance yet: pre-manifest, own_url
@@ -1420,6 +1445,22 @@ mod tests {
         assert!(!debug_enabled(&config), "empty value stays silent");
         config.insert("debug".to_owned(), "1".to_owned());
         assert!(debug_enabled(&config), "non-empty value enables tracing");
+    }
+
+    #[test]
+    fn steer_is_armed_only_for_the_actors_own_tab() {
+        assert!(
+            steer_completes_locally(Some(2), 2),
+            "an actor rebuilding the tab it lives in arms the completing steer"
+        );
+        assert!(
+            !steer_completes_locally(Some(1), 2),
+            "a remote actor rebuilding a tab it does not live in arms no steer"
+        );
+        assert!(
+            !steer_completes_locally(None, 2),
+            "an actor whose own tab is unknown arms no steer"
+        );
     }
 
     #[test]
