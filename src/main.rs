@@ -528,8 +528,12 @@ impl Sidebar {
     // The shared dump → transform → override machinery behind regenerate
     // and retrofit: rebuild the tab's swap set around its dumped
     // arrangement and record the steer that completes the toggle once
-    // TabUpdate reports the new set installed. None means nothing was
-    // overridden and the caller runs its own degraded path.
+    // TabUpdate reports the new set installed. Some means the tab is
+    // handled — either the swap set was installed, or the rebuild was
+    // abandoned because the dump already carries another instance's sidebar
+    // (a lagged election re-firing on an already-retrofitted tab, which a
+    // second override would corrupt by re-absorbing its panes). None means
+    // the rebuild could not run and the caller degrades.
     fn install_split_preserving_swaps(
         &mut self,
         tab: usize,
@@ -540,6 +544,18 @@ impl Sidebar {
         // In-band errors and a 1s server-side timeout; a stale tab id dumps
         // no tab node and fails the rebuild below.
         let (dump, _metadata) = dump_session_layout_for_tab(tab_id).ok()?;
+        // The dump is authoritative current state, immune to the PaneUpdate
+        // instance-list lag that lets a remote election re-fire on a tab
+        // whose freshly installed resident it has not yet seen. If a sidebar
+        // already lives in the tiled region, the resident owns the tab.
+        if dump_contains_sidebar(&dump, &url) {
+            trace!(
+                self,
+                "rebuild aborted tab={}: dump already carries a sidebar (resident owns it)",
+                tab
+            );
+            return Some(());
+        }
         let layout = split_preserving_layout_kdl(&dump, &url, &self.config).ok()?;
         trace!(
             self,
@@ -1000,6 +1016,33 @@ fn split_preserving_layout_kdl(
         undocked = tab_kdl(UNDOCKED_COLS, &region_kdl),
         base = tab_kdl(DOCKED_COLS, "pane stacked=true {\nchildren\n}\n"),
     ))
+}
+
+// Whether the dumped tab already carries a sidebar rail in its tiled region
+// — a resident another instance installed. The server strips only the
+// requesting plugin's own pane from a dump
+// (populate_session_layout_metadata), so any sidebar pane surviving here
+// belongs to a different instance: the tab is already retrofitted and its
+// resident owns it. The floating layer is skipped — a transient bootstrap
+// floater does not own the tab's tiled arrangement.
+fn dump_contains_sidebar(dump: &str, own_url: &str) -> bool {
+    let Ok(body) = extract_tab_body(dump) else {
+        return false;
+    };
+    top_level_blocks(&body)
+        .iter()
+        .filter(|block| !is_floating_panes_block(block))
+        .any(|block| block_has_sidebar(block, own_url))
+}
+
+fn block_has_sidebar(block: &[String], own_url: &str) -> bool {
+    if let Some(location) = plugin_location(block) {
+        return classify_plugin_location(&location, own_url) == PluginRole::Rail;
+    }
+    block.len() >= 2
+        && top_level_blocks(&block[1..block.len() - 1])
+            .iter()
+            .any(|child| block_has_sidebar(child, own_url))
 }
 
 // Lines between the first depth-1 `tab` node's braces in a dumped layout.
@@ -2931,6 +2974,51 @@ mod tests {
             3
         );
         assert_eq!(kdl.matches("cwd=\"/shell\"").count(), 2);
+    }
+
+    #[test]
+    fn dump_with_a_tiled_sidebar_is_recognized_as_already_retrofitted() {
+        let url = "file:/tmp/zellij-sidebar.wasm";
+        let retrofitted = r#"layout {
+    tab name="t" {
+        pane split_direction="vertical" {
+            pane size=28 borderless=true name="sidebar" {
+                plugin location="file:/tmp/zellij-sidebar.wasm" {
+                    rail "1"
+                }
+            }
+            pane cwd="/a"
+        }
+    }
+}
+"#;
+        assert!(dump_contains_sidebar(retrofitted, url), "resident rail detected");
+        let other_path = retrofitted.replace("/tmp/zellij-sidebar.wasm", "/other/zellij-sidebar.wasm");
+        assert!(
+            dump_contains_sidebar(&other_path, url),
+            "a differently-pathed sidebar is still recognized"
+        );
+        assert!(
+            !dump_contains_sidebar(dump_fixture(), url),
+            "a never-retrofitted tab of shells and chrome carries no sidebar"
+        );
+        let floating_only = r#"layout {
+    tab name="t" {
+        pane cwd="/a"
+        floating_panes {
+            pane {
+                plugin location="file:/tmp/zellij-sidebar.wasm" {
+                    rail "1"
+                }
+            }
+        }
+    }
+}
+"#;
+        assert!(
+            !dump_contains_sidebar(floating_only, url),
+            "a floating sidebar does not own the tab's tiled region"
+        );
     }
 
     #[test]
