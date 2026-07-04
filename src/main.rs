@@ -490,38 +490,30 @@ impl Sidebar {
 
     // Docks the sidebar into the active tab, which has none: rebuild the
     // tab's swap set around its dumped arrangement — the override's base
-    // spawns the rail — and steer to docked once the override reports in,
-    // so the tab arrives with its splits intact. When the rebuild cannot
-    // run, the absorb override docks the rail alone: its base stacks the
-    // tab's panes, which is already the docked geometry, so no steer is
-    // needed. Every later toggle on the tab is a pure swap cycle.
+    // spawns the rail — and steer to docked once the override reports in, so
+    // the tab arrives with its splits intact. When this instance cannot do
+    // that proper rebuild (permissions not yet granted or tab_states too
+    // stale to resolve the tab id → no rebuild target, or the dump/transform
+    // fails), it DEFERS: the relaxed election has every perceiving instance
+    // retrofit, so a capable one docks the tab. Blind-stacking here instead
+    // would re-absorb a tab another instance already docked and destroy the
+    // user's splits.
     fn retrofit(&mut self, active_tab: Option<usize>) {
-        let installed = rebuild_target(self.permissions_granted, active_tab, &self.tab_states)
-            .and_then(|(tab, tab_id)| {
-                self.install_split_preserving_swaps(tab, tab_id, DockState::Docked)
-            });
-        if installed.is_none() {
-            self.absorb_retrofit(active_tab);
-        }
-    }
-
-    fn absorb_retrofit(&mut self, active_tab: Option<usize>) {
-        if let Some(url) = self.own_url.clone() {
-            trace!(self, "action absorb_retrofit tab={:?}", active_tab);
-            override_layout(
-                LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
-                true, // retain existing terminal panes
-                true, // retain existing plugin panes
-                true, // apply only to the active tab
-                BTreeMap::new(),
+        let Some((tab, tab_id)) =
+            rebuild_target(self.permissions_granted, active_tab, &self.tab_states)
+        else {
+            trace!(
+                self,
+                "retrofit deferred tab={:?}: no rebuild target (no grant or stale tab_states)",
+                active_tab
             );
-            // This override records no PendingSteer (its base is already the
-            // docked geometry), so it arms the repeat-press cooldown itself:
-            // its visible docking lags the issue like the JIT pipeline's
-            // steer does.
-            if let Some(tab) = active_tab {
-                self.toggle_cooldown = Some((tab, Instant::now()));
-            }
+            return;
+        };
+        if self
+            .install_split_preserving_swaps(tab, tab_id, DockState::Docked)
+            .is_none()
+        {
+            trace!(self, "retrofit deferred tab={}: split-preserving rebuild failed", tab);
         }
     }
 
@@ -540,10 +532,19 @@ impl Sidebar {
         tab_id: usize,
         target: DockState,
     ) -> Option<()> {
-        let url = self.own_url.clone()?;
+        let Some(url) = self.own_url.clone() else {
+            trace!(self, "rebuild failed tab={}: own url unknown", tab);
+            return None;
+        };
         // In-band errors and a 1s server-side timeout; a stale tab id dumps
         // no tab node and fails the rebuild below.
-        let (dump, _metadata) = dump_session_layout_for_tab(tab_id).ok()?;
+        let (dump, _metadata) = match dump_session_layout_for_tab(tab_id) {
+            Ok(dump) => dump,
+            Err(e) => {
+                trace!(self, "rebuild failed tab={} tab_id={}: dump error: {}", tab, tab_id, e);
+                return None;
+            }
+        };
         // The dump is authoritative current state, immune to the PaneUpdate
         // instance-list lag that lets a remote election re-fire on a tab
         // whose freshly installed resident it has not yet seen. If a sidebar
@@ -556,7 +557,13 @@ impl Sidebar {
             );
             return Some(());
         }
-        let layout = split_preserving_layout_kdl(&dump, &url, &self.config).ok()?;
+        let layout = match split_preserving_layout_kdl(&dump, &url, &self.config) {
+            Ok(layout) => layout,
+            Err(e) => {
+                trace!(self, "rebuild failed tab={}: transform error: {}", tab, e);
+                return None;
+            }
+        };
         trace!(
             self,
             "action install_split_preserving_swaps tab={} tab_id={} target={:?}",
@@ -915,41 +922,6 @@ fn should_close_self(
 // the manifest shows another selectable pane in our tab.
 fn should_hand_back_focus(own_focused: bool, nav_mode: bool, has_focus_target: bool) -> bool {
     own_focused && !nav_mode && has_focus_target
-}
-
-// The absorb override for a tab without a sidebar, used when the
-// split-preserving rebuild cannot run: a full replacement layout that docks
-// the sidebar and installs the docked/undocked swap set, stacking the tab's
-// panes. It must carry the tab-bar/status-bar chrome and a stacked main
-// that absorbs the existing panes — override_layout replaces the whole tab,
-// and anything the KDL omits is dropped. The tab node stays unnamed so the
-// user's tab name survives the override.
-fn retrofit_layout_kdl(plugin_url: &str, config: &BTreeMap<String, String>) -> String {
-    let tab_body = |sidebar_cols: usize| {
-        format!(
-            r#"  tab {{
-    pane size=1 borderless=true {{
-        plugin location="zellij:tab-bar"
-    }}
-    pane split_direction="vertical" {{
-{rail}        pane stacked=true {{
-            children
-        }}
-    }}
-    pane size=1 borderless=true {{
-        plugin location="zellij:status-bar"
-    }}
-  }}
-"#,
-            rail = rail_pane_kdl(plugin_url, config, sidebar_cols)
-        )
-    };
-    format!(
-        "layout {{\n swap_tiled_layout name=\"docked\" {{\n{docked} }}\n swap_tiled_layout name=\"undocked\" {{\n{undocked} }}\n{base}}}\n",
-        docked = tab_body(DOCKED_COLS),
-        undocked = tab_body(UNDOCKED_COLS),
-        base = tab_body(DOCKED_COLS),
-    )
 }
 
 // The sidebar's own slot in a generated layout. The plugin block repeats
@@ -2186,10 +2158,13 @@ mod tests {
     }
 
     #[test]
-    fn absorb_retrofit_arms_the_cooldown_for_the_active_tab() {
-        // The absorb override records no PendingSteer, so without its own
-        // cooldown a repeat press inside its visible lag would fire a second
-        // override at the same tab.
+    fn retrofit_defers_instead_of_stacking_when_it_cannot_rebuild() {
+        // Under the relaxed election every perceiving instance retrofits, so
+        // an instance that cannot do a proper split-preserving retrofit (here
+        // permissions are not yet granted, so rebuild_target is None) must
+        // defer to a capable instance rather than blind absorb-stack the tab
+        // and destroy its splits. Deferring issues no override and arms no
+        // cooldown; a capable instance docks the tab, or a later press does.
         let mut sidebar = Sidebar::default();
         sidebar.plugin_id = 7;
         sidebar.active_tab = Some(1);
@@ -2198,17 +2173,8 @@ mod tests {
         sidebar.own_url = Some("file:/tmp/zellij-sidebar.wasm".to_owned());
         sidebar.instances = vec![inst(7, 1, true)];
         sidebar.perform_toggle();
-        assert_eq!(sidebar.toggle_cooldown.map(|(tab, _)| tab), Some(1));
-
-        // Without a URL nothing is overridden: no cooldown to arm.
-        let mut sidebar = Sidebar::default();
-        sidebar.plugin_id = 7;
-        sidebar.active_tab = Some(1);
-        sidebar.own_tab = Some(1);
-        sidebar.own_floating = true;
-        sidebar.instances = vec![inst(7, 1, true)];
-        sidebar.perform_toggle();
-        assert!(sidebar.toggle_cooldown.is_none());
+        assert!(sidebar.toggle_cooldown.is_none(), "deferring arms no cooldown");
+        assert!(sidebar.pending_steer.is_none(), "deferring records no steer");
     }
 
     #[test]
@@ -3199,36 +3165,4 @@ mod tests {
         );
     }
 
-    #[test]
-    fn retrofit_layout_carries_swap_set_chrome_and_config_identity() {
-        let mut config = BTreeMap::new();
-        config.insert("rail".to_owned(), "1".to_owned());
-        let kdl = retrofit_layout_kdl("file:/tmp/zellij-sidebar.wasm", &config);
-        assert!(kdl.contains("swap_tiled_layout name=\"docked\""));
-        assert!(kdl.contains("swap_tiled_layout name=\"undocked\""));
-        // docked swap + base tab reserve the full slot; undocked is a sliver
-        assert_eq!(
-            kdl.matches("pane size=28 borderless=true name=\"sidebar\"")
-                .count(),
-            2
-        );
-        assert_eq!(
-            kdl.matches("pane size=1 borderless=true name=\"sidebar\"")
-                .count(),
-            1
-        );
-        // every sidebar block carries the plugin URL and its config identity
-        assert_eq!(
-            kdl.matches("plugin location=\"file:/tmp/zellij-sidebar.wasm\"")
-                .count(),
-            3
-        );
-        assert_eq!(kdl.matches("rail \"1\"").count(), 3);
-        assert!(kdl.contains("zellij:tab-bar"));
-        assert!(kdl.contains("zellij:status-bar"));
-        assert!(kdl.contains("pane stacked=true"));
-        assert!(kdl.contains("children"));
-        // The tab node stays unnamed so the user's tab name survives the override.
-        assert!(!kdl.contains("tab name="));
-    }
 }
