@@ -24,6 +24,9 @@ const STATUS_POLL_SECS: f64 = 2.0;
 // Sidebar widths in the two swap-layout states (mirrors layouts/zaphod.kdl).
 const DOCKED_COLS: usize = 28;
 const UNDOCKED_COLS: usize = 1;
+// Below this render width the rail is the undocked sliver (docked is 28,
+// undocked is 1) — too narrow for status text, so it need not poll.
+const STATUS_MIN_COLS: usize = 8;
 // How long after a deferred steer fires that repeat presses for its tab are
 // still swallowed: the steered collapse becomes visible a beat after the
 // steer itself, and a press inside that gap would instantly undo the toggle
@@ -61,6 +64,49 @@ struct Sidebar {
     // immediately): the press waits for the first PaneUpdate that fills
     // own_url/own_tab and fires exactly once.
     pending_bootstrap_toggle: bool,
+    // The last render width, used to gate status polling: an undocked sliver
+    // has no room to show status, so it skips the poll.
+    last_cols: usize,
+    // Per-pane status-poll backoff keyed by terminal pane id: a pane whose
+    // get_pane_running_command keeps timing out is polled exponentially less
+    // often instead of every timer. Pruned to the current rows each poll.
+    poll_backoff: BTreeMap<u32, PollBackoff>,
+}
+
+// One pane's status-poll backoff. get_pane_running_command's timeout Err is
+// the same shape as not-found, so a naive poll retries a stuck pane every
+// timer forever, each retry blocking the plugin thread on a ps fork. After a
+// failed poll the pane is skipped for a growing number of timers; a success
+// resets it.
+#[derive(Default, Clone, Copy)]
+struct PollBackoff {
+    failures: u32,
+    skip: u32,
+}
+
+impl PollBackoff {
+    // Whether this pane is due for a poll this timer; consumes one skip if
+    // it is backed off.
+    fn due(&mut self) -> bool {
+        if self.skip > 0 {
+            self.skip -= 1;
+            false
+        } else {
+            true
+        }
+    }
+
+    // Records a poll's outcome: a failure grows the backoff, a success clears
+    // it.
+    fn record(&mut self, failed: bool) {
+        if failed {
+            self.failures += 1;
+            self.skip = backoff_skips(self.failures);
+        } else {
+            self.failures = 0;
+            self.skip = 0;
+        }
+    }
 }
 
 // The dock state a swap-set override is driving its tab toward, deferred
@@ -299,7 +345,12 @@ impl ZellijPlugin for Sidebar {
                 self.rows != old || !self.rendered_once
             }
             Event::Timer(_) => {
-                let changed = self.refresh_statuses();
+                let changed =
+                    if should_poll_statuses(self.own_tab, self.active_tab, self.last_cols) {
+                        self.refresh_statuses()
+                    } else {
+                        false
+                    };
                 set_timeout(STATUS_POLL_SECS);
                 changed
             }
@@ -344,6 +395,7 @@ impl ZellijPlugin for Sidebar {
 
     fn render(&mut self, _rows: usize, cols: usize) {
         self.rendered_once = true;
+        self.last_cols = cols;
         if !self.permissions_requested {
             self.permissions_requested = true;
             request_permission(&[
@@ -604,17 +656,26 @@ impl Sidebar {
 
     // Returns whether any row's agent fields changed (i.e. a render is due).
     fn refresh_statuses(&mut self) -> bool {
+        let mut backoff = std::mem::take(&mut self.poll_backoff);
+        let live: std::collections::BTreeSet<u32> = self.rows.iter().map(|r| r.pane_id).collect();
+        backoff.retain(|pane_id, _| live.contains(pane_id));
         let mut changed = false;
         for row in self.rows.iter_mut() {
+            let state = backoff.entry(row.pane_id).or_default();
+            if !state.due() {
+                continue; // backed off: keep the previous status
+            }
             let pane_id = PaneId::Terminal(row.pane_id);
             let command = get_pane_running_command(pane_id);
             let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
+            state.record(command.is_err());
             let enriched = agent::enrich_fields(&row.agent, &row.title, command, viewport);
             if enriched != row.agent {
                 row.agent = enriched;
                 changed = true;
             }
         }
+        self.poll_backoff = backoff;
         changed
     }
 }
@@ -778,6 +839,30 @@ fn pending_steer_disposition(
 // with a non-empty value.
 fn debug_enabled(config: &BTreeMap<String, String>) -> bool {
     config.get("debug").is_some_and(|value| !value.is_empty())
+}
+
+// Number of timers to skip after a pane's status poll fails: 0, 1, 3, 7, 15,
+// then flat at 15 (~30s at a 2s poll). Caps the shift so it never overflows.
+fn backoff_skips(failures: u32) -> u32 {
+    (1u32 << failures.min(4)) - 1
+}
+
+// Whether this instance should poll pane statuses at all. Only the active
+// tab's docked rail is on screen: an undocked sliver (render width below
+// STATUS_MIN_COLS) shows no status, and a background tab's rail is off
+// screen, so both skip — this collapses N per-tab pollers to the one visible
+// instance. cols is the live render width, accurate for the visible sidebar.
+// When the active tab is unknown, bias toward polling: a skipped poll only
+// leaves the previous status on screen (never blank), so a wasted poll is
+// cheaper than briefly stale status after a fast tab switch.
+fn should_poll_statuses(own_tab: Option<usize>, active_tab: Option<usize>, cols: usize) -> bool {
+    if cols < STATUS_MIN_COLS {
+        return false;
+    }
+    match (own_tab, active_tab) {
+        (Some(own), Some(active)) => own == active,
+        _ => true,
+    }
 }
 
 // A deferred steer completes only for the actor that lives in the tab it
@@ -1504,6 +1589,47 @@ mod tests {
             !steer_completes_locally(None, 2),
             "an actor whose own tab is unknown arms no steer"
         );
+    }
+
+    #[test]
+    fn polls_only_the_active_tabs_docked_rail() {
+        // The active tab's docked rail is the only on-screen status; poll it.
+        assert!(should_poll_statuses(Some(1), Some(1), DOCKED_COLS));
+        // A background tab's rail is off screen — skip.
+        assert!(!should_poll_statuses(Some(1), Some(2), DOCKED_COLS));
+        // The undocked 1-col sliver shows nothing — skip even when active.
+        assert!(!should_poll_statuses(Some(1), Some(1), UNDOCKED_COLS));
+        // Unknown active tab: bias toward polling (a skip only leaves the
+        // previous status on screen, never a blank).
+        assert!(should_poll_statuses(Some(1), None, DOCKED_COLS));
+        assert!(should_poll_statuses(None, None, DOCKED_COLS));
+    }
+
+    #[test]
+    fn poll_backoff_skips_grow_and_cap() {
+        assert_eq!(backoff_skips(0), 0);
+        assert_eq!(backoff_skips(1), 1);
+        assert_eq!(backoff_skips(2), 3);
+        assert_eq!(backoff_skips(3), 7);
+        assert_eq!(backoff_skips(4), 15);
+        assert_eq!(backoff_skips(20), 15); // capped, no overflow
+    }
+
+    #[test]
+    fn a_repeatedly_failing_pane_backs_off_then_recovers() {
+        let mut bo = PollBackoff::default();
+        assert!(bo.due(), "first timer polls");
+        bo.record(true); // timeout/not-found → one skip
+        assert!(!bo.due(), "backed off one timer");
+        assert!(bo.due(), "then polls again");
+        bo.record(true); // second failure → three skips
+        assert!(!bo.due());
+        assert!(!bo.due());
+        assert!(!bo.due());
+        assert!(bo.due());
+        bo.record(false); // a success resets the backoff
+        assert!(bo.due(), "recovered: polls every timer");
+        assert!(bo.due());
     }
 
     #[test]
