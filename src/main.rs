@@ -7,6 +7,19 @@ use zellij_tile::prelude::*;
 
 mod agent;
 
+// Emits one greppable line to the plugin log when the "debug" config key is
+// set. Plugin stderr is routed to zellij.log by the server's LoggingPipe
+// (zellij-server plugin_loader sets stderr to a LoggingPipe; stdout is the
+// pane render, so println! must never carry trace output). Off, it is a
+// bare bool check: the arguments are not evaluated.
+macro_rules! trace {
+    ($self:expr, $($arg:tt)*) => {
+        if $self.debug {
+            eprintln!("zaphod-trace[{}]: {}", $self.plugin_id, format_args!($($arg)*));
+        }
+    };
+}
+
 const STATUS_POLL_SECS: f64 = 2.0;
 // Sidebar widths in the two swap-layout states (mirrors layouts/zaphod.kdl).
 const DOCKED_COLS: usize = 28;
@@ -27,6 +40,7 @@ struct Sidebar {
     own_tab: Option<usize>,
     own_url: Option<String>,
     config: BTreeMap<String, String>,
+    debug: bool,
     nav_mode: bool,
     nav_selected: usize,
     return_focus: Option<u32>,
@@ -131,6 +145,7 @@ impl ZellijPlugin for Sidebar {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.plugin_id = get_plugin_ids().plugin_id;
         self.config = configuration;
+        self.debug = debug_enabled(&self.config);
         subscribe(&[
             EventType::PaneUpdate,
             EventType::TabUpdate,
@@ -200,10 +215,24 @@ impl ZellijPlugin for Sidebar {
                     })
                     .collect();
                 if let Some(pending) = self.pending_steer {
-                    match pending_steer_disposition(pending, self.active_tab, &self.tab_states) {
+                    let disposition =
+                        pending_steer_disposition(pending, self.active_tab, &self.tab_states);
+                    trace!(
+                        self,
+                        "steer disposition tab={} target={:?} reported_name={:?} dirty={} float={} active_tab={:?} -> {:?}",
+                        pending.tab,
+                        pending.target,
+                        self.tab_states.get(&pending.tab).and_then(|s| s.swap_name.as_deref()),
+                        self.tab_states.get(&pending.tab).is_some_and(|s| s.swap_dirty),
+                        self.tab_states.get(&pending.tab).is_some_and(|s| s.floating_visible),
+                        self.active_tab,
+                        disposition
+                    );
+                    match disposition {
                         SteerDisposition::Fire { backwards } => {
                             self.pending_steer = None;
                             self.toggle_cooldown = Some((pending.tab, Instant::now()));
+                            trace!(self, "steer fire backwards={}", backwards);
                             steer_swap(backwards);
                         }
                         SteerDisposition::Drop => self.pending_steer = None,
@@ -244,6 +273,7 @@ impl ZellijPlugin for Sidebar {
                 // every PaneUpdate until the manifest catches up.
                 if should_close_self(self.close_requested, self.own_floating, self.own_tab, &self.instances) {
                     self.close_requested = true;
+                    trace!(self, "close_self firing own_tab={:?}", self.own_tab);
                     close_self();
                     return false;
                 }
@@ -255,6 +285,12 @@ impl ZellijPlugin for Sidebar {
                 ) {
                     // Consumed exactly once; perform_toggle never re-arms it.
                     self.pending_bootstrap_toggle = false;
+                    trace!(
+                        self,
+                        "bootstrap toggle firing own_tab={:?} active_tab={:?}",
+                        self.own_tab,
+                        self.active_tab
+                    );
                     self.perform_toggle();
                 }
                 // PaneUpdate fires constantly in agent-heavy tabs; re-rendering
@@ -276,6 +312,7 @@ impl ZellijPlugin for Sidebar {
     }
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
+        trace!(self, "pipe recv name={}", pipe_message.name);
         // CLI pipe callers terminate via the server's auto-unblock once this
         // returns; an explicit unblock would need the ReadCliPipes grant.
         if pipe_message.name == "navigate" {
@@ -297,8 +334,10 @@ impl ZellijPlugin for Sidebar {
         // press; the manifest fires it.
         if !own_pane_known(&self.own_url, self.own_tab) {
             self.pending_bootstrap_toggle = true;
+            trace!(self, "pipe toggle parked as bootstrap (own pane unknown)");
             return false;
         }
+        trace!(self, "pipe toggle acting");
         self.perform_toggle();
         false
     }
@@ -380,12 +419,25 @@ impl Sidebar {
 
     fn perform_toggle(&mut self) {
         let active_tab = self.current_active_tab();
+        trace!(
+            self,
+            "perform_toggle active_tab={:?} swap_name={:?} swap_dirty={} floating_visible={} own_tab={:?} own_floating={} pending_steer={:?} cooldown={:?}",
+            active_tab,
+            active_tab.and_then(|t| self.tab_states.get(&t)).and_then(|s| s.swap_name.as_deref()),
+            active_tab.and_then(|t| self.tab_states.get(&t)).is_some_and(|s| s.swap_dirty),
+            active_tab.and_then(|t| self.tab_states.get(&t)).is_some_and(|s| s.floating_visible),
+            self.own_tab,
+            self.own_floating,
+            self.pending_steer,
+            self.toggle_cooldown
+        );
         if should_swallow_toggle(
             active_tab,
             self.pending_steer,
             self.toggle_cooldown,
             Instant::now(),
         ) {
+            trace!(self, "perform_toggle swallowed tab={:?}", active_tab);
             return;
         }
         // A press that is not the parked steer's own bounce supersedes it.
@@ -393,7 +445,7 @@ impl Sidebar {
         let active_state = active_tab.and_then(|tab| self.tab_states.get(&tab));
         let active_swap_name = active_state.and_then(|state| state.swap_name.clone());
         let active_swap_dirty = active_state.is_some_and(|state| state.swap_dirty);
-        match decide_toggle(
+        let action = decide_toggle(
             self.own_tab,
             self.own_floating,
             active_tab,
@@ -401,15 +453,24 @@ impl Sidebar {
             active_swap_dirty,
             self.plugin_id,
             &self.instances,
-        ) {
+        );
+        trace!(self, "decide_toggle verdict={:?}", action);
+        match action {
             ToggleAction::SteerSwap { backwards } => {
+                trace!(self, "action steer_swap backwards={}", backwards);
                 // Flip docked <-> sliver by rearranging the tab's existing
                 // panes; the plugin pane itself never hides or moves.
                 steer_swap(backwards);
             }
-            ToggleAction::RegenerateSwaps { target } => self.regenerate_swaps(target),
-            ToggleAction::Retrofit => self.retrofit(active_tab),
-            ToggleAction::Ignore => {}
+            ToggleAction::RegenerateSwaps { target } => {
+                trace!(self, "action regenerate_swaps target={:?}", target);
+                self.regenerate_swaps(target);
+            }
+            ToggleAction::Retrofit => {
+                trace!(self, "action retrofit tab={:?}", active_tab);
+                self.retrofit(active_tab);
+            }
+            ToggleAction::Ignore => trace!(self, "action ignore"),
         }
     }
 
@@ -422,6 +483,7 @@ impl Sidebar {
         let rebuilt = rebuild_target(self.permissions_granted, self.own_tab, &self.tab_states)
             .and_then(|(tab, tab_id)| self.install_split_preserving_swaps(tab, tab_id, target));
         if rebuilt.is_none() {
+            trace!(self, "action fallback_swap_cycle target={:?}", target);
             fallback_swap_cycle();
         }
     }
@@ -445,6 +507,7 @@ impl Sidebar {
 
     fn absorb_retrofit(&mut self, active_tab: Option<usize>) {
         if let Some(url) = self.own_url.clone() {
+            trace!(self, "action absorb_retrofit tab={:?}", active_tab);
             override_layout(
                 LayoutInfo::Stringified(retrofit_layout_kdl(&url, &self.config)),
                 true, // retain existing terminal panes
@@ -478,6 +541,13 @@ impl Sidebar {
         // no tab node and fails the rebuild below.
         let (dump, _metadata) = dump_session_layout_for_tab(tab_id).ok()?;
         let layout = split_preserving_layout_kdl(&dump, &url, &self.config).ok()?;
+        trace!(
+            self,
+            "action install_split_preserving_swaps tab={} tab_id={} target={:?}",
+            tab,
+            tab_id,
+            target
+        );
         override_layout(
             LayoutInfo::Stringified(layout),
             true, // retain existing terminal panes
@@ -492,6 +562,7 @@ impl Sidebar {
         // otherwise. The recorded target lets the TabUpdate handler finish
         // the toggle from whichever entry is reported.
         self.pending_steer = Some(PendingSteer { tab, target });
+        trace!(self, "pending_steer recorded tab={} target={:?}", tab, target);
         Some(())
     }
 
@@ -663,6 +734,12 @@ fn pending_steer_disposition(
         (Some(_), _) => SteerDisposition::Drop,
         (None, _) => SteerDisposition::Keep,
     }
+}
+
+// Whether trace instrumentation is enabled: the "debug" config key present
+// with a non-empty value.
+fn debug_enabled(config: &BTreeMap<String, String>) -> bool {
+    config.get("debug").is_some_and(|value| !value.is_empty())
 }
 
 // Whether any manifest has named this instance yet: pre-manifest, own_url
@@ -1333,6 +1410,16 @@ mod tests {
             panes.insert(tab, list);
         }
         PaneManifest { panes }
+    }
+
+    #[test]
+    fn trace_is_gated_off_unless_config_sets_a_nonempty_debug_value() {
+        assert!(!debug_enabled(&BTreeMap::new()), "absent key stays silent");
+        let mut config = BTreeMap::new();
+        config.insert("debug".to_owned(), String::new());
+        assert!(!debug_enabled(&config), "empty value stays silent");
+        config.insert("debug".to_owned(), "1".to_owned());
+        assert!(debug_enabled(&config), "non-empty value enables tracing");
     }
 
     #[test]
