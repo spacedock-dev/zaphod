@@ -285,13 +285,18 @@ Two paths put the swap set on a tab:
    zero terminals and the session exits immediately; both observed live) —
    so ordinary tabs are born without a sidebar and reach the docked state
    via the retrofit.
-2. **Retrofit (option a)** — for a live tab without the swap set, a one-time
+2. **Retrofit** — for a live tab without the swap set, a one-time
    `override_layout(LayoutInfo::Stringified(kdl), retain_terminals=true,
    retain_plugins=true, apply_only_to_active_tab=true)` whose KDL contains the
-   tab-bar/status-bar chrome, a stacked main that absorbs the existing panes,
-   the `rail "1"` sidebar slot, and **both** `swap_tiled_layout` sections. The
-   override installs the swap set on that tab; every subsequent toggle is pure
-   swap cycling. (Confirmed viable — no per-toggle re-override needed.)
+   tab-bar/status-bar chrome, the `rail "1"` sidebar slot, and **both**
+   `swap_tiled_layout` sections installs the swap set on that tab; every
+   subsequent toggle is pure swap cycling (no per-toggle re-override). The KDL
+   is generated from the tab's own dumped arrangement so the user's splits
+   survive the retrofit — the split-preserving rebuild detailed under Toggle
+   v3 below, not a blind stacked-absorb. Any instance that observes a
+   sidebar-less active tab retrofits it (the relaxed election, arc entry
+   below); an instance that cannot run the rebuild defers rather than
+   absorbing.
 
 ### Live validation evidence (2026-07-02, ztest, zellij 0.44.1, attached client)
 
@@ -529,10 +534,14 @@ clean 0→end wrap) — avoids the flaky next-past-end zone entirely.
   observed live) arrives in the dump and leaves repaired: the transform
   extracts chrome from wherever the dump seats it and re-emits canonical
   rows. When the rebuild cannot run — permission not granted, no tab id,
-  dump or transform error — the v2 absorb override runs instead, with no
-  steer: its base lands directly on the docked geometry (the arrangement
-  stacks, the toggle still docks). The absorb KDL keeps the
-  `stacked { children }` main (proven three times — do not change).
+  dump or transform error — the retrofit **defers** (returns without
+  acting): a capable instance with fresh `tab_states` docks the tab, or the
+  next press does. The blind stacked-absorb fallback was removed
+  (`absorb_retrofit` and `retrofit_layout_kdl` are deleted), because under
+  the relaxed election it would blind-stack a tab another instance had
+  already docked correctly, destroying the user's splits (arc entry below).
+  The split-preserving base still keeps the `stacked { children }` main —
+  the only retained-pane-correct shape, proven three times (do not change).
 
 **Anomaly resolved (2026-07-04, v0.44.1 source trace).** The 2026-07-03
 CLI no-op and the 2026-07-02 mistarget are one law: **a CLI
@@ -555,6 +564,126 @@ from *any* tab's instance — targets the attached user's true focused tab.
 Proven live in drill 7 (2026-07-04): two remote-election retrofits from a
 background tab's rail installed rails on the user's focused tabs.
 
+### Toggle v3.7–v3.12 — hardening under concurrency, load, and real dump shapes (validated live 2026-07-04..07, ztest)
+
+Toggle v3 above is the mechanism; the entries below are what it took to make
+it hold under rapid toggling, many tabs, and the layout dumps zellij actually
+emits. All shipped at HEAD.
+
+- **Relaxed retrofit election (v3.8).** The first design elected one instance —
+  the session's lowest sidebar pane id — to retrofit a sidebar-less active tab.
+  Under rapid toggling each instance's `tab_id → position` translation goes
+  stale at a different rate, so instances disagree on which tab is active in
+  the same instant: the elected instance often retrofitted a stale tab and
+  aborted, while the instances that saw the bare tab correctly were barred — a
+  brand-new tab could deadlock and never dock. The gate is dropped: **any
+  instance that observes a sidebar-less active tab retrofits it.** Plugins
+  process a pipe concurrently (one pinned server thread per instance), so
+  several may retrofit the same tab on one press; three layers dedup them — the
+  dump abort (below), the server re-seating a rail by `(url, config)` rather
+  than spawning a second, and the idempotent transform. Where two tiled rails
+  still race in, the **higher pane-id one is redundant and closes itself**,
+  leaving the single lowest-id resident. Removing the election also cured its
+  crashed-instance starvation (SPEC #34): a crashed sidebar persists in the
+  manifest and the dump, so a retrofit into that tab aborts on the dump before
+  a second rail is ever seated.
+
+- **Dump-abort seeder dedup (v3.7).** A retrofit dumps the target tab fresh
+  from the server before overriding; if any sidebar rail survives that dump
+  (the server strips only the requesting plugin's own pane), the tab is already
+  retrofitted and the override aborts. This dedups concurrent retrofits and
+  discriminates "already ours" from "fresh split tab" — `swap_name` cannot,
+  because a just-overridden tab momentarily reports "BASE", identical to a
+  never-retrofitted split tab, so the authoritative signal is the dump, not the
+  cached manifest.
+
+- **Remote retrofit arms no steer.** The deferred steer is recorded only when
+  the acting instance lives in the tab it rebuilt. A remote retrofit (an
+  instance docking a tab it does not live in) cannot fire the steer —
+  `previous/next_swap_layout` act on the client's active tab — and the
+  override's own relayout lands that tab docked anyway, so its resident owns
+  every later toggle.
+
+- **Defer, never blind-absorb (v3.9).** Under the relaxed election, an instance
+  whose `tab_states` is too stale to resolve the tab id, or whose
+  dump/transform fails, must not fall through to a split-less stack override —
+  that blind-stacks a tab another instance already docked correctly and
+  destroys the user's splits (observed live: absorb fired 45× in one drill,
+  several on tabs already reporting "docked"). It now **defers** instead;
+  `absorb_retrofit` and `retrofit_layout_kdl` are deleted, `rail_pane_kdl`
+  stays (used by `split_preserving_layout_kdl`).
+
+- **Poll only the visible docked rail.** `refresh_statuses` forks a `ps`
+  (`GetPaneRunningCommand`, 100ms server budget) per pane on a 2s timer; with
+  one rail per tab, N tabs polling M panes saturated the PTY thread, busy panes
+  deterministically timed out (drill 13: 337 timeouts in 2 min), and toggle
+  dumps queued behind the storm. Only the active tab's **docked** rail is on
+  screen, so the poll is gated on visibility — an undocked sliver and every
+  background tab's rail poll nothing, collapsing ~N pollers to one. The gate
+  reads `reported_active_tab`, set only in the `TabUpdate` handler from the
+  server's authoritative `t.active` — **not** `active_tab`, which
+  `perform_toggle` also overwrites via the stale `tab_id → position`
+  translation (that dual writer left the gate uncertain and over-polling: drill
+  14 still saw 266 timeouts). Failing panes back off (skipped for a growing run
+  of timers — 0, 1, 3, 7, 15, then flat ~30s, reset on success), because a
+  timeout `Err` is shaped like not-found and a naive poll otherwise retries a
+  stuck pane forever. A skipped poll shows the pane's previous status, never a
+  blank, and heals on the next `TabUpdate`.
+
+- **Debounce and honor the launching press (v3.4).** A press for a tab whose
+  JIT pipeline is still in flight, or whose steer fired < 600ms ago, is
+  swallowed — the pipeline's visible collapse lags the press, so a quick second
+  press otherwise reads as an instant re-toggle. And a toggle pipe that reaches
+  a just-launched instance before its first `PaneUpdate` (the keybind's
+  launch-if-missing races its own pipe) is parked, not dropped, and consumed
+  exactly once on the first manifest that names the instance with its active
+  tab known.
+
+- **Single-line chrome extraction (v3.11).** zellij's layout dump serializes a
+  chrome or rail pane with its plugin child inline on one line —
+  `pane size=1 borderless=true { plugin location="zellij:tab-bar" }` — which
+  the chrome extractor previously treated as an opaque leaf and left in the
+  user region. On mixed vertical/horizontal split tabs that baked the tab-bar
+  mid-layout and left a single-line rail un-dropped as a stray second rail. The
+  extractor now reads the plugin location off a single line and classifies it
+  exactly like the multi-line path, so top-level chrome, nested chrome, and
+  stray rails are all hoisted or dropped correctly.
+
+- **Trace behind a debug gate (v3.6).** Every toggle-path decision emits one
+  greppable `zaphod-trace[<id>]:` line to stderr (which zellij routes to
+  `zellij.log`, never the pane) when a non-empty `debug` config key is set;
+  production behavior is byte-identical when the gate is off.
+
+#### The split-preserving fidelity ceiling (accepted, 2026-07-07)
+
+One structural loss survives every fix above and is **not** a plugin bug: a
+deeply-nested percentage region flattens when the rail width flips. Live A/B on
+a mixed 3-pane v/h tab (drove `next_swap_layout`, dumped each state; region =
+right of the size-28/1 rail):
+
+| State | Region dump | Structure |
+|---|---|---|
+| docked (rail=28) | `pane 50% { pane 50%; pane 50% }` + `pane 50%` | nested — a column of two rows beside a column |
+| undocked (rail=1) | `pane 50%` + `pane 25%` + `pane 25%` | flat — three side-by-side columns; nesting gone, sizes recomputed |
+
+The split-preserving transform is innocent — it emits a **byte-identical**
+nested region in both swaps, differing only by rail width (verified offline).
+The loss is entirely in zellij's swap re-seat: applying a swap resolves the
+layout to absolute leaf geometry for the current free space
+(`LayoutApplier::apply_tiled_panes_layout_to_existing_panes → flatten_layout`,
+`zellij-server/src/tab/layout_applier.rs:160,357`), not by re-applying the
+tree; when the free space changes (the 28→1 rail flip widens the region)
+`position_panes_in_space`'s percentage-constraint solve can fail, and
+`flatten_layout`'s `.or_else` fallback then re-positions **ignoring the
+percentage sizes** — zellij's own comment there reads "a hack around some
+issues with the constraint system that should be addressed in a systemic
+manner" (`layout_applier.rs:370-388`). No template shape survives it
+(`flatten_layout` discards the tree, and the failing step is the percentage
+solve, not the structure). **Panes and content always survive — only the split
+nesting is lost.** Still present on zellij main (post-0.44.3), unfixed in any
+release. Accepted as the ceiling of split preservation; upstream family: zellij
+#1825, #2829, #1758, #4647. (SPEC landmine #35.)
+
 ### Permission gating (zellij v0.44.1 source, verified)
 
 `override_layout` is gated by **`ChangeApplicationState`**
@@ -566,35 +695,41 @@ machinery deleted, `OpenTerminalsOrPlugins` has no consumer and is dropped; the
 minimal grant set is `ReadApplicationState` + `ChangeApplicationState` +
 `ReadPaneContents`.
 
-### Approved deletion list
+### What the rework deleted — and what it kept
 
-Mapped with file:line citations at HEAD `95d8eda` (baseline: 37/37 tests green;
-`src/agent.rs` contains none of the symbols):
+The adopted architecture removed the summon/spawn machinery and the degraded
+absorb path. The former leader-election state was **kept and repurposed** for
+the relaxed election, not deleted — a distinction that matters because an
+earlier plan slated it for removal.
 
-- `ToggleAction::SpawnInActive` / `::HideSelf` / `::ShowHere` — the variants,
-  their `pipe()` / `ensure_visible_in_active_tab` arms, and their
-  `decide_toggle` production sites. `toggle_action_requests_render` collapses
-  with them.
-- Leader election inside `decide_toggle` (`src/main.rs:424-440`) and its
-  satellite state: `instances`, `sidebar_instances()`, `own_url`
-  (`permissions_granted` becomes write-only). `decide_toggle` itself stays —
-  the SwapLayout head — with a shrunken signature.
-- The summon machinery: `float_as_rail`, `rail_coordinates`, the crate's only
-  `float_multiple_panes` / `change_floating_panes_coordinates` calls,
-  `RAIL_WIDTH`, `rail_mode`, `rail_positioned`, and render's first-float rail
-  snap (`src/main.rs:257-260`).
-- The out-of-set `hide_self`/`show_self` sites: the pre-render summon blocks in
-  `pipe()` (`src/main.rs:170-176`, `:184-195`) and the header-body
-  click-to-hide (`:368-369`) — `handle_click` is redesigned, and the navigate
-  flow through `ensure_visible_in_active_tab` is rethought as that fn
-  collapses.
-- The `unblock_cli_pipe_input` call (`src/main.rs:166-168`): it needs the
-  never-requested `ReadCliPipes` grant, is silently denied today, and CLI pipes
-  terminate anyway via the server's auto-unblock once `pipe()` returns.
-- `OpenTerminalsOrPlugins` from the permission request list (`src/main.rs:252`)
-  and the `can_spawn` gate.
-- Tests: four spawn/leader tests deleted, two hide/show tests deleted or
-  rewritten, one swap-layout test updated to the shrunken signature.
+**Deleted:**
+
+- The `ToggleAction::SpawnInActive` / `::HideSelf` / `::ShowHere` variants —
+  their `pipe()` / `ensure_visible_in_active_tab` arms and `decide_toggle`
+  production sites — and `toggle_action_requests_render` with them.
+- The summon machinery: `float_as_rail`, `rail_coordinates`, the crate's
+  `float_multiple_panes` / `change_floating_panes_coordinates` /
+  `open_plugin_pane_floating` calls, `RAIL_WIDTH`, `rail_mode`,
+  `rail_positioned`, and render's first-float rail snap.
+- The out-of-set `hide_self` / `show_self` sites (the pre-render summon blocks
+  in `pipe()` and the header-body click-to-hide) and the
+  `unblock_cli_pipe_input` call — it needed the never-requested `ReadCliPipes`
+  grant and CLI pipes auto-unblock once `pipe()` returns anyway.
+- `absorb_retrofit` and `retrofit_layout_kdl` (removed with the
+  defer-not-absorb change, b8b4231); `rail_pane_kdl` stays, still used by
+  `split_preserving_layout_kdl`.
+- The `OpenTerminalsOrPlugins` grant and the `can_spawn` gate — no consumer
+  once the spawn path is gone.
+
+**Kept and repurposed** (the relaxed election reuses the old leader-election
+satellites rather than deleting them):
+
+- `sidebar_instances()` and the `instances` state — the lowest-id leader gate
+  was replaced by any-instance-retrofits plus the `is_redundant_tiled_sidebar`
+  cleanup, both of which read the session's sidebar instances.
+- `own_url` — feeds the retrofit override, which re-seats the tab's rail by
+  `(url, config)`.
+- `decide_toggle` — stays as the toggle head, with a shrunken signature.
 
 ### Hazard for layouts that ship the sidebar (verified live)
 
@@ -610,22 +745,24 @@ rework, and an upstream zellij report is planned.
 
 - **Repo:** `/Users/clkao/git/zaphod` (crate `zellij-sidebar`).
 - **Working branch:** `wip/override-layout-docking`, based at `7c0d2a6`
-  ("Fix reentrant sidebar toggle routing"). At time of writing the branch has **no commits
-  yet** — it is identical to `main`; all work so far is investigation, no source edits.
+  ("Fix reentrant sidebar toggle routing"). It carries the whole toggle
+  rework — 21 commits (`d6ad89b`…`bce89a4`) past `main`; HEAD is `bce89a4`.
 - **Untracked:** `.safehouse` (safehouse config; `add-dirs=~/.config/zellij`,
   `add-dirs=~/git/spacedock-research`).
 - **Git worktrees:**
-  - `/Users/clkao/git/zaphod` → `7c0d2a6` `[wip/override-layout-docking]` (primary).
+  - `/Users/clkao/git/zaphod` → `bce89a4` `[wip/override-layout-docking]` (primary).
   - `/private/tmp/zaphod-review-4ddbf148` → `4ddbf14` (detached HEAD, **prunable** — stale
     review worktree; `git worktree prune` to remove).
 - **Build:** `./build.sh` →
   `target/wasm32-wasip1/release/zellij-sidebar.wasm`. Uses `rustup`'s rustc
   (`RUSTC="$(rustup which rustc)" cargo build --release --target wasm32-wasip1`) because
-  homebrew rust shadows rustup and lacks the `wasm32-wasip1` std. Current artifact built
-  2026-06-10 (predates this investigation; no rebuild needed yet — no source changed).
+  homebrew rust shadows rustup and lacks the `wasm32-wasip1` std. The artifact
+  is rebuilt across the arc (latest 2026-07-07); the only rollout item still
+  pending is retiring the old-wasm **instances** left running in live sessions
+  (a live-session step, not a source rebuild).
 - **Versions:** zellij CLI 0.44.1; `zellij-tile` locked 0.44.3 (current release 0.44.3,
   bug-fix-only).
-- **Source under change:** `src/main.rs` — the adopted-architecture deletion set
-  (`float_as_rail`, the spawn/hide/show `ToggleAction` arms, leader election in
-  `decide_toggle`, `ensure_visible_in_active_tab`, the `handle_click` redesign);
+- **Source changed:** `src/main.rs` carries the shipped rework — the summon /
+  hide / show / spawn machinery removed, the split-preserving retrofit and
+  relaxed election, the poll-visibility gate, and the chrome extraction;
   `src/agent.rs` (agent awareness) is unaffected.

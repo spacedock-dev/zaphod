@@ -316,8 +316,9 @@ these as laws.
     above is cured, because a live instance docks the tab regardless of a
     crashed pane's id. Concurrent retrofits (instances disagree on the active
     tab under pipe-flood staleness, so several may act on one press) are
-    deduped by the JIT dump abort, and a redundant tiled rail — a lower
-    pane-id sidebar sharing the tab — closes itself. That cleanup could in
+    deduped by the JIT dump abort, and a redundant tiled rail — the higher
+    pane-id sidebar of two sharing the tab — closes itself, leaving the
+    lowest-id resident. That cleanup could in
     principle close a *live* rail if a crashed sidebar's dead pane lingered
     with a lower id, but the window is unreachable: `handle_plugin_crash`
     (`zellij-server` `wasm_bridge.rs`) only paints a panic indicator, it does
@@ -327,6 +328,28 @@ these as laws.
     the dump (it already carries a sidebar) before installing any rail, so a
     live rail is never seated beside the dead one and the cleanup never
     observes two sidebars — no manifest liveness signal is needed.
+35. **Swap re-seat flattens nested percentage regions when the available
+    width changes.** Applying a swap layout re-seats existing panes by
+    resolving the layout to absolute leaf geometry for the current free space
+    (`LayoutApplier::apply_tiled_panes_layout_to_existing_panes` →
+    `flatten_layout`, `layout_applier.rs:160,357`), not by re-applying the
+    layout tree. When the tab's free space changes — here the docked↔undocked
+    rail-width flip (28↔1) widens the region — `position_panes_in_space`'s
+    percentage-constraint solve can fail, and `flatten_layout`'s `.or_else`
+    branch then re-positions **ignoring the percentage sizes** (zellij's own
+    comment: "a hack around some issues with the constraint system that should
+    be addressed in a systemic manner", `layout_applier.rs:370-388`). A
+    deeply-nested percentage region (`pane 50% { pane 50%; pane 50% } +
+    pane 50%`) then collapses from nested (a column of two rows beside a
+    column) to a flat side-by-side split on the wider swap — panes and content
+    all survive, only the split nesting is lost. The split-preserving transform
+    is innocent: it emits a byte-identical nested region in both swaps,
+    differing only by rail width (verified offline). The loss is entirely in
+    zellij's re-seat, and no template shape survives it — `flatten_layout`
+    discards the tree, and the failing step is the percentage solve, not the
+    structure. Still present on zellij main (post-0.44.3). Accepted as the
+    split-preserving fidelity ceiling; upstream family: #1825, #2829, #1758,
+    #4647.
 
 ## If building v2 from scratch
 
@@ -347,8 +370,14 @@ these as laws.
    chrome-only with an explicit `tab { pane }` (see #27); tabs get the
    sidebar + swap set from `new-tab --layout zaphod` at birth or from a
    one-time `override_layout` retrofit on first toggle — complete KDL:
-   chrome, stacked main, both swaps (`docs/docking-approach.md`, Adopted
-   architecture). Nothing is spawned, hidden, or shown.
+   chrome, stacked main, both swaps carrying the tab's own dumped
+   arrangement (`docs/docking-approach.md`, Adopted architecture). Nothing
+   is spawned, hidden, or shown. Accept a fidelity ceiling: regenerating the
+   swaps preserves the user's splits across the rail-width flip, but a
+   deeply-nested percentage region flattens on collapse — zellij's swap
+   re-seat discards the layout tree when the percentage-constraint solve
+   fails at the changed width, and no template shape survives it (see #35).
+   Panes and content always survive; only the split nesting is lost.
 4. **Keybind = pipe toggle only**, with `floating true` + `skip_cache` (dev)
    + an identity config key. Treat any pane-less instance as dead weight to
    be starved, not managed.
