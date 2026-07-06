@@ -1197,6 +1197,21 @@ fn extract_chrome_panes(
     removed: &mut Vec<String>,
 ) -> Option<Vec<String>> {
     if block.len() < 2 {
+        // A pane can serialize with its plugin child inline on one line:
+        //   pane size=1 borderless=true { plugin location="zellij:tab-bar" }
+        // zellij's dump writes chrome (and single-child rails) this way, so
+        // classify it like a multi-line chrome/rail pane; a plain leaf pane
+        // (no inline plugin) is kept unchanged.
+        if let Some(location) = inline_plugin_location(&block[0]) {
+            return match classify_plugin_location(&location, own_plugin_url) {
+                PluginRole::Chrome => {
+                    removed.push(location);
+                    None
+                }
+                PluginRole::Rail => None,
+                PluginRole::ThirdParty => Some(block),
+            };
+        }
         return Some(block);
     }
     let children = top_level_blocks(&block[1..block.len() - 1]);
@@ -1230,6 +1245,17 @@ fn extract_chrome_panes(
     rebuilt.extend(kept.into_iter().flatten());
     rebuilt.push(block[block.len() - 1].clone());
     Some(rebuilt)
+}
+
+// The plugin location of a pane whose plugin child is inlined on the same
+// line: `pane ... { plugin location="X" ... }`. prop_token matches the first
+// UNQUOTED `location="..."` — the plugin's, since panes carry no location
+// prop — even past a nested config block like the rail's `{ rail "1" }`. A
+// plain leaf pane (no inline plugin) has no location and returns None.
+fn inline_plugin_location(line: &str) -> Option<String> {
+    let token = prop_token(line, "location")?;
+    let location = token.strip_prefix("location=\"")?.strip_suffix('"')?;
+    Some(location.to_owned())
 }
 
 // The location of a plugin node, when the block is one directly (its first
@@ -3030,7 +3056,137 @@ mod tests {
     }
 
     #[test]
+    fn single_line_chrome_extracts_like_multi_line() {
+        // zellij dumps a chrome pane on ONE line:
+        //   pane size=1 borderless=true { plugin location="zellij:tab-bar" }
+        // — the format the transform actually receives in production (the
+        // other fixtures use the non-production multi-line shape, which hid
+        // this bug). Single-line chrome must extract to the SAME clean
+        // template as multi-line: chrome hoisted to canonical top/bottom
+        // rows, never baked into the region.
+        let region = concat!(
+            "        pane split_direction=\"vertical\" {\n",
+            "            pane size=\"50%\" {\n",
+            "                pane size=\"50%\" cwd=\"/a\"\n",
+            "                pane size=\"50%\" cwd=\"/b\"\n",
+            "            }\n",
+            "            pane size=\"50%\" split_direction=\"vertical\" {\n",
+            "                pane size=\"33%\" cwd=\"/c\"\n",
+            "                pane size=\"33%\" cwd=\"/d\"\n",
+            "                pane size=\"34%\" cwd=\"/e\"\n",
+            "            }\n",
+            "        }",
+        );
+        let wrap = |tabbar: &str, statusbar: &str| {
+            format!("layout {{\n    tab name=\"t\" {{\n{tabbar}\n{region}\n{statusbar}\n    }}\n}}\n")
+        };
+        let multi = wrap(
+            "        pane size=1 borderless=true {\n            plugin location=\"zellij:tab-bar\"\n        }",
+            "        pane size=1 borderless=true {\n            plugin location=\"zellij:status-bar\"\n        }",
+        );
+        let single = wrap(
+            "        pane size=1 borderless=true { plugin location=\"zellij:tab-bar\" }",
+            "        pane size=1 borderless=true { plugin location=\"zellij:status-bar\" }",
+        );
+        let url = "file:/tmp/zellij-sidebar.wasm";
+        let out_multi = split_preserving_layout_kdl(&multi, url, &jit_config()).unwrap();
+        let out_single = split_preserving_layout_kdl(&single, url, &jit_config()).unwrap();
+        assert_eq!(
+            out_single, out_multi,
+            "single-line chrome must extract identically to multi-line"
+        );
+        // The tab-bar is the tab's first child (top chrome row), immediately
+        // before the region's vertical split — never baked in the region.
+        assert!(out_single.contains(
+            "tab {\npane size=1 borderless=true {\nplugin location=\"zellij:tab-bar\"\n}\npane split_direction=\"vertical\""
+        ));
+    }
+
+    #[test]
+    fn broken_mixed_split_dump_recovers_chrome_and_drops_stray_rail() {
+        // The live tab-7 dump after the bug: a single-line tab-bar baked deep
+        // in a mixed v/h region and a single-line stray rail left in the
+        // region. Re-transforming it must hoist the tab-bar to a top row and
+        // drop the stray rail — exactly one canonical rail per swap body.
+        let dump = r#"layout {
+    tab name="Tab #7" focus=true hide_floating_panes=true {
+        pane split_direction="vertical" {
+            pane name="sidebar" size=28 borderless=true { plugin location="file:/tmp/zellij-sidebar.wasm" { rail "1" } }
+            pane {
+                pane size="50%" split_direction="vertical" {
+                    pane size="25%" cwd="/a"
+                    pane size="25%" borderless=true { plugin location="zellij:tab-bar" }
+                    pane size="50%" cwd="/b"
+                }
+                pane size="50%" split_direction="vertical" {
+                    pane size="50%" cwd="/c"
+                    pane focus=true size="50%" cwd="/d"
+                }
+            }
+        }
+        pane size=1 borderless=true { plugin location="zellij:status-bar" }
+    }
+}
+"#;
+        let url = "file:/tmp/zellij-sidebar.wasm";
+        let out = split_preserving_layout_kdl(dump, url, &jit_config()).unwrap();
+        assert!(out.contains(
+            "tab {\npane size=1 borderless=true {\nplugin location=\"zellij:tab-bar\"\n}\npane split_direction=\"vertical\""
+        ));
+        assert_eq!(out.matches(url).count(), 3, "one canonical rail per swap body, stray dropped");
+        assert_eq!(out.matches("zellij:tab-bar").count(), 3);
+        assert_eq!(out.matches("zellij:status-bar").count(), 3);
+    }
+
+    #[test]
+    fn single_line_chrome_regenerates_to_a_fixed_point() {
+        // zellij dumps chrome single-line, so a re-toggle feeds the transform
+        // its own output re-serialized single-line. That must be a fixed
+        // point: the single-line form of the already-retrofitted shape
+        // transforms to the same body as its multi-line form.
+        let multi = r#"layout {
+    tab name="Tab #3" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane size=28 borderless=true name="sidebar" {
+                plugin location="file:/tmp/zellij-sidebar.wasm" {
+                    rail "1"
+                }
+            }
+            pane cwd="/a" size="50%"
+            pane cwd="/b" size="50%"
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
+"#;
+        let single = r#"layout {
+    tab name="Tab #3" {
+        pane size=1 borderless=true { plugin location="zellij:tab-bar" }
+        pane split_direction="vertical" {
+            pane size=28 borderless=true name="sidebar" { plugin location="file:/tmp/zellij-sidebar.wasm" { rail "1" } }
+            pane cwd="/a" size="50%"
+            pane cwd="/b" size="50%"
+        }
+        pane size=1 borderless=true { plugin location="zellij:status-bar" }
+    }
+}
+"#;
+        let url = "file:/tmp/zellij-sidebar.wasm";
+        let out_multi = split_preserving_layout_kdl(multi, url, &jit_config()).unwrap();
+        let out_single = split_preserving_layout_kdl(single, url, &jit_config()).unwrap();
+        assert_eq!(out_single, out_multi);
+    }
+
+    #[test]
     fn regenerating_from_the_transforms_own_output_is_a_fixed_point() {
+        // Fixture note: this uses the multi-line chrome form; zellij's real
+        // dump serializes chrome single-line
+        // (single_line_chrome_regenerates_to_a_fixed_point covers that path).
         // A tab wearing the transform's own output can be dumped and
         // rebuilt again mid-session — a later toggle, or a remote election
         // (F4) retrofitting a tab that already carries another instance's
