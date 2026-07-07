@@ -1,9 +1,10 @@
 ---
 title: Grout session-state mapping + default-path fix
-status: backlog
+status: ideation
 source: plan sprint 1 + sprint-0 gate findings
 score: 0.9
 id: kawd2h37e2rhn9t9ynf61ppe
+started: 2026-07-07T23:00:49Z
 ---
 
 ## Problem
