@@ -1,9 +1,10 @@
 ---
 title: Grout skeleton
-status: backlog
+status: ideation
 source: plan sprint 0 (docs/plan-agent-rail.md)
 score: 0.8
 id: fvfk1a5c1xcrbcjp6ap0z157
+started: 2026-07-07T04:49:25Z
 ---
 
 ## Problem
