@@ -309,3 +309,134 @@ Fallback without the debug key: the same sizes on pipe name `toggle` — the rai
 ### Summary
 
 Built the sprint-0 grout skeleton on branch spacedock-ensign/grout-skeleton (7 commits, 2f34b07..13c4d1f), strict red-first TDD, one behavior per commit: row protocol pinned to plan decision 3; brief derivation + frontmatter parse against the vendored playground pair; session decode off the recorded v0.36.1 fixture (termination_status → state, first_message → summary); end-to-end two-row emit on agent-event with no --plugin ever; and the 5s kill timer proving a wedged pipe cannot wedge grout. Environment notes: fixture recording auto-spawned an agentsview daemon (pid 29962) — stopped via `serve stop`, port 8080 verified free; ~/.agentsview untouched. Provenance nuance recorded in grout/README.md: the playground gate pair is a working-copy artifact of spacedock-subspace @ 9be5fbc (gitignored there as /playground*, not in that commit's tree); its shapes match the brief code at 9be5fbc.
+
+## Refutation audit — validation, throwaway checkout @13c4d1f
+
+Throwaway: `git archive 13c4d1f` extracted to the session scratchpad (never
+the implementation worktree). Baseline there first: `go test ./...` +
+`go vet ./...` green under GOPROXY=off. Probes live in a throwaway
+`refute_test.go` (6 tests) plus two fixture mutations; suite re-verified
+green after every restore. No REFUTED findings; two caveats noted below.
+
+1. **Protocol drift vs plan decision 3.** Key sets transcribed independently
+   from `docs/plan-agent-rail.md` decision 3 match rows.go struct tags and
+   the test baselines (session 7 keys, gate 9). Probe: all-empty source
+   fields → exact key sets survive (no omitempty-style drop); zero `round`
+   still a JSON number; `ts` from a nanosecond instant still parses RFC3339.
+   Probe: summary carrying raw `\n`/`\r`/quotes → marshaled payload has no
+   raw newline bytes, one-line-per-invocation holds. SURVIVED.
+2. **Kill-timer child reaping under variants.** Variant: TERM-immune child
+   (`trap '' TERM INT` + loop) — both recorded pids reaped (kill -0 →
+   ESRCH), elapsed 2.14s < the 4s wall, error surfaced; CommandContext's
+   SIGKILL is untrappable. Variant: child exits 0 leaving a `sleep 300 &`
+   grandchild holding inherited pipes — production shape (stderr is an
+   *os.File, as main.go passes os.Stderr): run returns in 30ms, exit 0;
+   test shape (bytes.Buffer stderr): bounded at 4.3s by WaitDelay (2s/row)
+   and surfaces the error. Grout never wedges. SURVIVED, with caveat:
+   grandchildren themselves survive (4/4 alive after runs) — the kill scope
+   is the direct child only; real `zellij pipe` spawns no grandchildren,
+   and boundedness holds regardless.
+3. **Fixture-provenance holes.** Mutation: session-get.json
+   `termination_status` awaiting_user→running → TestSessionRowFromFixture +
+   TestEmitEndToEnd fail on exactly that field (restored). Mutation:
+   playground-gate.md `round: 1`→`2` → TestGateRowFromBrief +
+   TestEmitEndToEnd fail (restored). Baselines demonstrably flow from the
+   fixtures, not from hardcoded twins. Source check: spacedock-subspace is
+   at HEAD 9be5fbc as the README claims; `DecisionLogPath`
+   (internal/brief/brief.go) matches grout's `briefPathForLog` inversion;
+   the vendored playground pair is byte-identical to the working copy
+   (diff clean); the README's gitignored-working-copy nuance is accurate.
+   SURVIVED, with caveat: subspace special-cases `brief.md` →
+   `decision-log.jsonl`, which the TrimSuffix inversion does not cover
+   (would derive `decision-log.jsonl.md`). The entity pins only the
+   gate-foo shape and defers discovery to sprint 2 — flag for the sprint-2
+   glob config.
+4. **Clamp edge cases.** Probes: 510 ASCII + 4-byte emoji straddling 512 →
+   510 bytes, valid UTF-8, prefix of source; exactly 512 → unchanged;
+   513 → 512; empty → empty; clamp below the first rune (`"世"`, 2) → ""
+   without panic. Probe: 600×0xff direct call → no panic, returns 512
+   still-invalid bytes (0xff looks like a rune start); ingress probe shows
+   `decodeSession` sanitizes invalid UTF-8 to U+FFFD on decode, so
+   clampSummary never sees invalid input via the real path. SURVIVED.
+
+## Demo script — sprint-0 exit gate (AC-4 + AC-5), CL drives
+
+Setup (once):
+
+1. Build + install the plugin from the branch with the pipe-unblock fix
+   landed: `./build.sh && ./install.sh` at the zaphod repo root (installs
+   `~/.config/zellij/layouts/zaphod.kdl`).
+2. Enable the trace observation path (pre-slice-(c) there is no rendered
+   row): add `debug "1"` beside each `rail "1"` in the installed
+   `~/.config/zellij/layouts/zaphod.kdl` plugin blocks.
+3. Start a fresh zellij session on that layout. In any shell (log verified
+   present at this path on this machine):
+
+       LOG="${TMPDIR%/}/zellij-$(id -u)/zellij-log/zellij.log"
+       tail -f "$LOG" | grep --line-buffered 'pipe recv name=agent-event'
+
+Spot-check (seconds, before any real time is spent — proves the drill
+infra end to end):
+
+4. Inside the session: `timeout 10 zellij pipe --name agent-event -- ping; echo exit=$?`
+   Expect: prompt returns quickly, `exit=0`, and one
+   `zaphod-trace[N]: pipe recv name=agent-event` line in the tail.
+   No trace line → the debug key is not active in the running layout (fix
+   step 2, restart) or fall back to `--name toggle` (rail visibly toggles).
+   Hang until timeout → the running plugin predates the pipe-unblock fix.
+
+AC-4 — both row kinds at the plugin within 10s:
+
+5. Pick a live session id: `agentsview session list | head`.
+6. Inside the session, from the grout worktree root
+   (`/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-grout-skeleton`):
+
+       time go run ./grout <session-id>
+
+   (gate log defaults to the vendored
+   `grout/testdata/playground-gate.decisions.jsonl`; pass a real gate log
+   as argv[2] to demo against the live playground copy instead.)
+7. Expect: exit 0, stderr empty, wall time well under 10s (spike baseline
+   1–6s), and TWO new `pipe recv name=agent-event` trace lines — session
+   row then gate row. That is AC-4's pre-slice-(c) observable; once slice
+   (c) lands, the rendered rail rows replace the trace as the observation.
+   Failure shape: `pipe timeout after 5s: kind=…` on stderr + exit 1 means
+   the pipe path is wedged; grout still exits within ~12s by design.
+
+AC-5 — payload ceiling probe (parked from implementation; run while the
+session is up, one size at a time so receipt is attributable):
+
+8.     timeout 10 zellij pipe --name agent-event -- "$(python3 -c 'print("x"*4096)')"    # 4 KiB
+       timeout 10 zellij pipe --name agent-event -- "$(python3 -c 'print("x"*65536)')"   # 64 KiB
+       timeout 10 zellij pipe --name agent-event -- "$(python3 -c 'print("x"*262144)')"  # 256 KiB
+
+   One new trace line after each command = receipt at that size. The trace
+   logs the name only, not payload length — hence one-at-a-time. Payload
+   integrity (untruncated content) becomes checkable when slice (c) parses
+   payloads. Fallback without the debug key: the same sizes on
+   `--name toggle`; the rail visibly toggling proves traversal.
+9. Record the result in this entity: the measured ceiling, or "≥256 KiB —
+   unbounded for our purposes". A ceiling below ~1 KiB invalidates the
+   protocol → back to ideation.
+
+## Stage Report: validation
+
+- DONE: Every offline AC (AC-1, AC-2, AC-3) re-verified by re-running its Verified-by command yourself in the worktree — verdicts from re-execution with your own outputs, never the implementer's numbers
+  Worktree clean at 13c4d1f (identity = implementation's final commit). AC-1 `go test -run TestEmitEndToEnd`: PASS 0.44s. AC-2 `-run TestRowProtocol`: 2/2 PASS (protocol + clamp sibling). AC-3 `-run TestPipeKillTimer`: PASS, 2.09s elapsed, inside the 2×PipeTimeout+2s wall. Full suite + `go vet` + `gofmt -l` clean under GOPROXY=off.
+- DONE: Refutation audit on a THROWAWAY checkout (never the implementation worktree) with named attacks: protocol drift vs plan decision 3, kill-timer child reaping under variants, fixture-provenance holes, clamp edge cases — each attack's probe and outcome recorded
+  git-archive of 13c4d1f in the session scratchpad; 6 throwaway probe tests + 2 fixture mutations, outcomes in "Refutation audit" section above. No REFUTED; two caveats: grandchild kill scope (bounded regardless; production stderr path unaffected), brief.md derivation special case (sprint-2 discovery concern).
+- DONE: Demo script prepared for CL's live gate: exact setup + commands + expected observations for AC-4 (both rows at plugin <10s) and the parked AC-5 probe (4/64/256 KiB), including the pre-slice-(c) debug-trace observation path and a cheap spot-check that the drill infra works before CL's time is spent
+  "Demo script" section above: install + `debug "1"` setup, seconds-cost `zellij pipe … -- ping` spot-check with trace grep, AC-4 run + expected observations and failure shape, AC-5 one-size-at-a-time probes with trace receipt and toggle fallback. Log path and every command verified present/runnable on this machine.
+
+### Summary
+
+Independently re-verified all three offline ACs by re-execution in the
+worktree at 13c4d1f — all pass with my own outputs. Ran a four-attack
+refutation audit on a throwaway git-archive checkout: no REFUTED findings;
+the protocol, kill timer, fixtures, and clamp survive, with two recorded
+caveats (grandchild processes outlive the kill scope though grout stays
+bounded; the brief.md→decision-log.jsonl derivation special case is
+uncovered until sprint 2's discovery). Fixture mutations proved AC-1's
+baselines flow from the fixtures. Prepared CL's live-gate demo script for
+AC-4/AC-5 with a seconds-cost spot-check ahead of the expensive run;
+interactive ACs remain CL's to settle at the demo.
