@@ -481,7 +481,16 @@ impl Sidebar {
     fn handle_click(&mut self, line: isize) {
         match decide_click(line, &self.rows) {
             ClickAction::ToggleDock => self.perform_toggle(),
-            ClickAction::FocusPane(id) => focus_terminal_pane(id, false, false),
+            ClickAction::FocusPane(id) => {
+                // A click-through during nav mode must also leave nav:
+                // focus moves to the clicked pane, and a latched nav_mode
+                // would keep the rail selectable with Enter/Esc routed to
+                // the now-focused terminal.
+                if self.nav_mode {
+                    self.exit_nav(false);
+                }
+                focus_terminal_pane(id, false, false);
+            }
             ClickAction::None => {}
         }
     }
@@ -2749,6 +2758,22 @@ mod tests {
         assert_eq!(decide_click(2, &rows), ClickAction::FocusPane(4));
         assert_eq!(decide_click(5, &rows), ClickAction::FocusPane(8));
         assert_eq!(decide_click(99, &rows), ClickAction::None);
+    }
+
+    #[test]
+    fn row_click_during_nav_mode_exits_nav() {
+        // A row click while nav mode is on focuses the pane but must also
+        // exit nav — otherwise nav_mode stays latched: the rail stays
+        // selectable, the focus-handback guard stays disabled, and
+        // Enter/Esc keep routing to the now-focused terminal (F8).
+        let mut sidebar = Sidebar::default();
+        sidebar.nav_mode = true;
+        sidebar.rows = vec![Row {
+            pane_id: 4,
+            ..Default::default()
+        }];
+        sidebar.handle_click(2); // line 2 = row 0 → FocusPane(4)
+        assert!(!sidebar.nav_mode, "click-through must drop nav mode");
     }
 
     #[test]
