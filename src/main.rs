@@ -78,6 +78,9 @@ struct Sidebar {
     // get_pane_running_command keeps timing out is polled exponentially less
     // often instead of every timer. Pruned to the current rows each poll.
     poll_backoff: BTreeMap<u32, PollBackoff>,
+    // Wedge drill knob (see wedge_poll_secs): seconds each status poll sleeps
+    // in place of its get_pane_running_command call. None outside drills.
+    wedge_poll_secs: Option<u64>,
 }
 
 // One pane's status-poll backoff. get_pane_running_command's timeout Err is
@@ -199,6 +202,7 @@ impl ZellijPlugin for Sidebar {
         self.plugin_id = get_plugin_ids().plugin_id;
         self.config = configuration;
         self.debug = debug_enabled(&self.config);
+        self.wedge_poll_secs = wedge_poll_secs(&self.config);
         subscribe(&[
             EventType::PaneUpdate,
             EventType::TabUpdate,
@@ -676,7 +680,14 @@ impl Sidebar {
                 continue; // backed off: keep the previous status
             }
             let pane_id = PaneId::Terminal(row.pane_id);
-            let command = get_pane_running_command(pane_id);
+            let command = match self.wedge_poll_secs {
+                Some(secs) => {
+                    trace!(self, "wedge drill: sleeping {}s in place of pane {} status call", secs, row.pane_id);
+                    std::thread::sleep(Duration::from_secs(secs));
+                    Err("wedge drill".to_owned())
+                }
+                None => get_pane_running_command(pane_id),
+            };
             let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
             state.record(command.is_err());
             let enriched = agent::enrich_fields(&row.agent, &row.title, command, viewport);
@@ -863,6 +874,15 @@ fn pending_steer_disposition(
 // with a non-empty value.
 fn debug_enabled(config: &BTreeMap<String, String>) -> bool {
     config.get("debug").is_some_and(|value| !value.is_empty())
+}
+
+// Wedge drill knob: the "wedge_poll_secs" config key, parsed as whole
+// seconds. When set, each status poll sleeps this long in place of its
+// get_pane_running_command call — the same blocking layer (the plugin's
+// pinned thread) as a real wedge, so the wedge budget is exercisable end to
+// end without waiting to catch a wild one. Absent or unparseable: off.
+fn wedge_poll_secs(config: &BTreeMap<String, String>) -> Option<u64> {
+    config.get("wedge_poll_secs").and_then(|value| value.parse().ok())
 }
 
 // Number of timers to skip after a pane's status poll fails: 0, 1, 3, 7, 15,
@@ -1638,6 +1658,18 @@ mod tests {
         assert!(!debug_enabled(&config), "empty value stays silent");
         config.insert("debug".to_owned(), "1".to_owned());
         assert!(debug_enabled(&config), "non-empty value enables tracing");
+    }
+
+    #[test]
+    fn wedge_drill_runs_only_with_a_numeric_wedge_poll_secs_value() {
+        assert_eq!(wedge_poll_secs(&BTreeMap::new()), None, "absent key: no drill");
+        let mut config = BTreeMap::new();
+        config.insert("wedge_poll_secs".to_owned(), "15".to_owned());
+        assert_eq!(wedge_poll_secs(&config), Some(15));
+        config.insert("wedge_poll_secs".to_owned(), String::new());
+        assert_eq!(wedge_poll_secs(&config), None, "empty value: no drill");
+        config.insert("wedge_poll_secs".to_owned(), "slow".to_owned());
+        assert_eq!(wedge_poll_secs(&config), None, "non-numeric value: no drill");
     }
 
     #[test]
