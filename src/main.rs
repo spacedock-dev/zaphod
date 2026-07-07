@@ -1,7 +1,9 @@
 // ABOUTME: Clickable pane-switcher sidebar for zellij — lists panes in its own tab with their
 // ABOUTME: last terminal line; Alt-/ flips it between a docked rail and a 1-col sliver.
 
+use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use zellij_tile::prelude::*;
 
@@ -86,6 +88,16 @@ struct Sidebar {
     // Wedge drill knob (see wedge_poll_secs): seconds each status poll sleeps
     // in place of its get_pane_running_command call. None outside drills.
     wedge_poll_secs: Option<u64>,
+    // Agent sessions and pending gates fed over the agent-event pipe,
+    // rendered as the AGENTS/GATES sections below the pane rows. Upserted in
+    // arrival order, never expired (grout is one-shot in sprint 0).
+    sessions: Vec<SessionEvent>,
+    gates: Vec<GateEvent>,
+    // Each terminal pane's cwd as last polled via get_pane_cwd — the data
+    // session binding matches against. Keyed by pane id, so it survives the
+    // manifest's row rebuilds; pruned to the current rows each poll pass. A
+    // failed poll keeps the previous entry (stale-not-blank).
+    pane_cwds: BTreeMap<u32, PathBuf>,
 }
 
 // One pane's status-poll backoff. get_pane_running_command's timeout Err is
@@ -166,11 +178,198 @@ struct Row {
     agent: agent::AgentFields,
 }
 
+// One agent-event payload: the two row kinds pinned by plan decision 3
+// (docs/plan-agent-rail.md). Only the fields the rail acts on are declared;
+// everything else (ts, workflow, entity, future additions) is tolerated and
+// ignored, and a declared field that is absent defaults — a session without
+// cwd simply renders unbound.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum AgentEvent {
+    Session(SessionEvent),
+    Gate(GateEvent),
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+struct SessionEvent {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    cwd: String,
+    #[serde(default)]
+    agent: String,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+struct GateEvent {
+    #[serde(default)]
+    log_path: String,
+    #[serde(default)]
+    entity_title: String,
+    #[serde(default)]
+    stage: String,
+    #[serde(default)]
+    round: u32,
+    #[serde(default)]
+    recommendation: String,
+}
+
+// Parses one agent-event payload line. Malformed JSON and unknown kinds are
+// in-band errors; the caller drops the event with the reason traced.
+fn parse_agent_event(payload: &str) -> Result<AgentEvent, String> {
+    serde_json::from_str(payload).map_err(|error| error.to_string())
+}
+
+// Upserts one event into the rail's session/gate lists: sessions keyed by
+// id, gates by log_path, insertion order kept, no expiry (grout is one-shot
+// in sprint 0; lifecycle is sprint 1+). Returns whether stored state
+// changed, so the pipe handler re-renders only on real updates.
+fn apply_agent_event(
+    sessions: &mut Vec<SessionEvent>,
+    gates: &mut Vec<GateEvent>,
+    event: AgentEvent,
+) -> bool {
+    match event {
+        AgentEvent::Session(session) => {
+            let key = session.id.clone();
+            upsert(sessions, |existing| existing.id == key, session)
+        }
+        AgentEvent::Gate(gate) => {
+            let key = gate.log_path.clone();
+            upsert(gates, |existing| existing.log_path == key, gate)
+        }
+    }
+}
+
+fn upsert<T: PartialEq>(list: &mut Vec<T>, keyed: impl Fn(&T) -> bool, item: T) -> bool {
+    match list.iter_mut().find(|existing| keyed(existing)) {
+        Some(existing) if *existing == item => false,
+        Some(existing) => {
+            *existing = item;
+            true
+        }
+        None => {
+            list.push(item);
+            true
+        }
+    }
+}
+
+// The cwd comparison rule for session→pane binding. get_pane_cwd answers
+// with the OS-resolved physical path (sysinfo resolves symlinks — /tmp →
+// /private/tmp on macOS) while agentsview records whatever the session
+// reported; the cwd-shape probe (entity test plan item 1) settles whether
+// the two shapes diverge. Exact textual match until it does — a
+// probe-pinned rule slots in here without touching bind_session's callers.
+fn normalize_cwd(cwd: &str) -> String {
+    cwd.to_owned()
+}
+
+// The pane a session's cwd binds to: exactly one listed pane whose polled
+// cwd matches → that pane id; zero or two-plus matches → None. Unbound
+// renders as unbound and its click is dead — never guessed.
+fn bind_session(session_cwd: &str, rows: &[Row], cwds: &BTreeMap<u32, PathBuf>) -> Option<u32> {
+    if session_cwd.is_empty() {
+        return None;
+    }
+    let target = normalize_cwd(session_cwd);
+    let mut matches = rows.iter().filter(|row| {
+        cwds.get(&row.pane_id)
+            .is_some_and(|cwd| normalize_cwd(&cwd.to_string_lossy()) == target)
+    });
+    let bound = matches.next()?;
+    matches.next().is_none().then_some(bound.pane_id)
+}
+
+// The gate's reviewable artifact, inverted from its decision-log path the
+// same way grout derives the log from the brief: trim .decisions.jsonl, add
+// .md. A log path without that suffix yields no brief — never float a wrong
+// file.
+fn brief_path_for_log(log_path: &str) -> Option<String> {
+    log_path
+        .strip_suffix(".decisions.jsonl")
+        .filter(|stem| !stem.is_empty())
+        .map(|stem| format!("{stem}.md"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum LineTarget {
     Header,
     Row(usize),
+    SessionRow(usize),
+    GateRow(usize),
     None,
+}
+
+// The rail's 1-based line map: pane rows first, then an AGENTS and a GATES
+// section, each a header line plus two-line rows, present only when it has
+// rows — an empty section occupies no lines at all. render prints in this
+// exact order, so deriving click targets from the same counts keeps the
+// click math aligned with the pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SectionLayout {
+    pane_count: usize,
+    session_count: usize,
+    gate_count: usize,
+}
+
+fn section_layout(pane_count: usize, session_count: usize, gate_count: usize) -> SectionLayout {
+    SectionLayout {
+        pane_count,
+        session_count,
+        gate_count,
+    }
+}
+
+impl SectionLayout {
+    // 1-based line of the AGENTS header, when the section renders.
+    fn agents_header(&self) -> Option<usize> {
+        (self.session_count > 0).then(|| 2 + 2 * self.pane_count)
+    }
+
+    // 1-based line of the GATES header, when the section renders.
+    fn gates_header(&self) -> Option<usize> {
+        (self.gate_count > 0).then(|| {
+            let sessions = if self.session_count > 0 {
+                1 + 2 * self.session_count
+            } else {
+                0
+            };
+            2 + 2 * self.pane_count + sessions
+        })
+    }
+
+    fn target(&self, line: isize) -> LineTarget {
+        if line <= 0 {
+            return LineTarget::None;
+        }
+        // The pane region is the shipped pane-rows map, byte for byte.
+        if (line as usize) < 2 + 2 * self.pane_count {
+            return target_for_line(line, self.pane_count);
+        }
+        let line = line as usize;
+        if let Some(header) = self.agents_header() {
+            if line == header {
+                return LineTarget::None;
+            }
+            if line <= header + 2 * self.session_count {
+                return LineTarget::SessionRow((line - header - 1) / 2);
+            }
+        }
+        if let Some(header) = self.gates_header() {
+            if line == header {
+                return LineTarget::None;
+            }
+            if line <= header + 2 * self.gate_count {
+                return LineTarget::GateRow((line - header - 1) / 2);
+            }
+        }
+        LineTarget::None
+    }
 }
 
 // The two sidebar presentation states a tab's swap set encodes: a 28-col
@@ -193,10 +392,14 @@ enum ToggleAction {
     Ignore,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum ClickAction {
     ToggleDock,
     FocusPane(u32),
+    // Float subspace-tui on the gate's brief with --log pointed at its
+    // decision log, so verdicts land on the gate's real record — the rail
+    // itself never writes it.
+    FloatGate { brief: String, log: String },
     None,
 }
 
@@ -383,6 +586,21 @@ impl ZellijPlugin for Sidebar {
         trace!(self, "pipe recv name={}", pipe_message.name);
         // CLI pipe callers terminate via the server's auto-unblock once this
         // returns; an explicit unblock would need the ReadCliPipes grant.
+        if pipe_message.name == "agent-event" {
+            // Only plugin state moves here — no host calls in pipe() (SPEC
+            // landmine #4); true re-renders, false leaves the screen alone.
+            let Some(payload) = pipe_message.payload.as_deref() else {
+                trace!(self, "agent-event dropped: missing payload");
+                return false;
+            };
+            return match parse_agent_event(payload) {
+                Ok(event) => apply_agent_event(&mut self.sessions, &mut self.gates, event),
+                Err(reason) => {
+                    trace!(self, "agent-event dropped: {}", reason);
+                    false
+                }
+            };
+        }
         if pipe_message.name == "navigate" {
             // Nav belongs to the active tab's resident instance; every tab's
             // layout carries one.
@@ -419,6 +637,9 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ReadApplicationState,
                 PermissionType::ChangeApplicationState,
                 PermissionType::ReadPaneContents,
+                // OpenCommandPaneFloating — the gate row's subspace-tui
+                // float — sits behind the RunCommands grant.
+                PermissionType::RunCommands,
             ]);
         }
         // Header: any click runs the same dock toggle as Alt-/ (the ⇄ marks
@@ -437,6 +658,31 @@ impl ZellijPlugin for Sidebar {
             }
             let status = agent::status_line(&row.agent, cols.saturating_sub(4));
             println!("    \u{1b}[2m{}\u{1b}[0m", status);
+        }
+        // The agent-event sections render only when they have rows: a rail
+        // that never receives an event prints exactly the lines above.
+        if !self.sessions.is_empty() {
+            println!(
+                "\u{1b}[7m▾ AGENTS{}\u{1b}[0m",
+                " ".repeat(cols.saturating_sub(9))
+            );
+            for session in &self.sessions {
+                let bound = bind_session(&session.cwd, &self.rows, &self.pane_cwds).is_some();
+                println!("{}", session_row_line(session, bound, cols));
+                let summary: String =
+                    session.summary.chars().take(cols.saturating_sub(4)).collect();
+                println!("    \u{1b}[2m{}\u{1b}[0m", summary);
+            }
+        }
+        if !self.gates.is_empty() {
+            println!(
+                "\u{1b}[7m▾ GATES{}\u{1b}[0m",
+                " ".repeat(cols.saturating_sub(8))
+            );
+            for gate in &self.gates {
+                println!("{}", gate_row_line(gate, cols));
+                println!("    \u{1b}[2m{}\u{1b}[0m", gate_row_detail(gate, cols));
+            }
         }
     }
 }
@@ -479,10 +725,53 @@ impl Sidebar {
     }
 
     fn handle_click(&mut self, line: isize) {
-        match decide_click(line, &self.rows) {
+        match decide_rail_click(line, &self.rows, &self.sessions, &self.gates, &self.pane_cwds) {
             ClickAction::ToggleDock => self.perform_toggle(),
-            ClickAction::FocusPane(id) => focus_terminal_pane(id, false, false),
-            ClickAction::None => {}
+            ClickAction::FocusPane(id) => {
+                // A click-through during nav mode must also leave nav:
+                // focus moves to the clicked pane, and a latched nav_mode
+                // would keep the rail selectable with Enter/Esc routed to
+                // the now-focused terminal.
+                if self.nav_mode {
+                    self.exit_nav(false);
+                }
+                focus_terminal_pane(id, false, false);
+            }
+            ClickAction::FloatGate { brief, log } => {
+                if self.nav_mode {
+                    self.exit_nav(false);
+                }
+                trace!(self, "float gate brief={} log={}", brief, log);
+                // subspace-tui's --log implies persist: verdicts issued in
+                // the floated TUI land on the gate's real decision log —
+                // the rail itself never writes the record. Mouse handling
+                // runs in update(), a context permitted to open panes
+                // (SPEC landmine #4 bars pipe()/load() only).
+                open_command_pane_floating(
+                    CommandToRun {
+                        path: "subspace-tui".into(),
+                        args: vec![brief, "--log".to_owned(), log],
+                        cwd: None,
+                    },
+                    None,
+                    BTreeMap::new(),
+                );
+            }
+            ClickAction::None => {
+                // A gate row can decide to nothing: its log_path has no
+                // derivable brief. Name the reason rather than floating a
+                // wrong file.
+                if let LineTarget::GateRow(idx) =
+                    section_layout(self.rows.len(), self.sessions.len(), self.gates.len())
+                        .target(line)
+                {
+                    trace!(
+                        self,
+                        "gate row {} click ignored: no brief derivable from log_path",
+                        idx
+                    );
+                }
+            }
         }
     }
 
@@ -673,11 +962,13 @@ impl Sidebar {
         Some(())
     }
 
-    // Returns whether any row's agent fields changed (i.e. a render is due).
+    // Returns whether any row's agent fields or polled cwd changed (i.e. a
+    // render is due — a cwd change can flip a session row's binding).
     fn refresh_statuses(&mut self) -> bool {
         let mut backoff = std::mem::take(&mut self.poll_backoff);
         let live: std::collections::BTreeSet<u32> = self.rows.iter().map(|r| r.pane_id).collect();
         backoff.retain(|pane_id, _| live.contains(pane_id));
+        self.pane_cwds.retain(|pane_id, _| live.contains(pane_id));
         let mut changed = false;
         for row in self.rows.iter_mut() {
             let state = backoff.entry(row.pane_id).or_default();
@@ -707,6 +998,29 @@ impl Sidebar {
                     started.elapsed().as_millis()
                 );
                 break;
+            }
+            // The pane's cwd feeds session binding: one more timed call
+            // under the same wedge budget. Its twin get_pane_running_command
+            // produced the observed ~13s wedges despite the export's 100ms
+            // guard, so the guard is not trusted here either. A failed call
+            // keeps the previous entry (stale-not-blank).
+            let cwd_started = Instant::now();
+            let cwd = get_pane_cwd(pane_id);
+            if wedge_aborts_pass(cwd_started.elapsed()) {
+                state.record(true);
+                trace!(
+                    self,
+                    "status pass aborted: pane {} cwd call wedge-classified after {}ms",
+                    row.pane_id,
+                    cwd_started.elapsed().as_millis()
+                );
+                break;
+            }
+            if let Ok(cwd) = cwd {
+                if self.pane_cwds.get(&row.pane_id) != Some(&cwd) {
+                    self.pane_cwds.insert(row.pane_id, cwd);
+                    changed = true;
+                }
             }
             let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
             state.record(command.is_err());
@@ -1015,6 +1329,39 @@ fn decide_click(line: isize, rows: &[Row]) -> ClickAction {
         LineTarget::Row(idx) => rows
             .get(idx)
             .map(|row| ClickAction::FocusPane(row.pane_id))
+            .unwrap_or(ClickAction::None),
+        // The pane-rows map never yields section rows.
+        LineTarget::None | LineTarget::SessionRow(_) | LineTarget::GateRow(_) => ClickAction::None,
+    }
+}
+
+// Click decision over the whole sectioned rail. Pane-region lines defer to
+// decide_click (the shipped pane-rows decider); a session row focuses its
+// cwd-bound pane and an unbound row's click is dead — never guessed; a gate
+// row floats the review TUI on the gate's brief, and a log path with no
+// derivable brief clicks to nothing rather than floating a wrong file.
+fn decide_rail_click(
+    line: isize,
+    rows: &[Row],
+    sessions: &[SessionEvent],
+    gates: &[GateEvent],
+    cwds: &BTreeMap<u32, PathBuf>,
+) -> ClickAction {
+    match section_layout(rows.len(), sessions.len(), gates.len()).target(line) {
+        LineTarget::Header | LineTarget::Row(_) => decide_click(line, rows),
+        LineTarget::SessionRow(idx) => sessions
+            .get(idx)
+            .and_then(|session| bind_session(&session.cwd, rows, cwds))
+            .map(ClickAction::FocusPane)
+            .unwrap_or(ClickAction::None),
+        LineTarget::GateRow(idx) => gates
+            .get(idx)
+            .and_then(|gate| {
+                brief_path_for_log(&gate.log_path).map(|brief| ClickAction::FloatGate {
+                    brief,
+                    log: gate.log_path.clone(),
+                })
+            })
             .unwrap_or(ClickAction::None),
         LineTarget::None => ClickAction::None,
     }
@@ -1552,14 +1899,54 @@ fn target_for_line(line: isize, row_count: usize) -> LineTarget {
     }
 }
 
-fn state_marker(fields: &agent::AgentFields) -> &'static str {
-    match fields.state {
+fn state_glyph(state: agent::AgentState) -> &'static str {
+    match state {
         agent::AgentState::Blocked => "\u{1b}[31m\u{25cf}\u{1b}[0m ",
         agent::AgentState::Working => "\u{1b}[33m\u{25cf}\u{1b}[0m ",
         agent::AgentState::Done => "\u{1b}[36m\u{25cf}\u{1b}[0m ",
         agent::AgentState::Idle => "\u{1b}[32m\u{2713}\u{1b}[0m ",
         agent::AgentState::Unknown => "  ",
     }
+}
+
+fn state_marker(fields: &agent::AgentFields) -> &'static str {
+    state_glyph(fields.state)
+}
+
+// First line of a session row: the session's state marker and agent name,
+// with an explicit ·unbound tag when no listed pane matches its cwd.
+fn session_row_line(session: &SessionEvent, bound: bool, cols: usize) -> String {
+    let text = if bound {
+        session.agent.clone()
+    } else {
+        format!("{} \u{b7}unbound", session.agent)
+    };
+    let text: String = text.chars().take(cols.saturating_sub(2)).collect();
+    format!(
+        "{}{}",
+        state_glyph(agent::marker_for_state(&session.state)),
+        text
+    )
+}
+
+// First line of a gate row: a pending gate waits on a verdict, so it wears
+// the blocked marker; the entity title names what is under review.
+fn gate_row_line(gate: &GateEvent, cols: usize) -> String {
+    let title: String = gate
+        .entity_title
+        .chars()
+        .take(cols.saturating_sub(2))
+        .collect();
+    format!("{}{}", state_glyph(agent::AgentState::Blocked), title)
+}
+
+// Second line of a gate row: where the gate sits and what the reviewer
+// recommends, sized like the pane rows' dim status line.
+fn gate_row_detail(gate: &GateEvent, cols: usize) -> String {
+    format!("{} r{} \u{b7} {}", gate.stage, gate.round, gate.recommendation)
+        .chars()
+        .take(cols.saturating_sub(4))
+        .collect()
 }
 
 fn row_marker(row: &Row) -> &'static str {
@@ -1679,6 +2066,381 @@ mod tests {
         PaneManifest { panes }
     }
 
+    // The two pinned agent-event row kinds (plan decision 3,
+    // docs/plan-agent-rail.md), transcribed with grout's exact field sets —
+    // fixtures from outside this plugin's source.
+    fn session_line() -> &'static str {
+        r#"{"kind":"session","id":"01J9SESS","cwd":"/Users/clkao/git/zaphod","agent":"claude","state":"working","summary":"wiring the rows section","ts":"2026-07-07T05:00:00Z"}"#
+    }
+
+    fn gate_line() -> &'static str {
+        r#"{"kind":"gate","log_path":"/pg/brief.decisions.jsonl","workflow":"agent-rail-dev","entity":"plugin-rows-section","entity_title":"Plugin rows section","stage":"ideation","round":2,"recommendation":"APPROVED","ts":"2026-07-07T05:00:00Z"}"#
+    }
+
+    #[test]
+    fn parses_both_pinned_row_kinds() {
+        assert_eq!(
+            parse_agent_event(session_line()).unwrap(),
+            AgentEvent::Session(SessionEvent {
+                id: "01J9SESS".to_owned(),
+                cwd: "/Users/clkao/git/zaphod".to_owned(),
+                agent: "claude".to_owned(),
+                state: "working".to_owned(),
+                summary: "wiring the rows section".to_owned(),
+            })
+        );
+        assert_eq!(
+            parse_agent_event(gate_line()).unwrap(),
+            AgentEvent::Gate(GateEvent {
+                log_path: "/pg/brief.decisions.jsonl".to_owned(),
+                entity_title: "Plugin rows section".to_owned(),
+                stage: "ideation".to_owned(),
+                round: 2,
+                recommendation: "APPROVED".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn tolerates_missing_fields_and_unknown_extras() {
+        // grout pins exact field sets today; tolerance is the plugin's
+        // concern: extra fields are ignored, missing declared fields default
+        // (a session without cwd simply renders unbound).
+        let event =
+            parse_agent_event(r#"{"kind":"session","id":"s1","next_sprint_field":true}"#).unwrap();
+        assert_eq!(
+            event,
+            AgentEvent::Session(SessionEvent {
+                id: "s1".to_owned(),
+                ..Default::default()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_kind_and_malformed_json() {
+        let unknown = parse_agent_event(r#"{"kind":"deploy","id":"x"}"#).unwrap_err();
+        assert!(
+            unknown.contains("deploy"),
+            "reason names the unknown kind: {unknown}"
+        );
+        assert!(!parse_agent_event("{not json").unwrap_err().is_empty());
+        // A payload without a kind tag is an error, never a default kind.
+        assert!(parse_agent_event(r#"{"id":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn session_upsert_replaces_by_id() {
+        let mut sessions = Vec::new();
+        let mut gates = Vec::new();
+        let first = parse_agent_event(session_line()).unwrap();
+        assert!(apply_agent_event(&mut sessions, &mut gates, first.clone()));
+        // Re-applying the identical line changes nothing: no re-render.
+        assert!(!apply_agent_event(&mut sessions, &mut gates, first));
+        // The same id with updated fields replaces the row, never duplicates.
+        let updated = parse_agent_event(&session_line().replace("working", "done")).unwrap();
+        assert!(apply_agent_event(&mut sessions, &mut gates, updated));
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].state, "done");
+        assert!(gates.is_empty());
+    }
+
+    #[test]
+    fn gate_upsert_replaces_by_log_path_keeping_insertion_order() {
+        let mut sessions = Vec::new();
+        let mut gates = Vec::new();
+        let first = GateEvent {
+            log_path: "/a.decisions.jsonl".to_owned(),
+            round: 1,
+            ..Default::default()
+        };
+        let second = GateEvent {
+            log_path: "/b.decisions.jsonl".to_owned(),
+            round: 1,
+            ..Default::default()
+        };
+        assert!(apply_agent_event(&mut sessions, &mut gates, AgentEvent::Gate(first.clone())));
+        assert!(apply_agent_event(&mut sessions, &mut gates, AgentEvent::Gate(second)));
+        // A later round for the first gate updates it in place.
+        let rerun = GateEvent { round: 2, ..first };
+        assert!(apply_agent_event(&mut sessions, &mut gates, AgentEvent::Gate(rerun)));
+        assert_eq!(
+            gates.iter().map(|g| g.log_path.as_str()).collect::<Vec<_>>(),
+            vec!["/a.decisions.jsonl", "/b.decisions.jsonl"]
+        );
+        assert_eq!(gates[0].round, 2);
+        assert!(sessions.is_empty());
+    }
+
+    fn cwd_row(pane_id: u32) -> Row {
+        Row {
+            pane_id,
+            ..Default::default()
+        }
+    }
+
+    fn cwd_map(entries: &[(u32, &str)]) -> BTreeMap<u32, std::path::PathBuf> {
+        entries
+            .iter()
+            .map(|(id, cwd)| (*id, std::path::PathBuf::from(cwd)))
+            .collect()
+    }
+
+    #[test]
+    fn single_match_binds() {
+        let rows = [cwd_row(4), cwd_row(8)];
+        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp/elsewhere")]);
+        assert_eq!(
+            bind_session("/Users/clkao/git/zaphod", &rows, &cwds),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn no_match_renders_unbound() {
+        let rows = [cwd_row(4)];
+        let cwds = cwd_map(&[(4, "/tmp/elsewhere")]);
+        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
+        // A pane whose cwd was never polled cannot match.
+        assert_eq!(bind_session("/tmp/elsewhere", &[cwd_row(9)], &cwds), None);
+        // A session without a cwd never binds — unbound, not guessed.
+        assert_eq!(bind_session("", &rows, &cwds), None);
+    }
+
+    #[test]
+    fn ambiguous_cwd_renders_unbound() {
+        // Two panes sharing the session's cwd: binding would be a guess.
+        let rows = [cwd_row(4), cwd_row(8)];
+        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/Users/clkao/git/zaphod")]);
+        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
+    }
+
+    #[test]
+    fn stale_cwd_entries_outside_the_row_set_never_bind() {
+        // The cwd map can briefly carry a closed pane between the manifest
+        // rebuild and the next poll's prune; only listed rows may bind.
+        let rows = [cwd_row(4)];
+        let cwds = cwd_map(&[(4, "/tmp/a"), (99, "/Users/clkao/git/zaphod")]);
+        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
+    }
+
+    #[test]
+    fn brief_path_inverts_the_decision_log_suffix() {
+        assert_eq!(
+            brief_path_for_log("/pg/brief.decisions.jsonl"),
+            Some("/pg/brief.md".to_owned())
+        );
+        // A log path without the suffix yields no brief: the row still
+        // renders, but its click must never float a wrong file.
+        assert_eq!(brief_path_for_log("/pg/brief.jsonl"), None);
+        assert_eq!(brief_path_for_log(""), None);
+    }
+
+    #[test]
+    fn sectioned_lines_map_headers_rows_and_beyond_for_p2_s1_g1() {
+        // Hand-counted against the render order: PANES header, two 2-line
+        // pane rows, AGENTS header, one 2-line session row, GATES header,
+        // one 2-line gate row. Section headers are not controls.
+        let layout = section_layout(2, 1, 1);
+        assert_eq!(layout.target(0), LineTarget::None);
+        assert_eq!(layout.target(1), LineTarget::Header);
+        assert_eq!(layout.target(2), LineTarget::Row(0));
+        assert_eq!(layout.target(5), LineTarget::Row(1));
+        assert_eq!(layout.target(6), LineTarget::None); // AGENTS header
+        assert_eq!(layout.target(7), LineTarget::SessionRow(0));
+        assert_eq!(layout.target(8), LineTarget::SessionRow(0));
+        assert_eq!(layout.target(9), LineTarget::None); // GATES header
+        assert_eq!(layout.target(10), LineTarget::GateRow(0));
+        assert_eq!(layout.target(11), LineTarget::GateRow(0));
+        assert_eq!(layout.target(12), LineTarget::None);
+    }
+
+    #[test]
+    fn empty_sections_map_like_the_pane_only_rail() {
+        // Zero footprint: with no agent events received the sectioned map is
+        // the shipped pane-rows map on every line.
+        let layout = section_layout(2, 0, 0);
+        for line in -1..10 {
+            assert_eq!(layout.target(line), target_for_line(line, 2));
+        }
+    }
+
+    #[test]
+    fn gates_section_starts_right_after_pane_rows_when_no_sessions_arrived() {
+        let layout = section_layout(1, 0, 2);
+        assert_eq!(layout.target(3), LineTarget::Row(0));
+        assert_eq!(layout.target(4), LineTarget::None); // GATES header
+        assert_eq!(layout.target(5), LineTarget::GateRow(0));
+        assert_eq!(layout.target(7), LineTarget::GateRow(1));
+        assert_eq!(layout.target(9), LineTarget::None);
+    }
+
+    #[test]
+    fn session_row_click_focuses_only_when_bound() {
+        let rows = vec![cwd_row(4), cwd_row(8)];
+        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp")]);
+        let sessions = vec![SessionEvent {
+            cwd: "/Users/clkao/git/zaphod".to_owned(),
+            ..Default::default()
+        }];
+        let gates = Vec::new();
+        // P=2,S=1: the session row occupies lines 7-8.
+        assert_eq!(
+            decide_rail_click(7, &rows, &sessions, &gates, &cwds),
+            ClickAction::FocusPane(4)
+        );
+        // An unbound session row's click is dead — never guessed.
+        let unmatched = vec![SessionEvent {
+            cwd: "/nowhere".to_owned(),
+            ..Default::default()
+        }];
+        assert_eq!(
+            decide_rail_click(8, &rows, &unmatched, &gates, &cwds),
+            ClickAction::None
+        );
+    }
+
+    #[test]
+    fn gate_click_floats_tui_on_brief() {
+        let rows = vec![cwd_row(4), cwd_row(8)];
+        let cwds = BTreeMap::new();
+        let sessions = vec![SessionEvent::default()];
+        let gates = vec![GateEvent {
+            log_path: "/pg/brief.decisions.jsonl".to_owned(),
+            ..Default::default()
+        }];
+        // P=2,S=1,G=1: the gate row occupies lines 10-11.
+        assert_eq!(
+            decide_rail_click(10, &rows, &sessions, &gates, &cwds),
+            ClickAction::FloatGate {
+                brief: "/pg/brief.md".to_owned(),
+                log: "/pg/brief.decisions.jsonl".to_owned(),
+            }
+        );
+        // The pane region still routes through the shipped decider.
+        assert_eq!(
+            decide_rail_click(1, &rows, &sessions, &gates, &cwds),
+            ClickAction::ToggleDock
+        );
+        assert_eq!(
+            decide_rail_click(2, &rows, &sessions, &gates, &cwds),
+            ClickAction::FocusPane(4)
+        );
+    }
+
+    #[test]
+    fn bad_log_suffix_never_floats() {
+        // The row renders, but a log_path that does not end .decisions.jsonl
+        // has no derivable brief: clicking it must do nothing.
+        let gates = vec![GateEvent {
+            log_path: "/pg/notes.txt".to_owned(),
+            ..Default::default()
+        }];
+        // P=0,S=0,G=1: GATES header at line 2, gate row lines 3-4.
+        assert_eq!(
+            decide_rail_click(3, &[], &[], &gates, &BTreeMap::new()),
+            ClickAction::None
+        );
+    }
+
+    fn agent_event(payload: Option<&str>) -> PipeMessage {
+        PipeMessage {
+            source: PipeSource::Keybind,
+            name: "agent-event".to_owned(),
+            payload: payload.map(str::to_owned),
+            args: BTreeMap::new(),
+            is_private: false,
+        }
+    }
+
+    #[test]
+    fn agent_event_lines_land_as_session_and_gate_rows() {
+        let mut sidebar = Sidebar::default();
+        assert!(sidebar.pipe(agent_event(Some(session_line()))), "a new row re-renders");
+        assert!(sidebar.pipe(agent_event(Some(gate_line()))));
+        assert_eq!(sidebar.sessions.len(), 1);
+        assert_eq!(sidebar.sessions[0].agent, "claude");
+        assert_eq!(sidebar.gates.len(), 1);
+        assert_eq!(sidebar.gates[0].round, 2);
+        // The identical line again changes nothing: no re-render.
+        assert!(!sidebar.pipe(agent_event(Some(session_line()))));
+        assert_eq!(sidebar.sessions.len(), 1);
+    }
+
+    #[test]
+    fn unknown_kind_dropped() {
+        let mut sidebar = Sidebar::default();
+        assert!(!sidebar.pipe(agent_event(Some(r#"{"kind":"deploy","id":"x"}"#))));
+        assert!(sidebar.sessions.is_empty() && sidebar.gates.is_empty());
+    }
+
+    #[test]
+    fn malformed_json_dropped() {
+        let mut sidebar = Sidebar::default();
+        assert!(!sidebar.pipe(agent_event(Some("{not json"))));
+        assert!(sidebar.sessions.is_empty() && sidebar.gates.is_empty());
+    }
+
+    #[test]
+    fn missing_payload_dropped() {
+        let mut sidebar = Sidebar::default();
+        assert!(!sidebar.pipe(agent_event(None)));
+        assert!(sidebar.sessions.is_empty() && sidebar.gates.is_empty());
+    }
+
+    #[test]
+    fn pinned_protocol_lines_render_and_bind() {
+        // Wire to action: the two pinned lines plus a pane set whose one
+        // matching cwd equals the session's cwd yield a bound session row
+        // and an actionable gate row.
+        let mut sidebar = Sidebar::default();
+        assert!(sidebar.pipe(agent_event(Some(session_line()))));
+        assert!(sidebar.pipe(agent_event(Some(gate_line()))));
+        sidebar.rows = vec![cwd_row(4), cwd_row(8)];
+        sidebar.pane_cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp")]);
+        // The session row's marker reflects the line's state; bound rows
+        // carry no unbound tag and click through to the cwd-bound pane.
+        let session = &sidebar.sessions[0];
+        let bound = bind_session(&session.cwd, &sidebar.rows, &sidebar.pane_cwds);
+        assert_eq!(bound, Some(4));
+        let line = session_row_line(session, bound.is_some(), 28);
+        assert!(line.starts_with(state_glyph(agent::AgentState::Working)));
+        assert!(line.contains("claude"));
+        assert!(!line.contains("\u{b7}unbound"));
+        assert_eq!(
+            decide_rail_click(7, &sidebar.rows, &sidebar.sessions, &sidebar.gates, &sidebar.pane_cwds),
+            ClickAction::FocusPane(4)
+        );
+        // The gate row names the entity under review and its stage detail;
+        // its click floats the TUI on the brief with the verbatim log path.
+        let gate = &sidebar.gates[0];
+        assert!(gate_row_line(gate, 28).contains("Plugin rows section"));
+        assert_eq!(gate_row_detail(gate, 80), "ideation r2 \u{b7} APPROVED");
+        assert_eq!(
+            decide_rail_click(10, &sidebar.rows, &sidebar.sessions, &sidebar.gates, &sidebar.pane_cwds),
+            ClickAction::FloatGate {
+                brief: "/pg/brief.md".to_owned(),
+                log: "/pg/brief.decisions.jsonl".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn unbound_session_rows_carry_the_unbound_tag() {
+        let session = SessionEvent {
+            agent: "claude".to_owned(),
+            state: "blocked".to_owned(),
+            ..Default::default()
+        };
+        let line = session_row_line(&session, false, 28);
+        assert!(line.starts_with(state_glyph(agent::AgentState::Blocked)));
+        assert!(line.ends_with("claude \u{b7}unbound"));
+        // Row text truncates to the rail width like pane rows.
+        let narrow = session_row_line(&session, false, 8);
+        assert!(narrow.ends_with("claude"));
+        assert!(!narrow.contains("\u{b7}unbound"));
+    }
+
     #[test]
     fn trace_is_gated_off_unless_config_sets_a_nonempty_debug_value() {
         assert!(!debug_enabled(&BTreeMap::new()), "absent key stays silent");
@@ -1792,6 +2554,20 @@ mod tests {
         assert_eq!(failures(&sidebar, 1), Some(1), "the backed-off pane is skipped, not re-recorded");
         assert_eq!(failures(&sidebar, 2), Some(1), "the pass moves to the next due pane");
         assert_eq!(failures(&sidebar, 3), None, "the abort spares the panes behind the wedge");
+    }
+
+    #[test]
+    fn cwd_map_prunes_to_live_rows() {
+        // A closed pane's polled cwd must not linger in the map. The drill
+        // knob stands in for the host calls: the pass aborts at the first
+        // wedge-classified status call, before any cwd call, so the prune is
+        // observable hermetically.
+        let mut sidebar = Sidebar::default();
+        sidebar.wedge_poll_secs = Some(1);
+        sidebar.pane_cwds = cwd_map(&[(1, "/a"), (99, "/gone")]);
+        sidebar.rows = vec![cwd_row(1)];
+        sidebar.refresh_statuses();
+        assert_eq!(sidebar.pane_cwds, cwd_map(&[(1, "/a")]));
     }
 
     #[test]
@@ -2749,6 +3525,39 @@ mod tests {
         assert_eq!(decide_click(2, &rows), ClickAction::FocusPane(4));
         assert_eq!(decide_click(5, &rows), ClickAction::FocusPane(8));
         assert_eq!(decide_click(99, &rows), ClickAction::None);
+    }
+
+    #[test]
+    fn session_row_click_through_the_rail_focuses_and_exits_nav() {
+        // The click handler routes through the sectioned decider: a bound
+        // session row's line reaches FocusPane (observable here through the
+        // nav exit it shares with pane-row clicks).
+        let mut sidebar = Sidebar::default();
+        sidebar.nav_mode = true;
+        sidebar.rows = vec![cwd_row(4), cwd_row(8)];
+        sidebar.pane_cwds = cwd_map(&[(4, "/w")]);
+        sidebar.sessions = vec![SessionEvent {
+            cwd: "/w".to_owned(),
+            ..Default::default()
+        }];
+        sidebar.handle_click(7); // P=2,S=1: the session row's first line
+        assert!(!sidebar.nav_mode, "the session click must reach FocusPane");
+    }
+
+    #[test]
+    fn row_click_during_nav_mode_exits_nav() {
+        // A row click while nav mode is on focuses the pane but must also
+        // exit nav — otherwise nav_mode stays latched: the rail stays
+        // selectable, the focus-handback guard stays disabled, and
+        // Enter/Esc keep routing to the now-focused terminal (F8).
+        let mut sidebar = Sidebar::default();
+        sidebar.nav_mode = true;
+        sidebar.rows = vec![Row {
+            pane_id: 4,
+            ..Default::default()
+        }];
+        sidebar.handle_click(2); // line 2 = row 0 → FocusPane(4)
+        assert!(!sidebar.nav_mode, "click-through must drop nav mode");
     }
 
     #[test]

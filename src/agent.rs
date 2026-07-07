@@ -13,10 +13,21 @@ pub enum AgentKind {
 pub enum AgentState {
     Blocked,
     Working,
-    #[allow(dead_code)]
     Done,
     Idle,
     Unknown,
+}
+
+// Maps grout's session-state strings (the agent-event row protocol) onto the
+// marker states; anything unrecognized renders the neutral marker.
+pub fn marker_for_state(state: &str) -> AgentState {
+    match state {
+        "blocked" => AgentState::Blocked,
+        "working" => AgentState::Working,
+        "idle" => AgentState::Idle,
+        "done" => AgentState::Done,
+        _ => AgentState::Unknown,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -473,6 +484,16 @@ mod tests {
         assert_eq!(fields.kind, AgentKind::Unknown);
         assert_eq!(fields.state, AgentState::Unknown);
         assert_eq!(fields.running_command, Some(argv(&["bash"])));
+    }
+
+    #[test]
+    fn grout_state_strings_map_onto_marker_states() {
+        assert_eq!(marker_for_state("blocked"), AgentState::Blocked);
+        assert_eq!(marker_for_state("working"), AgentState::Working);
+        assert_eq!(marker_for_state("idle"), AgentState::Idle);
+        assert_eq!(marker_for_state("done"), AgentState::Done);
+        assert_eq!(marker_for_state("exited"), AgentState::Unknown);
+        assert_eq!(marker_for_state(""), AgentState::Unknown);
     }
 
     #[test]
