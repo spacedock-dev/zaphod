@@ -247,3 +247,38 @@ machinery, adds a config-gated drill knob, and leads the test plan with a
 pre-fix baseline drill that would invalidate either the wedge model or the
 refutation before implementation starts. Doc diffs for SPEC #5 and the
 plan are proposed for gate review.
+
+## Stage Report: implementation
+
+- DONE: Red-first evidence recorded for each new pure fn (wedge_aborts_pass, wedge_poll_secs parse) — failure output with the predicted reason in the stage report
+  Both went red with the predicted reason (fn not yet written): `error[E0425]: cannot find function `wedge_poll_secs` in this scope` → green in 4b9f098; `error[E0425]: cannot find function `wedge_aborts_pass` in this scope` → green in 9332436.
+- DONE: AC-1 drill outcome recorded: pre-fix vs post-fix `time` outputs (or the headless-render fallback taken with reason) — settle test-plan item 1 cheaply FIRST
+  Run first, at the knob-only commit 4b9f098: `real 87.02` (≥60s bound met; exactly one 6×15s pass, 6 sleep traces). Post-fix at 9332436: `real 11.96` (<20s bound met). No fallback needed — the headless background session rendered the rail and fired polls.
+- DONE: Doc diffs applied as designed: SPEC #5 and docs/plan-agent-rail.md sprint 0(a) corrected off the refuted mechanism
+  0153787 applies both diffs verbatim from the ideation body (SPEC #5 append; sprint 0(a) final-sentence replacement).
+
+### Summary
+
+Three commits on spacedock-ensign/plugin-pipe-unblock: 4b9f098 (wedge_poll_secs
+drill knob — sleeps in place of get_pane_running_command, plus a per-sleep trace
+line), 9332436 (wedge budget — a call stalling past WEDGE_THRESHOLD=1s records
+into its pane's PollBackoff and aborts the pass with a trace line), 0153787
+(doc diffs). Suite 99 → 103 (`cargo test`), `cargo check --tests` clean; new
+tests: wedge_drill_runs_only_with_a_numeric_wedge_poll_secs_value,
+wedge_classified_call_aborts_the_pass, fast_call_continues_the_pass,
+wedge_outcome_lands_in_the_panes_backoff_and_a_success_clears_it (the last
+documents the wedge→backoff contract over shipped PollBackoff behavior, so it
+was born green — red-first evidence covers the two new pure fns).
+
+AC-2 drill evidence: post-fix the log gained exactly one "wedge drill: sleeping"
+line per pass, and `status pass aborted: pane 2 wedge-classified after 15001ms`
+is greppable in the drill session's zellij.log.
+
+Drill notes for validation: the scripted drill created the wedge tab LAST
+(focus=true) so its rail owns the visibility-gated poll — creating the healthy
+tab last would gate the wedge rail's polls off and void the drill. Session
+names must stay short (macOS 103-byte IPC socket cap). The drill wasm path was
+pre-granted by seeding permissions.kdl (SPEC #9) and the entry was removed
+after both runs — CL's permission cache is as found; a live demo of the wedge
+tab needs a re-seed or one interactive grant for the drill wasm path. Parked
+demo-ready for AC-I1/AC-I2 per the workflow's posture.
