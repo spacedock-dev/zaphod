@@ -1769,6 +1769,32 @@ mod tests {
     }
 
     #[test]
+    fn aborted_pass_leaves_untried_panes_backoff_untouched() {
+        // Drives refresh_statuses itself through the wedge branch: the drill
+        // knob sleeps 1s in place of the host call, which wedge-classifies
+        // every status call without reaching get_pane_scrollback.
+        let mut sidebar = Sidebar::default();
+        sidebar.wedge_poll_secs = Some(1);
+        sidebar.rows = (1u32..=3)
+            .map(|id| Row {
+                pane_id: id,
+                ..Default::default()
+            })
+            .collect();
+
+        sidebar.refresh_statuses(); // pass 1: pane 1 wedges, the pass aborts
+        let failures = |s: &Sidebar, id: u32| s.poll_backoff.get(&id).map(|b| b.failures);
+        assert_eq!(failures(&sidebar, 1), Some(1), "the wedge lands in the pane's backoff");
+        assert_eq!(failures(&sidebar, 2), None, "untried panes get no backoff entry");
+        assert_eq!(failures(&sidebar, 3), None);
+
+        sidebar.refresh_statuses(); // pass 2: pane 1 backed off, pane 2 wedges
+        assert_eq!(failures(&sidebar, 1), Some(1), "the backed-off pane is skipped, not re-recorded");
+        assert_eq!(failures(&sidebar, 2), Some(1), "the pass moves to the next due pane");
+        assert_eq!(failures(&sidebar, 3), None, "the abort spares the panes behind the wedge");
+    }
+
+    #[test]
     fn a_repeatedly_failing_pane_backs_off_then_recovers() {
         let mut bo = PollBackoff::default();
         assert!(bo.due(), "first timer polls");
