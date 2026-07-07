@@ -3,6 +3,7 @@
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use zellij_tile::prelude::*;
 
@@ -246,6 +247,32 @@ fn upsert<T: PartialEq>(list: &mut Vec<T>, keyed: impl Fn(&T) -> bool, item: T) 
             true
         }
     }
+}
+
+// The cwd comparison rule for session→pane binding. get_pane_cwd answers
+// with the OS-resolved physical path (sysinfo resolves symlinks — /tmp →
+// /private/tmp on macOS) while agentsview records whatever the session
+// reported; the cwd-shape probe (entity test plan item 1) settles whether
+// the two shapes diverge. Exact textual match until it does — a
+// probe-pinned rule slots in here without touching bind_session's callers.
+fn normalize_cwd(cwd: &str) -> String {
+    cwd.to_owned()
+}
+
+// The pane a session's cwd binds to: exactly one listed pane whose polled
+// cwd matches → that pane id; zero or two-plus matches → None. Unbound
+// renders as unbound and its click is dead — never guessed.
+fn bind_session(session_cwd: &str, rows: &[Row], cwds: &BTreeMap<u32, PathBuf>) -> Option<u32> {
+    if session_cwd.is_empty() {
+        return None;
+    }
+    let target = normalize_cwd(session_cwd);
+    let mut matches = rows.iter().filter(|row| {
+        cwds.get(&row.pane_id)
+            .is_some_and(|cwd| normalize_cwd(&cwd.to_string_lossy()) == target)
+    });
+    let bound = matches.next()?;
+    matches.next().is_none().then_some(bound.pane_id)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1874,6 +1901,58 @@ mod tests {
         );
         assert_eq!(gates[0].round, 2);
         assert!(sessions.is_empty());
+    }
+
+    fn cwd_row(pane_id: u32) -> Row {
+        Row {
+            pane_id,
+            ..Default::default()
+        }
+    }
+
+    fn cwd_map(entries: &[(u32, &str)]) -> BTreeMap<u32, std::path::PathBuf> {
+        entries
+            .iter()
+            .map(|(id, cwd)| (*id, std::path::PathBuf::from(cwd)))
+            .collect()
+    }
+
+    #[test]
+    fn single_match_binds() {
+        let rows = [cwd_row(4), cwd_row(8)];
+        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp/elsewhere")]);
+        assert_eq!(
+            bind_session("/Users/clkao/git/zaphod", &rows, &cwds),
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn no_match_renders_unbound() {
+        let rows = [cwd_row(4)];
+        let cwds = cwd_map(&[(4, "/tmp/elsewhere")]);
+        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
+        // A pane whose cwd was never polled cannot match.
+        assert_eq!(bind_session("/tmp/elsewhere", &[cwd_row(9)], &cwds), None);
+        // A session without a cwd never binds — unbound, not guessed.
+        assert_eq!(bind_session("", &rows, &cwds), None);
+    }
+
+    #[test]
+    fn ambiguous_cwd_renders_unbound() {
+        // Two panes sharing the session's cwd: binding would be a guess.
+        let rows = [cwd_row(4), cwd_row(8)];
+        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/Users/clkao/git/zaphod")]);
+        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
+    }
+
+    #[test]
+    fn stale_cwd_entries_outside_the_row_set_never_bind() {
+        // The cwd map can briefly carry a closed pane between the manifest
+        // rebuild and the next poll's prune; only listed rows may bind.
+        let rows = [cwd_row(4)];
+        let cwds = cwd_map(&[(4, "/tmp/a"), (99, "/Users/clkao/git/zaphod")]);
+        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
     }
 
     #[test]
