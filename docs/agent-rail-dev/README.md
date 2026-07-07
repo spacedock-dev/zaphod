@@ -12,7 +12,6 @@ stages:
   states:
     - name: backlog
       initial: true
-      gate: true
     - name: ideation
       gate: true
     - name: implementation
@@ -90,7 +89,8 @@ id-style: sd-b32
 ### `backlog`
 
 A slice enters backlog as a seed from the sprint plan (or a finding promoted
-from triage). CL curates: the gate decides which slices advance to ideation.
+from triage). Ungated: the FO advances slices in sprint-plan order; CL
+reprioritizes conversationally.
 
 - **Inputs:** `docs/plan-agent-rail.md` sprint ordering; the slice's seed description.
 - **Outputs:** a one-paragraph problem statement and the sprint it serves.
@@ -104,9 +104,9 @@ criteria as entity-level end-state properties with `Verified by:` clauses, and
 a test plan matching the AC's level of abstraction.
 
 - **Inputs:** `docs/prd-agent-rail.md`, `docs/plan-agent-rail.md` (the decisions section is binding: binding-in-plugin, Go grout, two typed row kinds over pipe name `agent-event`, glob config), the landmine dossier woven through both, `SPEC.md` landmines, `docs/docking-approach.md` for the shipped container, `docs/review-findings-2026-07-07.md` for open findings that touch the slice's code region.
-- **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; the slice's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan.
-- **Good:** every AC externally provable (a test name, a command + expected output, an observable file); fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
-- **Bad:** an AC provable only by reviewing the entity's own prose; a design that reaches beyond the slice's sprint exit criterion; inventing new mechanisms when the spike already proved one.
+- **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; ACs split into **offline** (agent-reproducible) and **interactive** (settled only by CL's live demo); the slice's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan — or the auditable negative `no spike needed: {the proven mechanisms it relies on}` on the record; when the slice changes user-visible behavior (keybinds, rows, layout), a concrete doc diff proposed in the body and reviewed at this gate.
+- **Good:** at least one AC measures the end value the slice exists for, against an independent baseline that can move the wrong way (a count, a timing, a behavior, resulting on-disk state) — a mechanism-only AC counts only when paired with the value-measuring AC it serves; every AC's expected value comes from outside the file under test; fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
+- **Bad:** an AC provable only by reviewing the entity's own prose; a string/substring/regex match over a file the implementer also writes (a tautology — the check polices its own author); a design that reaches beyond the slice's sprint exit criterion; inventing new mechanisms when the spike already proved one.
 
 ### `implementation`
 
@@ -116,31 +116,36 @@ strict TDD, one behavior per commit.
 - **Inputs:** the approved ideation body; the repo at the worktree branch.
 - **Outputs:** commits satisfying the AC (each: red test first, red output recorded in the stage report with the failure reason, minimal fix, suite green); a stage report with before/after test counts and the exact red output; for plugin work `cargo test` + `cargo check --tests` are the native verification (`./build.sh` only when a demo needs the wasm; native `cargo build` link-fails by design); for grout work `go test ./...` + `go vet`.
 - **Good:** the red test fails for the predicted reason before the fix; the smallest reasonable diff; surrounding style matched; new dump fixtures use zellij's real single-line shape.
-- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence.
+- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the slice has been handed to validation — confirm no pending round-trip before advancing.
 
 ### `validation`
 
-A fresh agent — no shared context with the implementer — verifies the
-deliverable against the ideation AC, reproducing each `Verified by:` clause
-rather than trusting the implementation's self-report, then runs an
-adversarial refutation audit. The gate presents the artifact to CL through
-spacedock-subspace: a brief plus `<artifact>.decisions.jsonl` written under
+The demo is the gate. A fresh agent — no shared context with the implementer
+— reproduces the **offline** ACs by re-running each `Verified by:` clause,
+runs an adversarial refutation audit on a throwaway checkout, and prepares
+the **demo script** for the interactive ACs: exact commands, setup state, and
+what CL should see at each step. CL drives the demo live in the fresh zellij
+session — for interactive ACs, CL is the validator; a fresh agent cannot
+reproduce a live floating-TUI drill. The gate presents artifact + demo result
+through spacedock-subspace: a brief plus `<artifact>.decisions.jsonl` under
 the globbable gates location (`docs/agent-rail-dev/.spacedock-state/gates/`),
-reviewed via `subspace-tui` (or the browser gate server) in CL's fresh zellij
-session. Either gate-approval to done or rejection back to implementation
-with concrete findings.
+reviewed via `subspace-tui` (or the browser gate server). Either
+gate-approval to done or rejection back to implementation with concrete
+findings.
 
-- **Inputs:** the worktree at the implementation's final commit; the ideation AC; the stage report's claims.
-- **Outputs:** per-AC verdicts with independently reproduced evidence (re-run commands, not re-read reports); a refutation audit that names concrete attack scenarios attempted (false positives/negatives, panic/indexing paths, caller impact, semantic drift vs. the pre-diff behavior) and why each failed — or a REFUTED with file:line; the subspace review record at the gates location.
-- **Good:** verdicts derived from re-execution; an attack survived is documented with the exact probe; "the finding's premise is false" is a valid and valuable outcome — stop and report rather than validating a fix against a false premise.
-- **Bad:** trusting the implementer's numbers; a SURVIVES with no named attacks; validating the letter of an AC whose served end value regressed; rubber-stamping a stale comment or doc claim the diff made false.
+- **Inputs:** the worktree at the implementation's final commit, identity-checked by raw commit SHA (a sibling may still be mutating the worktree); the ideation AC split; the stage report's claims.
+- **Outputs:** per-offline-AC verdicts with independently reproduced evidence (re-run commands, not re-read reports); a refutation audit on a throwaway checkout — never the implementation worktree — naming the concrete attack scenarios attempted (false positives/negatives, panic/indexing paths, caller impact, semantic drift vs. pre-diff behavior) and why each failed, or a REFUTED with file:line; the demo script; the subspace review record with the demo outcome.
+- **Good:** a cheap fixture or single-command spot-check proves the drill infrastructure works end-to-end before CL's time is spent on the expensive live run; verdicts derived from re-execution; an attack survived is documented with the exact probe; "the finding's premise is false" is a valid and valuable outcome — stop and report rather than validating a fix against a false premise.
+- **Bad:** trusting the implementer's numbers; a SURVIVES with no named attacks; a fresh agent "reproducing" an interactive AC it cannot actually drive; validating the letter of an AC whose served end value regressed; rubber-stamping a stale comment or doc claim the diff made false.
 
 ### `done`
 
 Terminal: the slice's worktree branch is merged directly into the working
 branch by the merge ceremony (no PR — this repo has no remote by choice),
 `completed` set, `verdict: PASSED`, entity archived. Reached via real merge,
-not a manual flag flip.
+not a manual flag flip. A slice whose only output is a decision with nothing
+shipped does not terminalize as PASSED — the decision is recorded in the
+sprint plan instead.
 
 ## Workflow-specific rules
 
@@ -162,6 +167,19 @@ not a manual flag flip.
   pipe-unblock slice leads sprint 0 because it is the one change protecting
   CL's real sessions. `install.sh` points the layout at the repo wasm in
   place — `./build.sh` hot-swaps what the next fresh session loads.
+- **Park-for-demo is correct posture.** When a slice's next step is CL's live
+  demo, parking it demo-ready and waiting for CL's window is right — not a
+  stall. The FO keeps other slices moving meanwhile.
+- **Live e2e before merge for output-shape changes.** A change to the
+  plugin's pipe payloads, row/pane output shape, or launch wiring must be
+  driven in a real zellij session before merge — offline tests prove the
+  logic, never the surface.
+- **Spike discipline binds infra too.** Build/install/rollout plumbing
+  changes (install.sh, layout wiring, grout deployment) get the same
+  smallest-end-to-end exercise first as feature slices.
+- **Approval is explicit.** A live grant, a demo pass, or a merge go-ahead is
+  never inferred from silence, from acknowledgment of a summary, or from a
+  prior gate approval — only an explicit yes counts.
 
 ## Workflow State
 
