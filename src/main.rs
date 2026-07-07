@@ -1205,14 +1205,15 @@ fn top_level_blocks(body: &[String]) -> Vec<Vec<String>> {
     blocks
 }
 
-// Removes every built-in `zellij:*` plugin pane and every copy of the
-// sidebar's own rail from a dumped pane block, wherever zellij's absorb
-// seated them, recording each removed chrome location (rail copies are
-// dropped without recording: rail_pane_kdl always contributes the
-// canonical slot, so a dumped copy is never re-emitted). A container
-// emptied by the removal is dropped with it; a container left with a
-// single child is replaced by that child, which takes over the
-// container's slot. A pane wrapping a third-party plugin is left intact.
+// Removes every built-in bar pane (tab-bar/status-bar/compact-bar) and
+// every copy of the sidebar's own rail from a dumped pane block, wherever
+// zellij's absorb seated them, recording each removed chrome location
+// (rail copies are dropped without recording: rail_pane_kdl always
+// contributes the canonical slot, so a dumped copy is never re-emitted).
+// A container emptied by the removal is dropped with it; a container left
+// with a single child is replaced by that child, which takes over the
+// container's slot. A pane wrapping any other plugin — third-party or a
+// builtin region pane like strider — is left intact.
 fn extract_chrome_panes(
     block: Vec<String>,
     own_plugin_url: &str,
@@ -1295,22 +1296,30 @@ fn plugin_location(block: &[String]) -> Option<String> {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum PluginRole {
-    // A zellij built-in (tab-bar/status-bar): extracted and re-emitted as a
-    // canonical chrome row.
+    // A zellij built-in bar (tab-bar/status-bar/compact-bar): extracted and
+    // re-emitted as a canonical chrome row.
     Chrome,
     // A copy of the sidebar's own rail, wherever it landed in the region:
     // dropped outright, since rail_pane_kdl always supplies the canonical
     // slot.
     Rail,
-    // Some other plugin the user placed: not ours to remove.
+    // Any other plugin — a user's, or a builtin region pane like strider:
+    // not ours to remove.
     ThirdParty,
 }
 
-// A defensive substring match backs up the exact-URL check: a rail built
-// from a different path or an older/newer configuration (same plugin,
-// different identity string) must still be recognized.
+// Chrome is an allowlist of zellij's builtin bars, not `zellij:*` wholesale:
+// the other builtins (strider, session-manager, …) are full panes, and
+// misreading one as chrome re-emits it as a size=1 bar — destroying it —
+// while misreading a future bar as ThirdParty only leaves it riding along
+// in the region. A defensive substring match backs up the exact-URL check:
+// a rail built from a different path or an older/newer configuration (same
+// plugin, different identity string) must still be recognized.
 fn classify_plugin_location(location: &str, own_plugin_url: &str) -> PluginRole {
-    if location.starts_with("zellij:") {
+    if matches!(
+        location,
+        "zellij:tab-bar" | "zellij:status-bar" | "zellij:compact-bar"
+    ) {
         PluginRole::Chrome
     } else if location == own_plugin_url || location.contains("zellij-sidebar") {
         PluginRole::Rail
@@ -3499,6 +3508,40 @@ mod tests {
             2
         );
         assert_eq!(kdl.matches("cwd=\"/shell\"").count(), 2);
+    }
+
+    #[test]
+    fn builtin_strider_region_pane_survives_extraction() {
+        // zellij:* is not synonymous with chrome: strider is a 20%-wide
+        // region pane in the builtin strider layout (`zellij setup
+        // --dump-layout strider`), serialized single-line in dumps like all
+        // plugin panes. Treating it as chrome re-emits the user's file
+        // browser as a size=1 bottom bar; it must ride along into both
+        // swaps like a third-party pane.
+        let dump = r#"layout {
+    tab name="t" focus=true hide_floating_panes=true {
+        pane size=1 borderless=true { plugin location="zellij:tab-bar" }
+        pane split_direction="vertical" {
+            pane size="20%" { plugin location="zellij:strider" }
+            pane cwd="/shell" size="80%"
+        }
+        pane size=2 borderless=true { plugin location="zellij:status-bar" }
+    }
+}
+"#;
+        let kdl = split_preserving_layout_kdl(dump, "file:/tmp/zellij-sidebar.wasm", &jit_config())
+            .unwrap();
+        assert_eq!(
+            kdl.matches("plugin location=\"zellij:strider\"").count(),
+            2,
+            "strider rides along into both swap bodies, never the base template"
+        );
+        assert!(
+            !kdl.contains("size=1 borderless=true { plugin location=\"zellij:strider\""),
+            "strider is not re-emitted as a chrome row"
+        );
+        assert_eq!(kdl.matches("zellij:tab-bar").count(), 3);
+        assert_eq!(kdl.matches("zellij:status-bar").count(), 3);
     }
 
     #[test]
