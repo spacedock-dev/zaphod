@@ -1,0 +1,227 @@
+---
+commissioned-by: spacedock@0.24.0-pre2
+entity-type: sprint_slice
+entity-label: slice
+entity-label-plural: slices
+id-style: sd-b32
+state: .spacedock-state
+stages:
+  defaults:
+    worktree: false
+    concurrency: 2
+  states:
+    - name: backlog
+      initial: true
+      gate: true
+    - name: ideation
+      gate: true
+    - name: implementation
+      worktree: true
+    - name: validation
+      worktree: true
+      fresh: true
+      feedback-to: implementation
+      gate: true
+    - name: done
+      terminal: true
+---
+
+# Agent-rail development
+
+Builds the zaphod agent rail per `docs/prd-agent-rail.md`, executing the sprint
+plan in `docs/plan-agent-rail.md`: the grout daemon, the row protocol, and the
+rail's rows section — walking skeleton first, then sessions-for-real,
+gates-for-real, and the M2 verdict seam. Each slice is the smallest demoable
+unit of a sprint. This workflow is itself the rail's first dogfood tenant: its
+validation reviews run through spacedock-subspace with decision logs at the
+globbable gates location, so the rail being built learns to surface the very
+gates that built it.
+
+## File Naming
+
+Each slice lives as either:
+
+- a flat markdown file `{slug}.md` (default), or
+- a folder `{slug}/` containing `index.md` as the canonical entity file, when
+  the slice produces per-stage artifacts (transcripts, drill evidence, design
+  notes) that belong alongside the tracker.
+
+Slugs are lowercase, hyphens, no spaces. Example: `plugin-pipe-unblock.md`.
+
+## Schema
+
+Every slice file has YAML frontmatter. Fields are documented below; see
+**Slice Template** for a copy-paste starter.
+
+### Field Reference
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique identifier, SD-B32 (see ID Style) |
+| `title` | string | Human-readable slice name |
+| `status` | enum | One of: backlog, ideation, implementation, validation, done |
+| `source` | string | Where this slice came from (plan sprint, retrospective, finding) |
+| `started` | ISO 8601 | When active work began |
+| `completed` | ISO 8601 | When the slice reached terminal status |
+| `verdict` | enum | PASSED or REJECTED — set at validation |
+| `score` | number | Priority score, 0.0–1.0 (optional) |
+| `worktree` | string | Worktree path while a dispatched agent is active; sticky across non-terminal advancements, cleared at terminal merge |
+| `issue` | string | GitHub issue reference (optional cross-reference) |
+| `pr` | string | Unused — this workflow ships by direct local merge, no PR ritual |
+| `mod-block` | string | Pending mod-declared blocking action, format `{lifecycle_point}:{mod_name}` |
+
+### ID Style
+
+The `id-style` is `sd-b32`: `id` stores the full stable 24-character lowercase
+SD-B32 stored ID (SHA-256 digest material formatted with Spacedock's
+human-safe alphabet `0123456789abcdefghjkmnpqrstvwxyz`), minted at creation
+via `spacedock new <slug> --id-seed "<slug>"`. Status tables display the
+shortest unique prefix (`MIN_PREFIX: 2`). Generated IDs make concurrent
+creation across worktree branches safe — no shared counter. Use
+`status --validate` before trusting workflow state and `status --resolve
+<ref>` to resolve slugs, stored IDs, or address prefixes.
+
+```yaml
+id-style: sd-b32
+```
+
+## Stages
+
+### `backlog`
+
+A slice enters backlog as a seed from the sprint plan (or a finding promoted
+from triage). CL curates: the gate decides which slices advance to ideation.
+
+- **Inputs:** `docs/plan-agent-rail.md` sprint ordering; the slice's seed description.
+- **Outputs:** a one-paragraph problem statement and the sprint it serves.
+- **Good:** the slice is the smallest unit that demos on its own; sprint-0 slices lead.
+- **Bad:** a slice that bundles two behaviors; a slice whose exit can't be demoed in the fresh zellij session.
+
+### `ideation`
+
+CL greenlit the slice; a worker designs it: problem, approach, acceptance
+criteria as entity-level end-state properties with `Verified by:` clauses, and
+a test plan matching the AC's level of abstraction.
+
+- **Inputs:** `docs/prd-agent-rail.md`, `docs/plan-agent-rail.md` (the decisions section is binding: binding-in-plugin, Go grout, two typed row kinds over pipe name `agent-event`, glob config), the landmine dossier woven through both, `SPEC.md` landmines, `docs/docking-approach.md` for the shipped container, `docs/review-findings-2026-07-07.md` for open findings that touch the slice's code region.
+- **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; the slice's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan.
+- **Good:** every AC externally provable (a test name, a command + expected output, an observable file); fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
+- **Bad:** an AC provable only by reviewing the entity's own prose; a design that reaches beyond the slice's sprint exit criterion; inventing new mechanisms when the spike already proved one.
+
+### `implementation`
+
+The design is approved and the deliverable is built in a dedicated worktree —
+strict TDD, one behavior per commit.
+
+- **Inputs:** the approved ideation body; the repo at the worktree branch.
+- **Outputs:** commits satisfying the AC (each: red test first, red output recorded in the stage report with the failure reason, minimal fix, suite green); a stage report with before/after test counts and the exact red output; for plugin work `cargo test` + `cargo check --tests` are the native verification (`./build.sh` only when a demo needs the wasm; native `cargo build` link-fails by design); for grout work `go test ./...` + `go vet`.
+- **Good:** the red test fails for the predicted reason before the fix; the smallest reasonable diff; surrounding style matched; new dump fixtures use zellij's real single-line shape.
+- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence.
+
+### `validation`
+
+A fresh agent — no shared context with the implementer — verifies the
+deliverable against the ideation AC, reproducing each `Verified by:` clause
+rather than trusting the implementation's self-report, then runs an
+adversarial refutation audit. The gate presents the artifact to CL through
+spacedock-subspace: a brief plus `<artifact>.decisions.jsonl` written under
+the globbable gates location (`docs/agent-rail-dev/.spacedock-state/gates/`),
+reviewed via `subspace-tui` (or the browser gate server) in CL's fresh zellij
+session. Either gate-approval to done or rejection back to implementation
+with concrete findings.
+
+- **Inputs:** the worktree at the implementation's final commit; the ideation AC; the stage report's claims.
+- **Outputs:** per-AC verdicts with independently reproduced evidence (re-run commands, not re-read reports); a refutation audit that names concrete attack scenarios attempted (false positives/negatives, panic/indexing paths, caller impact, semantic drift vs. the pre-diff behavior) and why each failed — or a REFUTED with file:line; the subspace review record at the gates location.
+- **Good:** verdicts derived from re-execution; an attack survived is documented with the exact probe; "the finding's premise is false" is a valid and valuable outcome — stop and report rather than validating a fix against a false premise.
+- **Bad:** trusting the implementer's numbers; a SURVIVES with no named attacks; validating the letter of an AC whose served end value regressed; rubber-stamping a stale comment or doc claim the diff made false.
+
+### `done`
+
+Terminal: the slice's worktree branch is merged directly into the working
+branch by the merge ceremony (no PR — this repo has no remote by choice),
+`completed` set, `verdict: PASSED`, entity archived. Reached via real merge,
+not a manual flag flip.
+
+## Workflow-specific rules
+
+- **No PR machinery.** Shipping is a direct local merge at terminal; the `pr`
+  field stays empty. If the repo later gains a remote and a PR ritual, refit
+  with the pr-merge mod rather than adding stages.
+- **Subspace review channel.** Validation-gate artifacts are presented as
+  subspace reviews with decision logs under
+  `docs/agent-rail-dev/.spacedock-state/gates/` — globbable at
+  `docs/agent-rail-dev/.spacedock-state/gates/*.decisions.jsonl`, versioned on
+  the state branch, zero code-branch churn. Manual presentation (CL floats
+  `subspace-tui` in the fresh session) until the rail's sprint-2 slice
+  automates discovery. The FO still owns the gate; subspace is the
+  presentation and record surface.
+- **Test-first authoring, external-proof ACs, and detached adversarial audit**
+  (the dev-shape proof disciplines) are mandatory here, folded into the
+  implementation and validation stage definitions above.
+- **Dogfood posture.** The rail fails visible-not-blocking; the plugin
+  pipe-unblock slice leads sprint 0 because it is the one change protecting
+  CL's real sessions. `install.sh` points the layout at the repo wasm in
+  place — `./build.sh` hot-swaps what the next fresh session loads.
+
+## Workflow State
+
+View the workflow overview:
+
+```bash
+spacedock status --workflow-dir docs/agent-rail-dev
+```
+
+Find dispatchable slices ready for their next stage:
+
+```bash
+spacedock status --workflow-dir docs/agent-rail-dev --next
+```
+
+## Slice Template
+
+```yaml
+---
+id:
+title: Slice title here
+status: backlog
+source:
+started:
+completed:
+verdict:
+score:
+worktree:
+issue:
+pr:
+mod-block:
+---
+
+## Problem
+
+What is broken or missing, and why it matters now.
+
+## Proposed approach
+
+How the implementation will address the problem. Concrete enough that a worker can start.
+
+## Acceptance criteria
+
+Each AC names a property of the finished slice (not a stage action) and how it is verified.
+
+**AC-1 — End-state property.**
+Verified by: grep / test name / file path / command a future reader can reproduce.
+
+## Test plan
+
+What tests verify the implementation, estimated cost, whether a live drill is needed.
+
+## Out of scope
+
+What this slice deliberately does not address.
+```
+
+## Commit Discipline
+
+- Commit status changes at dispatch and merge boundaries
+- Commit slice body updates when substantive
+- Implementation commits land on the worktree branch; merge to the working
+  branch happens directly at terminal (no PR)
