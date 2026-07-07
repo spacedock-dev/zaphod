@@ -213,6 +213,41 @@ fn parse_agent_event(payload: &str) -> Result<AgentEvent, String> {
     serde_json::from_str(payload).map_err(|error| error.to_string())
 }
 
+// Upserts one event into the rail's session/gate lists: sessions keyed by
+// id, gates by log_path, insertion order kept, no expiry (grout is one-shot
+// in sprint 0; lifecycle is sprint 1+). Returns whether stored state
+// changed, so the pipe handler re-renders only on real updates.
+fn apply_agent_event(
+    sessions: &mut Vec<SessionEvent>,
+    gates: &mut Vec<GateEvent>,
+    event: AgentEvent,
+) -> bool {
+    match event {
+        AgentEvent::Session(session) => {
+            let key = session.id.clone();
+            upsert(sessions, |existing| existing.id == key, session)
+        }
+        AgentEvent::Gate(gate) => {
+            let key = gate.log_path.clone();
+            upsert(gates, |existing| existing.log_path == key, gate)
+        }
+    }
+}
+
+fn upsert<T: PartialEq>(list: &mut Vec<T>, keyed: impl Fn(&T) -> bool, item: T) -> bool {
+    match list.iter_mut().find(|existing| keyed(existing)) {
+        Some(existing) if *existing == item => false,
+        Some(existing) => {
+            *existing = item;
+            true
+        }
+        None => {
+            list.push(item);
+            true
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum LineTarget {
     Header,
@@ -1796,6 +1831,49 @@ mod tests {
         assert!(!parse_agent_event("{not json").unwrap_err().is_empty());
         // A payload without a kind tag is an error, never a default kind.
         assert!(parse_agent_event(r#"{"id":"x"}"#).is_err());
+    }
+
+    #[test]
+    fn session_upsert_replaces_by_id() {
+        let mut sessions = Vec::new();
+        let mut gates = Vec::new();
+        let first = parse_agent_event(session_line()).unwrap();
+        assert!(apply_agent_event(&mut sessions, &mut gates, first.clone()));
+        // Re-applying the identical line changes nothing: no re-render.
+        assert!(!apply_agent_event(&mut sessions, &mut gates, first));
+        // The same id with updated fields replaces the row, never duplicates.
+        let updated = parse_agent_event(&session_line().replace("working", "done")).unwrap();
+        assert!(apply_agent_event(&mut sessions, &mut gates, updated));
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].state, "done");
+        assert!(gates.is_empty());
+    }
+
+    #[test]
+    fn gate_upsert_replaces_by_log_path_keeping_insertion_order() {
+        let mut sessions = Vec::new();
+        let mut gates = Vec::new();
+        let first = GateEvent {
+            log_path: "/a.decisions.jsonl".to_owned(),
+            round: 1,
+            ..Default::default()
+        };
+        let second = GateEvent {
+            log_path: "/b.decisions.jsonl".to_owned(),
+            round: 1,
+            ..Default::default()
+        };
+        assert!(apply_agent_event(&mut sessions, &mut gates, AgentEvent::Gate(first.clone())));
+        assert!(apply_agent_event(&mut sessions, &mut gates, AgentEvent::Gate(second)));
+        // A later round for the first gate updates it in place.
+        let rerun = GateEvent { round: 2, ..first };
+        assert!(apply_agent_event(&mut sessions, &mut gates, AgentEvent::Gate(rerun)));
+        assert_eq!(
+            gates.iter().map(|g| g.log_path.as_str()).collect::<Vec<_>>(),
+            vec!["/a.decisions.jsonl", "/b.decisions.jsonl"]
+        );
+        assert_eq!(gates[0].round, 2);
+        assert!(sessions.is_empty());
     }
 
     #[test]
