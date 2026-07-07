@@ -21,6 +21,11 @@ macro_rules! trace {
 }
 
 const STATUS_POLL_SECS: f64 = 2.0;
+// A pane-status call that stalls this long is wedge-classified and aborts
+// the rest of the poll pass. Healthy calls return well inside the 2s poll
+// timer; the observed wild GetPaneRunningCommand wedge is ~13s per call —
+// 1s sits well clear of both.
+const WEDGE_THRESHOLD: Duration = Duration::from_secs(1);
 // Sidebar widths in the two swap-layout states (mirrors layouts/zaphod.kdl).
 const DOCKED_COLS: usize = 28;
 const UNDOCKED_COLS: usize = 1;
@@ -78,6 +83,9 @@ struct Sidebar {
     // get_pane_running_command keeps timing out is polled exponentially less
     // often instead of every timer. Pruned to the current rows each poll.
     poll_backoff: BTreeMap<u32, PollBackoff>,
+    // Wedge drill knob (see wedge_poll_secs): seconds each status poll sleeps
+    // in place of its get_pane_running_command call. None outside drills.
+    wedge_poll_secs: Option<u64>,
 }
 
 // One pane's status-poll backoff. get_pane_running_command's timeout Err is
@@ -199,6 +207,7 @@ impl ZellijPlugin for Sidebar {
         self.plugin_id = get_plugin_ids().plugin_id;
         self.config = configuration;
         self.debug = debug_enabled(&self.config);
+        self.wedge_poll_secs = wedge_poll_secs(&self.config);
         subscribe(&[
             EventType::PaneUpdate,
             EventType::TabUpdate,
@@ -676,7 +685,29 @@ impl Sidebar {
                 continue; // backed off: keep the previous status
             }
             let pane_id = PaneId::Terminal(row.pane_id);
-            let command = get_pane_running_command(pane_id);
+            let started = Instant::now();
+            let command = match self.wedge_poll_secs {
+                Some(secs) => {
+                    trace!(self, "wedge drill: sleeping {}s in place of pane {} status call", secs, row.pane_id);
+                    std::thread::sleep(Duration::from_secs(secs));
+                    Err("wedge drill".to_owned())
+                }
+                None => get_pane_running_command(pane_id),
+            };
+            if wedge_aborts_pass(started.elapsed()) {
+                // The wedged pane earned its backoff by stalling the pass,
+                // whatever its call returned; the untried panes keep their
+                // previous status AND their backoff state — stale-not-blank,
+                // the posture should_poll_statuses already chose.
+                state.record(true);
+                trace!(
+                    self,
+                    "status pass aborted: pane {} wedge-classified after {}ms",
+                    row.pane_id,
+                    started.elapsed().as_millis()
+                );
+                break;
+            }
             let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
             state.record(command.is_err());
             let enriched = agent::enrich_fields(&row.agent, &row.title, command, viewport);
@@ -865,10 +896,28 @@ fn debug_enabled(config: &BTreeMap<String, String>) -> bool {
     config.get("debug").is_some_and(|value| !value.is_empty())
 }
 
+// Wedge drill knob: the "wedge_poll_secs" config key, parsed as whole
+// seconds. When set, each status poll sleeps this long in place of its
+// get_pane_running_command call — the same blocking layer (the plugin's
+// pinned thread) as a real wedge, so the wedge budget is exercisable end to
+// end without waiting to catch a wild one. Absent or unparseable: off.
+fn wedge_poll_secs(config: &BTreeMap<String, String>) -> Option<u64> {
+    config.get("wedge_poll_secs").and_then(|value| value.parse().ok())
+}
+
 // Number of timers to skip after a pane's status poll fails: 0, 1, 3, 7, 15,
 // then flat at 15 (~30s at a 2s poll). Caps the shift so it never overflows.
 fn backoff_skips(failures: u32) -> u32 {
     (1u32 << failures.min(4)) - 1
+}
+
+// Whether one pane-status call stalled long enough to abort the rest of the
+// poll pass. The plugin's pinned thread runs its queue FIFO, so a CLI pipe
+// dispatched at this instance waits behind the in-flight pass; bounding the
+// pass at one wedge bounds that wait at ≈ one wedge instead of one per
+// remaining pane.
+fn wedge_aborts_pass(elapsed: Duration) -> bool {
+    elapsed >= WEDGE_THRESHOLD
 }
 
 // Whether this instance should poll pane statuses at all. Only the active
@@ -1641,6 +1690,18 @@ mod tests {
     }
 
     #[test]
+    fn wedge_drill_runs_only_with_a_numeric_wedge_poll_secs_value() {
+        assert_eq!(wedge_poll_secs(&BTreeMap::new()), None, "absent key: no drill");
+        let mut config = BTreeMap::new();
+        config.insert("wedge_poll_secs".to_owned(), "15".to_owned());
+        assert_eq!(wedge_poll_secs(&config), Some(15));
+        config.insert("wedge_poll_secs".to_owned(), String::new());
+        assert_eq!(wedge_poll_secs(&config), None, "empty value: no drill");
+        config.insert("wedge_poll_secs".to_owned(), "slow".to_owned());
+        assert_eq!(wedge_poll_secs(&config), None, "non-numeric value: no drill");
+    }
+
+    #[test]
     fn steer_is_armed_only_for_the_actors_own_tab() {
         assert!(
             steer_completes_locally(Some(2), 2),
@@ -1678,6 +1739,59 @@ mod tests {
         assert_eq!(backoff_skips(3), 7);
         assert_eq!(backoff_skips(4), 15);
         assert_eq!(backoff_skips(20), 15); // capped, no overflow
+    }
+
+    #[test]
+    fn wedge_classified_call_aborts_the_pass() {
+        // The observed wild wedge: ~13s per GetPaneRunningCommand call.
+        assert!(wedge_aborts_pass(Duration::from_secs(13)));
+        // The classification threshold itself.
+        assert!(wedge_aborts_pass(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn fast_call_continues_the_pass() {
+        // Healthy calls return well inside the 2s poll timer.
+        assert!(!wedge_aborts_pass(Duration::from_millis(50)));
+        assert!(!wedge_aborts_pass(Duration::from_millis(999)));
+    }
+
+    #[test]
+    fn wedge_outcome_lands_in_the_panes_backoff_and_a_success_clears_it() {
+        let mut bo = PollBackoff::default();
+        bo.record(true); // a wedge is recorded as a failure even when the call returned Ok
+        assert_eq!(bo.skip, backoff_skips(1), "wedge grows the backoff");
+        bo.record(true);
+        assert_eq!(bo.skip, backoff_skips(2), "repeat wedges keep growing it");
+        bo.record(false); // a later success clears it
+        assert_eq!(bo.skip, 0);
+        assert_eq!(bo.failures, 0);
+    }
+
+    #[test]
+    fn aborted_pass_leaves_untried_panes_backoff_untouched() {
+        // Drives refresh_statuses itself through the wedge branch: the drill
+        // knob sleeps 1s in place of the host call, which wedge-classifies
+        // every status call without reaching get_pane_scrollback.
+        let mut sidebar = Sidebar::default();
+        sidebar.wedge_poll_secs = Some(1);
+        sidebar.rows = (1u32..=3)
+            .map(|id| Row {
+                pane_id: id,
+                ..Default::default()
+            })
+            .collect();
+
+        sidebar.refresh_statuses(); // pass 1: pane 1 wedges, the pass aborts
+        let failures = |s: &Sidebar, id: u32| s.poll_backoff.get(&id).map(|b| b.failures);
+        assert_eq!(failures(&sidebar, 1), Some(1), "the wedge lands in the pane's backoff");
+        assert_eq!(failures(&sidebar, 2), None, "untried panes get no backoff entry");
+        assert_eq!(failures(&sidebar, 3), None);
+
+        sidebar.refresh_statuses(); // pass 2: pane 1 backed off, pane 2 wedges
+        assert_eq!(failures(&sidebar, 1), Some(1), "the backed-off pane is skipped, not re-recorded");
+        assert_eq!(failures(&sidebar, 2), Some(1), "the pass moves to the next due pane");
+        assert_eq!(failures(&sidebar, 3), None, "the abort spares the panes behind the wedge");
     }
 
     #[test]

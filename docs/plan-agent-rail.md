@@ -38,9 +38,11 @@ Every joint exercised end to end, nothing polished.
   mitigation. The spike's landmine: the `zellij pipe` CLI never exits against a
   wedged instance, so the grout piping into a wedged rail hangs — this is the
   one change that protects CL's real sessions, which is why it leads the
-  sprint. It reinstates the `ReadCliPipes` grant + explicit unblock the dock
-  rework deleted: auto-unblock happens only when `pipe()` returns, which is
-  exactly what a wedged instance never does.
+  sprint. Ideation refuted the explicit unblock (a sibling's unblock cannot
+  release a pipe held by a wedged instance — SPEC #5); the fix is a wedge
+  budget on the status-poll path: one wedge-classified
+  `GetPaneRunningCommand` call aborts the pass, bounding any CLI pipe's wait
+  to ≈ one wedge.
 - **(b) Go grout skeleton.** Hardcoded config; one agentsview session via a
   one-shot `session get`; one gate log (the subspace playground fixture); emit
   both row kinds via `zellij pipe`, fire-and-forget with a kill timer.
