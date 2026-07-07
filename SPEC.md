@@ -81,6 +81,14 @@ these as laws.
    `unblock_cli_pipe_input`. The explicit call requires the `ReadCliPipes`
    grant — without it, it is silently denied (verified against v0.44.1 server
    source: `pipes.rs` NoChange bookkeeping + `zellij_exports.rs:5297`).
+   A CLI pipe stays blocked until every directed instance's `pipe()` has
+   returned: each instance is marked at dispatch (`wasm_bridge.rs:1174-1184`),
+   and an explicit `unblock_cli_pipe_input` from a sibling cannot release it —
+   the unblock only clears the explicit-block flag and the caller's own
+   membership; release requires the processing set empty (`pipes.rs:107-127`).
+   The only cross-instance release is plugin unload (`wasm_bridge.rs:602`).
+   Explicit unblock is therefore useless against a wedged sibling (verified
+   v0.44.1; corroborated by the 2026-07-07 receipt-then-hang spike).
 
 ### Permissions
 
