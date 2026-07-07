@@ -637,6 +637,9 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ReadApplicationState,
                 PermissionType::ChangeApplicationState,
                 PermissionType::ReadPaneContents,
+                // OpenCommandPaneFloating — the gate row's subspace-tui
+                // float — sits behind the RunCommands grant.
+                PermissionType::RunCommands,
             ]);
         }
         // Header: any click runs the same dock toggle as Alt-/ (the ⇄ marks
@@ -722,7 +725,7 @@ impl Sidebar {
     }
 
     fn handle_click(&mut self, line: isize) {
-        match decide_click(line, &self.rows) {
+        match decide_rail_click(line, &self.rows, &self.sessions, &self.gates, &self.pane_cwds) {
             ClickAction::ToggleDock => self.perform_toggle(),
             ClickAction::FocusPane(id) => {
                 // A click-through during nav mode must also leave nav:
@@ -734,8 +737,41 @@ impl Sidebar {
                 }
                 focus_terminal_pane(id, false, false);
             }
-            // The pane-rows decider never yields a gate float.
-            ClickAction::FloatGate { .. } | ClickAction::None => {}
+            ClickAction::FloatGate { brief, log } => {
+                if self.nav_mode {
+                    self.exit_nav(false);
+                }
+                trace!(self, "float gate brief={} log={}", brief, log);
+                // subspace-tui's --log implies persist: verdicts issued in
+                // the floated TUI land on the gate's real decision log —
+                // the rail itself never writes the record. Mouse handling
+                // runs in update(), a context permitted to open panes
+                // (SPEC landmine #4 bars pipe()/load() only).
+                open_command_pane_floating(
+                    CommandToRun {
+                        path: "subspace-tui".into(),
+                        args: vec![brief, "--log".to_owned(), log],
+                        cwd: None,
+                    },
+                    None,
+                    BTreeMap::new(),
+                );
+            }
+            ClickAction::None => {
+                // A gate row can decide to nothing: its log_path has no
+                // derivable brief. Name the reason rather than floating a
+                // wrong file.
+                if let LineTarget::GateRow(idx) =
+                    section_layout(self.rows.len(), self.sessions.len(), self.gates.len())
+                        .target(line)
+                {
+                    trace!(
+                        self,
+                        "gate row {} click ignored: no brief derivable from log_path",
+                        idx
+                    );
+                }
+            }
         }
     }
 
@@ -3489,6 +3525,23 @@ mod tests {
         assert_eq!(decide_click(2, &rows), ClickAction::FocusPane(4));
         assert_eq!(decide_click(5, &rows), ClickAction::FocusPane(8));
         assert_eq!(decide_click(99, &rows), ClickAction::None);
+    }
+
+    #[test]
+    fn session_row_click_through_the_rail_focuses_and_exits_nav() {
+        // The click handler routes through the sectioned decider: a bound
+        // session row's line reaches FocusPane (observable here through the
+        // nav exit it shares with pane-row clicks).
+        let mut sidebar = Sidebar::default();
+        sidebar.nav_mode = true;
+        sidebar.rows = vec![cwd_row(4), cwd_row(8)];
+        sidebar.pane_cwds = cwd_map(&[(4, "/w")]);
+        sidebar.sessions = vec![SessionEvent {
+            cwd: "/w".to_owned(),
+            ..Default::default()
+        }];
+        sidebar.handle_click(7); // P=2,S=1: the session row's first line
+        assert!(!sidebar.nav_mode, "the session click must reach FocusPane");
     }
 
     #[test]
