@@ -4,8 +4,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"os/exec"
 )
 
 // sessionInfo pins the source field names off the recorded fixture
@@ -24,4 +27,13 @@ func decodeSession(r io.Reader) (sessionInfo, error) {
 	var si sessionInfo
 	err := json.NewDecoder(r).Decode(&si)
 	return si, err
+}
+
+// FetchSession runs a one-shot `session get` against the agentsview binary.
+func FetchSession(bin, id string) (sessionInfo, error) {
+	out, err := exec.Command(bin, "session", "get", id, "--format", "json").Output()
+	if err != nil {
+		return sessionInfo{}, fmt.Errorf("%s session get %s: %w", bin, id, err)
+	}
+	return decodeSession(bytes.NewReader(out))
 }
