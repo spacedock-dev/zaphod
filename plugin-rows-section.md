@@ -326,3 +326,37 @@ OS-resolved get_pane_cwd answer and agentsview's recorded cwd — the probe is
 test plan item 1 and a CL step (sandbox blocks agentsview/live sessions).
 Folds in the one-line F8 fix on the exact click lines this slice rewrites;
 gate may strike it.
+
+## Stage Report: implementation
+
+- DONE: Red-first evidence recorded for every new pure fn (parse_agent_event, apply_agent_event, bind_session, brief_path_for_log, section_layout, marker_for_state) and the extended click math — each failure output with its predicted reason
+  13 commits 9f4f679..b83b302 on spacedock-ensign/plugin-rows-section, each red-first; red outputs listed below.
+- DONE: Zero-footprint AC held: every pre-existing test passes unmodified, and a no-events rail renders byte-identically to today
+  104 tests before → 130 after, all green (cargo test + cargo check --tests + cargo check, 0 warnings); `git diff 09a4710..HEAD` removes zero test lines; render's section blocks are non-empty-guarded after the untouched pane-region prints, and section_layout(P,0,0).target ≡ target_for_line on every line (test empty_sections_map_like_the_pane_only_rail).
+- DONE: Binding lands behind a normalization seam (exact-match now; the cwd-shape probe is unrun — the seam takes a rule without redesign) and the added get_pane_cwd call rides the merged wedge budget; F8 exit-nav fix included per CL
+  normalize_cwd is the seam — exact match today, probe pending, seam ready: a probe-pinned rule slots in without touching bind_session's callers. The cwd call is one more timed call in refresh_statuses under WEDGE_THRESHOLD: wedge-classified → backoff recorded + pass aborted; failed call keeps the previous entry (b2151d8). F8: FocusPane and FloatGate both exit nav on click-through (9f4f679, a03a20e).
+
+### Red evidence (test → failure, each observed before its fix)
+
+- row_click_during_nav_mode_exits_nav → panicked "click-through must drop nav mode" (handle_click never exited nav)
+- parses_both_pinned_row_kinds (+2 parse tests) → E0425/E0422: cannot find parse_agent_event / AgentEvent / SessionEvent / GateEvent
+- session_upsert_replaces_by_id, gate_upsert_replaces_by_log_path_keeping_insertion_order → E0425: cannot find apply_agent_event
+- grout_state_strings_map_onto_marker_states → E0425: cannot find marker_for_state
+- single_match_binds, no_match_renders_unbound, ambiguous_cwd_renders_unbound, stale_cwd_entries_outside_the_row_set_never_bind → E0425: cannot find bind_session
+- brief_path_inverts_the_decision_log_suffix → E0425: cannot find brief_path_for_log
+- sectioned_lines_map_headers_rows_and_beyond_for_p2_s1_g1 (+2 layout tests) → E0425 section_layout; E0599 no variant SessionRow/GateRow on LineTarget
+- session_row_click_focuses_only_when_bound, gate_click_floats_tui_on_brief, bad_log_suffix_never_floats → E0425 decide_rail_click; E0599 no variant FloatGate on ClickAction
+- agent_event_lines_land_as_session_and_gate_rows, unknown_kind_dropped, malformed_json_dropped, missing_payload_dropped → E0609: no field sessions/gates on Sidebar
+- cwd_map_prunes_to_live_rows → E0609: no field pane_cwds on Sidebar
+- pinned_protocol_lines_render_and_bind, unbound_session_rows_carry_the_unbound_tag → E0425: cannot find session_row_line / gate_row_line / gate_row_detail / state_glyph
+- session_row_click_through_the_rail_focuses_and_exits_nav → panicked "the session click must reach FocusPane" (handle_click still routed pane-only)
+
+### Deviations from the entity body
+
+- Row gains no cwd field: pane cwds live in a Sidebar-level pane_cwds map keyed by pane id. Pre-existing tests build Row with full struct literals, so a new field would force modifying them — the zero-footprint checklist item wins. Semantics preserved: survives PaneUpdate by keying, pruned to live rows each poll, stale-not-blank on failure, and bind_session matches listed rows only (stale map entries never bind).
+- decide_click/target_for_line keep their shipped signatures (pre-existing tests call them); the extension is SectionLayout::target + decide_rail_click, which delegate the pane region to the shipped fns so the two maps cannot diverge.
+- Gate rows wear the Blocked marker — the entity pinned no gate marker; a pending gate waits on a verdict.
+
+### Summary
+
+The display half is in: pipe() parses grout's two pinned kinds ahead of toggle handling with the recv trace kept first, upserts into AGENTS/GATES sections that occupy zero lines while empty, binds sessions by exact cwd match behind the normalize_cwd seam fed by a budget-bounded get_pane_cwd poll, and acts per kind — bound session → focus_terminal_pane, gate → float `subspace-tui <brief> --log <log>` under the newly requested RunCommands grant (one new prompt, per blast radius). The cwd-shape probe (test plan item 1) remains CL's live step; a divergent shape lands as a rule in normalize_cwd. The cwd wedge-abort branch mirrors the adjacent command wedge branch line for line; the drill knob aborts the pass before reaching it, so it is verified by inspection plus the existing budget tests. Wasm not built — no live demo in this stage.
