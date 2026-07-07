@@ -1,9 +1,10 @@
 ---
 title: Plugin rows section
-status: backlog
+status: ideation
 source: plan sprint 0 (docs/plan-agent-rail.md)
 score: 0.8
 id: 5tdw8rckcrsx1qfytsytgp9m
+started: 2026-07-07T05:32:39Z
 ---
 
 ## Problem
