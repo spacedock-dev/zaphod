@@ -47,13 +47,14 @@ func run(cfg Config, stderr io.Writer) error {
 		return err
 	}
 
+	sRow := BuildSessionRow(si, time.Now(), cfg.SummaryClampBytes)
+	gRow := BuildGateRow(gi, time.Now())
 	failed := false
-	rows := []any{
-		BuildSessionRow(si, time.Now(), cfg.SummaryClampBytes),
-		BuildGateRow(gi, time.Now()),
-	}
-	for _, row := range rows {
-		if err := EmitRow(cfg, row, stderr); err != nil {
+	for _, it := range []struct {
+		kind string
+		row  any
+	}{{sRow.Kind, sRow}, {gRow.Kind, gRow}} {
+		if err := EmitRow(cfg, it.kind, it.row, stderr); err != nil {
 			fmt.Fprintln(stderr, err)
 			failed = true
 		}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -134,6 +135,71 @@ func TestEmitEndToEnd(t *testing.T) {
 	for k, want := range wantGate {
 		if grow[k] != want {
 			t.Errorf("gate row %s = %v, want %v", k, grow[k], want)
+		}
+	}
+}
+
+func TestPipeKillTimer(t *testing.T) {
+	dir := t.TempDir()
+	argvLog := filepath.Join(dir, "argv.log")
+	pidLog := filepath.Join(dir, "pid.log")
+	fixture, err := filepath.Abs("testdata/session-get.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Wedged zellij: records argv and its pid, then never exits. exec makes
+	// $$ the sleep itself, so the recorded pid is the process grout must kill.
+	wedged := writeScript(t, dir, "zellij",
+		"#!/bin/sh\n{\necho \"$#\"\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done\n} >> "+argvLog+
+			"\necho $$ >> "+pidLog+"\nexec sleep 300\n")
+
+	cfg := Config{
+		AgentsviewBin:     writeScript(t, dir, "agentsview", "#!/bin/sh\ncat "+fixture+"\n"),
+		SessionID:         "31dbb8ee-1d55-40ad-aa71-66c58790b708",
+		GateLog:           "testdata/playground-gate.decisions.jsonl",
+		ZellijBin:         wedged,
+		PipeName:          "agent-event",
+		PipeTimeout:       time.Second,
+		SummaryClampBytes: 512,
+	}
+	var stderr bytes.Buffer
+	start := time.Now()
+	err = run(cfg, &stderr)
+	elapsed := time.Since(start)
+
+	if budget := 2*cfg.PipeTimeout + 2*time.Second; elapsed > budget {
+		t.Errorf("run took %s, want under %s", elapsed, budget)
+	}
+	if err == nil {
+		t.Error("run succeeded, want an error (exit 1)")
+	}
+	for _, want := range []string{"pipe timeout after 1s: kind=session", "kind=gate"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("stderr missing %q:\n%s", want, stderr.String())
+		}
+	}
+
+	// A timed-out session pipe must not stop the gate row.
+	if invs := readInvocations(t, argvLog); len(invs) != 2 {
+		t.Errorf("zellij invoked %d times, want both rows attempted", len(invs))
+	}
+
+	// No child left behind: kill -0 fails for every recorded pid.
+	data, err := os.ReadFile(pidLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pidLines := strings.Fields(string(data))
+	if len(pidLines) != 2 {
+		t.Fatalf("recorded %d child pids, want 2", len(pidLines))
+	}
+	for _, s := range pidLines {
+		pid, err := strconv.Atoi(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := syscall.Kill(pid, 0); err != syscall.ESRCH {
+			t.Errorf("child %d still alive (kill -0 err = %v)", pid, err)
 		}
 	}
 }
