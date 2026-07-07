@@ -9,6 +9,11 @@ A per-tab sidebar that answers "what is running in this tab and what does it
 want from me?" — built for stacked-pane workflows where many Claude/codex
 agents run side by side.
 
+The rail also renders agent-session and pending-gate rows fed over the
+`agent-event` pipe by grout — protocol and binding rules in
+`docs/plan-agent-rail.md` (decisions 1-3): two typed JSON kinds, cwd binding
+in the plugin via `get_pane_cwd`, unbound rendered as unbound, never guessed.
+
 ### Validated UX (what the prototype proved out with real use)
 
 - **Left rail, ~28–30 cols**, listing the current tab's terminal panes,
