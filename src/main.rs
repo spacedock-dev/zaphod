@@ -382,10 +382,14 @@ enum ToggleAction {
     Ignore,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum ClickAction {
     ToggleDock,
     FocusPane(u32),
+    // Float subspace-tui on the gate's brief with --log pointed at its
+    // decision log, so verdicts land on the gate's real record — the rail
+    // itself never writes it.
+    FloatGate { brief: String, log: String },
     None,
 }
 
@@ -680,7 +684,8 @@ impl Sidebar {
                 }
                 focus_terminal_pane(id, false, false);
             }
-            ClickAction::None => {}
+            // The pane-rows decider never yields a gate float.
+            ClickAction::FloatGate { .. } | ClickAction::None => {}
         }
     }
 
@@ -1216,6 +1221,38 @@ fn decide_click(line: isize, rows: &[Row]) -> ClickAction {
             .unwrap_or(ClickAction::None),
         // The pane-rows map never yields section rows.
         LineTarget::None | LineTarget::SessionRow(_) | LineTarget::GateRow(_) => ClickAction::None,
+    }
+}
+
+// Click decision over the whole sectioned rail. Pane-region lines defer to
+// decide_click (the shipped pane-rows decider); a session row focuses its
+// cwd-bound pane and an unbound row's click is dead — never guessed; a gate
+// row floats the review TUI on the gate's brief, and a log path with no
+// derivable brief clicks to nothing rather than floating a wrong file.
+fn decide_rail_click(
+    line: isize,
+    rows: &[Row],
+    sessions: &[SessionEvent],
+    gates: &[GateEvent],
+    cwds: &BTreeMap<u32, PathBuf>,
+) -> ClickAction {
+    match section_layout(rows.len(), sessions.len(), gates.len()).target(line) {
+        LineTarget::Header | LineTarget::Row(_) => decide_click(line, rows),
+        LineTarget::SessionRow(idx) => sessions
+            .get(idx)
+            .and_then(|session| bind_session(&session.cwd, rows, cwds))
+            .map(ClickAction::FocusPane)
+            .unwrap_or(ClickAction::None),
+        LineTarget::GateRow(idx) => gates
+            .get(idx)
+            .and_then(|gate| {
+                brief_path_for_log(&gate.log_path).map(|brief| ClickAction::FloatGate {
+                    brief,
+                    log: gate.log_path.clone(),
+                })
+            })
+            .unwrap_or(ClickAction::None),
+        LineTarget::None => ClickAction::None,
     }
 }
 
@@ -2085,6 +2122,74 @@ mod tests {
         assert_eq!(layout.target(5), LineTarget::GateRow(0));
         assert_eq!(layout.target(7), LineTarget::GateRow(1));
         assert_eq!(layout.target(9), LineTarget::None);
+    }
+
+    #[test]
+    fn session_row_click_focuses_only_when_bound() {
+        let rows = vec![cwd_row(4), cwd_row(8)];
+        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp")]);
+        let sessions = vec![SessionEvent {
+            cwd: "/Users/clkao/git/zaphod".to_owned(),
+            ..Default::default()
+        }];
+        let gates = Vec::new();
+        // P=2,S=1: the session row occupies lines 7-8.
+        assert_eq!(
+            decide_rail_click(7, &rows, &sessions, &gates, &cwds),
+            ClickAction::FocusPane(4)
+        );
+        // An unbound session row's click is dead — never guessed.
+        let unmatched = vec![SessionEvent {
+            cwd: "/nowhere".to_owned(),
+            ..Default::default()
+        }];
+        assert_eq!(
+            decide_rail_click(8, &rows, &unmatched, &gates, &cwds),
+            ClickAction::None
+        );
+    }
+
+    #[test]
+    fn gate_click_floats_tui_on_brief() {
+        let rows = vec![cwd_row(4), cwd_row(8)];
+        let cwds = BTreeMap::new();
+        let sessions = vec![SessionEvent::default()];
+        let gates = vec![GateEvent {
+            log_path: "/pg/brief.decisions.jsonl".to_owned(),
+            ..Default::default()
+        }];
+        // P=2,S=1,G=1: the gate row occupies lines 10-11.
+        assert_eq!(
+            decide_rail_click(10, &rows, &sessions, &gates, &cwds),
+            ClickAction::FloatGate {
+                brief: "/pg/brief.md".to_owned(),
+                log: "/pg/brief.decisions.jsonl".to_owned(),
+            }
+        );
+        // The pane region still routes through the shipped decider.
+        assert_eq!(
+            decide_rail_click(1, &rows, &sessions, &gates, &cwds),
+            ClickAction::ToggleDock
+        );
+        assert_eq!(
+            decide_rail_click(2, &rows, &sessions, &gates, &cwds),
+            ClickAction::FocusPane(4)
+        );
+    }
+
+    #[test]
+    fn bad_log_suffix_never_floats() {
+        // The row renders, but a log_path that does not end .decisions.jsonl
+        // has no derivable brief: clicking it must do nothing.
+        let gates = vec![GateEvent {
+            log_path: "/pg/notes.txt".to_owned(),
+            ..Default::default()
+        }];
+        // P=0,S=0,G=1: GATES header at line 2, gate row lines 3-4.
+        assert_eq!(
+            decide_rail_click(3, &[], &[], &gates, &BTreeMap::new()),
+            ClickAction::None
+        );
     }
 
     #[test]
