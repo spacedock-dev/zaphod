@@ -560,3 +560,29 @@ verbatim — named in the demo script (step 7) so the joint demo reads
 correctly. Demo is parked ready for CL with prerequisites verified against
 this machine (subspace-tui missing from PATH today; grout needs a real
 session id) and a seconds-cost spot-check ordered before any real drill.
+
+### Demo outcome (CL, 2026-07-07)
+
+Live demo PASSED; gate approved. Verbatim facts from CL's run:
+
+1. **AC-I1 PASS** — grout run exit 0, AGENTS + GATES rows rendered in the
+   rail, session-row click jumped focus to the cwd-bound pane. Gate-row
+   float and the AC-5 size probes were skipped by CL (optional extras;
+   they ride the sprint-1 dogfood).
+2. **cwd-shape probe (test plan item 1) SETTLED**: `pane_cwd` and the
+   agentsview cwd are byte-identical `/Users/clkao/git/zaphod` —
+   `normalize_cwd` stays identity. ALSO observed: raw per-read `pane_cwd`
+   is flaky (same pane null one read, real value the next) —
+   stale-not-blank smooths it, but sprint 1 should debounce the unbind
+   direction.
+3. **AC-I2 PARTIAL**: the expected one permission prompt NEVER RENDERED
+   (SPEC #7 landmine confirmed live — the plugin parked silently, all
+   events denied); the grant was seeded manually in `permissions.kdl`;
+   everything else unchanged post-grant.
+4. **Demo-script defects found live, for the record**: the worktree
+   `install.sh` split the plugin identity from the `config.kdl` keybind
+   (the production-path cp is the correct deploy pattern);
+   `go run ./grout` from any root fails (the module lives in `grout/`);
+   grout's default gate-log path is cwd-relative and never resolves under
+   `go run .` — absolute-path argv[2] is the workaround, a grout fix is
+   seeded for sprint 1.
