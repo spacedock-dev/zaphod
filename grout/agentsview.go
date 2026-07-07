@@ -3,6 +3,11 @@
 
 package main
 
+import (
+	"encoding/json"
+	"io"
+)
+
 // sessionInfo pins the source field names off the recorded fixture
 // (testdata/session-get.json, agentsview v0.36.1): termination_status
 // feeds the row's state, first_message its summary. The row fields, not
@@ -13,4 +18,10 @@ type sessionInfo struct {
 	Agent             string `json:"agent"`
 	TerminationStatus string `json:"termination_status"`
 	FirstMessage      string `json:"first_message"`
+}
+
+func decodeSession(r io.Reader) (sessionInfo, error) {
+	var si sessionInfo
+	err := json.NewDecoder(r).Decode(&si)
+	return si, err
 }
