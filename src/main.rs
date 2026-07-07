@@ -88,6 +88,11 @@ struct Sidebar {
     // Wedge drill knob (see wedge_poll_secs): seconds each status poll sleeps
     // in place of its get_pane_running_command call. None outside drills.
     wedge_poll_secs: Option<u64>,
+    // Agent sessions and pending gates fed over the agent-event pipe,
+    // rendered as the AGENTS/GATES sections below the pane rows. Upserted in
+    // arrival order, never expired (grout is one-shot in sprint 0).
+    sessions: Vec<SessionEvent>,
+    gates: Vec<GateEvent>,
 }
 
 // One pane's status-poll backoff. get_pane_running_command's timeout Err is
@@ -576,6 +581,21 @@ impl ZellijPlugin for Sidebar {
         trace!(self, "pipe recv name={}", pipe_message.name);
         // CLI pipe callers terminate via the server's auto-unblock once this
         // returns; an explicit unblock would need the ReadCliPipes grant.
+        if pipe_message.name == "agent-event" {
+            // Only plugin state moves here — no host calls in pipe() (SPEC
+            // landmine #4); true re-renders, false leaves the screen alone.
+            let Some(payload) = pipe_message.payload.as_deref() else {
+                trace!(self, "agent-event dropped: missing payload");
+                return false;
+            };
+            return match parse_agent_event(payload) {
+                Ok(event) => apply_agent_event(&mut self.sessions, &mut self.gates, event),
+                Err(reason) => {
+                    trace!(self, "agent-event dropped: {}", reason);
+                    false
+                }
+            };
+        }
         if pipe_message.name == "navigate" {
             // Nav belongs to the active tab's resident instance; every tab's
             // layout carries one.
@@ -2190,6 +2210,51 @@ mod tests {
             decide_rail_click(3, &[], &[], &gates, &BTreeMap::new()),
             ClickAction::None
         );
+    }
+
+    fn agent_event(payload: Option<&str>) -> PipeMessage {
+        PipeMessage {
+            source: PipeSource::Keybind,
+            name: "agent-event".to_owned(),
+            payload: payload.map(str::to_owned),
+            args: BTreeMap::new(),
+            is_private: false,
+        }
+    }
+
+    #[test]
+    fn agent_event_lines_land_as_session_and_gate_rows() {
+        let mut sidebar = Sidebar::default();
+        assert!(sidebar.pipe(agent_event(Some(session_line()))), "a new row re-renders");
+        assert!(sidebar.pipe(agent_event(Some(gate_line()))));
+        assert_eq!(sidebar.sessions.len(), 1);
+        assert_eq!(sidebar.sessions[0].agent, "claude");
+        assert_eq!(sidebar.gates.len(), 1);
+        assert_eq!(sidebar.gates[0].round, 2);
+        // The identical line again changes nothing: no re-render.
+        assert!(!sidebar.pipe(agent_event(Some(session_line()))));
+        assert_eq!(sidebar.sessions.len(), 1);
+    }
+
+    #[test]
+    fn unknown_kind_dropped() {
+        let mut sidebar = Sidebar::default();
+        assert!(!sidebar.pipe(agent_event(Some(r#"{"kind":"deploy","id":"x"}"#))));
+        assert!(sidebar.sessions.is_empty() && sidebar.gates.is_empty());
+    }
+
+    #[test]
+    fn malformed_json_dropped() {
+        let mut sidebar = Sidebar::default();
+        assert!(!sidebar.pipe(agent_event(Some("{not json"))));
+        assert!(sidebar.sessions.is_empty() && sidebar.gates.is_empty());
+    }
+
+    #[test]
+    fn missing_payload_dropped() {
+        let mut sidebar = Sidebar::default();
+        assert!(!sidebar.pipe(agent_event(None)));
+        assert!(sidebar.sessions.is_empty() && sidebar.gates.is_empty());
     }
 
     #[test]
