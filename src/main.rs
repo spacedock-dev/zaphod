@@ -275,6 +275,17 @@ fn bind_session(session_cwd: &str, rows: &[Row], cwds: &BTreeMap<u32, PathBuf>) 
     matches.next().is_none().then_some(bound.pane_id)
 }
 
+// The gate's reviewable artifact, inverted from its decision-log path the
+// same way grout derives the log from the brief: trim .decisions.jsonl, add
+// .md. A log path without that suffix yields no brief — never float a wrong
+// file.
+fn brief_path_for_log(log_path: &str) -> Option<String> {
+    log_path
+        .strip_suffix(".decisions.jsonl")
+        .filter(|stem| !stem.is_empty())
+        .map(|stem| format!("{stem}.md"))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum LineTarget {
     Header,
@@ -1953,6 +1964,18 @@ mod tests {
         let rows = [cwd_row(4)];
         let cwds = cwd_map(&[(4, "/tmp/a"), (99, "/Users/clkao/git/zaphod")]);
         assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
+    }
+
+    #[test]
+    fn brief_path_inverts_the_decision_log_suffix() {
+        assert_eq!(
+            brief_path_for_log("/pg/brief.decisions.jsonl"),
+            Some("/pg/brief.md".to_owned())
+        );
+        // A log path without the suffix yields no brief: the row still
+        // renders, but its click must never float a wrong file.
+        assert_eq!(brief_path_for_log("/pg/brief.jsonl"), None);
+        assert_eq!(brief_path_for_log(""), None);
     }
 
     #[test]
