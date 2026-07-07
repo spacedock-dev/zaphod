@@ -13,8 +13,8 @@ Fresh-eyes review of `src/main.rs` after the v3.1–v3.12 arc. Tests 95/95, `car
 ### F3 — MEDIUM, SUSPECTED — immediate toggle path not gated on floating-visible
 The deferred steer waits for floats to hide (`main.rs:833-835`) but the immediate `SteerSwap` in `perform_toggle` has no `floating_visible` gate. Per the TabState comment (`main.rs:139-142`), `swap_name`/`swap_dirty` speak for the FLOATING layer while floats are visible, and next/previous_swap_layout swap whichever layer is visible → pressing Alt-/ with a floating pane up cycles the floating swap set and reads the wrong layer's dirty flag. `floating_visible` is already in TabState, just not passed to `decide_toggle`.
 
-### F4 — MEDIUM-LOW, CONFIRMED — non-tab-bar chrome always re-emitted at bottom
-`is_top_bar` (`main.rs:1093-1099`) matches only "zellij:tab-bar"; all other `zellij:*` chrome lands in `chrome_bottom`. A user on the builtin compact layout gets their `zellij:compact-bar` (a TOP bar) relocated below the region on retrofit, re-emitted there on every regeneration. One-line fix (broaden the top-bar match).
+### F4 — REFUTED 2026-07-07 (was MEDIUM-LOW, CONFIRMED) — non-tab-bar chrome always re-emitted at bottom
+`is_top_bar` (`main.rs:1093-1099`) matches only "zellij:tab-bar"; all other `zellij:*` chrome lands in `chrome_bottom` — the routing is real, but the bug premise ("compact-bar is a TOP bar") is false: `zellij setup --dump-layout compact` (0.44.1) places compact-bar BELOW the region pane, and the compact swap layouts' `tab_template "ui"` agrees (`children`, then compact-bar). tab-bar is the only top bar zellij ships, so the name-based routing already re-emits every builtin layout's chrome at its correct home; the proposed one-liner would have INTRODUCED a relocation bug for builtin-compact users. Residual (possible future respec): placement is canonicalized by plugin name, so CUSTOM chrome placement (e.g. a user's top-placed status-bar) is normalized on retrofit — a faithful fix is position-preserving extraction (record above/below the first region pane), a design change affecting custom-placement users only.
 
 ### F5 — LOW, SUSPECTED — fallback_swap_cycle blind-cycles, dead from undocked
 `main.rs:940-943`: two blind `next` calls violate SPEC #29. From "undocked" (last entry): call 1 snap-folds (damage latch, no advance), call 2 is next-past-end → resets to 0 without applying → dead press; next press wraps back to undocked = another dead press (~3 presses to toggle). Only reachable on the degraded path (no grant / stale tab_states / dump error), but it's the "never blind-cycle" law broken in the code's own fallback.
@@ -27,6 +27,12 @@ The deferred steer waits for floats to hide (`main.rs:833-835`) but the immediat
 
 ### F8 — LOW/EDGE — clicking a row during nav mode leaves nav stuck on
 `handle_click` `FocusPane` (`main.rs:472-478`) focuses the pane but never exits nav: `nav_mode` stays true, the pane stays selectable, the focus-handback guard stays disabled, the inverse highlight persists, and Enter/Esc route to the now-focused terminal. Fix: `ClickAction::FocusPane` should `exit_nav(false)` when `nav_mode`.
+
+### F9 — MEDIUM, CONFIRMED-by-trace — builtin non-bar plugins classified as chrome, pane destroyed
+Found 2026-07-07 while refuting F4 (line refs @ 9b552bd). `classify_plugin_location` (`main.rs:1312`) treats EVERY `zellij:*` location as Chrome, but strider is a 20%-wide REGION pane, not a bar (`zellij setup --dump-layout strider`): on retrofit `extract_chrome_panes` strips a builtin-strider user's strider pane and re-emits it as a `size=1 borderless` bottom row — the file browser is destroyed, and every regeneration re-destroys it. Fix: only genuine bars are Chrome (tab-bar, status-bar, compact-bar); other `zellij:*` panes ride along like third-party region panes. Check 0.44.1's builtin plugin set for other real bars before choosing allowlist vs denylist.
+
+### F10 — LOW, CONFIRMED — chrome re-emitted at hardcoded size=1
+Found 2026-07-07 while refuting F4 (line refs @ 9b552bd). `chrome_row` (`main.rs:1106`) emits every extracted chrome row as `size=1`, but strider's builtin status-bar is `size=2` (`zellij setup --dump-layout strider`) — chrome height fidelity is lost on retrofit. Fix: carry the extracted pane's size prop into the re-emitted row.
 
 ### Minor race
 Before the redundant-rail cleanup fires, two tiled rails in one tab both satisfy the resident branch and both steer on one press — a double-step that can enter the unreliable next-past-end zone; self-heals when the higher-id rail closes (`main.rs:980-993`).
