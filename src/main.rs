@@ -721,7 +721,13 @@ fn decide_toggle(
         // position 0 to the list end (undocked, a visible collapse);
         // zellij's previous-swap wrap is deterministic while next past the
         // end is not (swap_layouts.rs progress_layout!).
-        if active_swap_dirty {
+        // A foreign swap name — a builtin or user-captured set, not ours —
+        // must not be stepped through: cycling it re-tiles the user's panes
+        // while the dock never toggles, and pending_steer_disposition drops
+        // a foreign report. Rebuild the swap set instead, like a dirty tab.
+        let foreign_swap =
+            active_swap_name.is_some_and(|name| !matches!(name, "BASE" | "docked" | "undocked"));
+        if active_swap_dirty || foreign_swap {
             ToggleAction::RegenerateSwaps {
                 target: if active_swap_name == Some("undocked") {
                     DockState::Docked
@@ -1839,9 +1845,30 @@ mod tests {
             ToggleAction::SteerSwap { backwards: true }
         );
         assert_eq!(steer(None), ToggleAction::SteerSwap { backwards: true });
+    }
+
+    #[test]
+    fn foreign_swap_set_is_replaced_not_cycled() {
+        // A clean tab can carry a swap set that is not ours — a builtin or
+        // user-captured one ("vertical", "stacked"). Steering would cycle
+        // those foreign templates, re-tiling the user's panes while the dock
+        // never toggles, and pending_steer_disposition drops a foreign name
+        // anyway. Rebuild the swap set around the current arrangement
+        // instead, exactly like a dirty tab.
+        let instances = [inst(7, 1, false)];
+        let toggle =
+            |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, false, 7, &instances);
         assert_eq!(
-            steer(Some("vertical")),
-            ToggleAction::SteerSwap { backwards: true }
+            toggle(Some("vertical")),
+            ToggleAction::RegenerateSwaps {
+                target: DockState::Undocked
+            }
+        );
+        assert_eq!(
+            toggle(Some("stacked")),
+            ToggleAction::RegenerateSwaps {
+                target: DockState::Undocked
+            }
         );
     }
 
