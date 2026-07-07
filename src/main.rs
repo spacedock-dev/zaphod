@@ -1132,10 +1132,16 @@ fn block_has_sidebar(block: &[String], own_url: &str) -> bool {
     if let Some(location) = plugin_location(block) {
         return classify_plugin_location(&location, own_url) == PluginRole::Rail;
     }
-    block.len() >= 2
-        && top_level_blocks(&block[1..block.len() - 1])
-            .iter()
-            .any(|child| block_has_sidebar(child, own_url))
+    if block.len() < 2 {
+        // zellij's dump serializes a single-child rail pane with its plugin
+        // inline on one line (see extract_chrome_panes).
+        return inline_plugin_location(&block[0]).is_some_and(|location| {
+            classify_plugin_location(&location, own_url) == PluginRole::Rail
+        });
+    }
+    top_level_blocks(&block[1..block.len() - 1])
+        .iter()
+        .any(|child| block_has_sidebar(child, own_url))
 }
 
 // Lines between the first depth-1 `tab` node's braces in a dumped layout.
@@ -3102,13 +3108,11 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn broken_mixed_split_dump_recovers_chrome_and_drops_stray_rail() {
-        // The live tab-7 dump after the bug: a single-line tab-bar baked deep
-        // in a mixed v/h region and a single-line stray rail left in the
-        // region. Re-transforming it must hoist the tab-bar to a top row and
-        // drop the stray rail — exactly one canonical rail per swap body.
-        let dump = r#"layout {
+    // A dumped tab carrying a rail, as zellij serializes it live: the rail
+    // and chrome panes inline on ONE line each, the tab-bar baked mid-region
+    // in a mixed vertical/horizontal split.
+    fn single_line_rail_dump() -> &'static str {
+        r#"layout {
     tab name="Tab #7" focus=true hide_floating_panes=true {
         pane split_direction="vertical" {
             pane name="sidebar" size=28 borderless=true { plugin location="file:/tmp/zellij-sidebar.wasm" { rail "1" } }
@@ -3127,9 +3131,17 @@ mod tests {
         pane size=1 borderless=true { plugin location="zellij:status-bar" }
     }
 }
-"#;
+"#
+    }
+
+    #[test]
+    fn broken_mixed_split_dump_recovers_chrome_and_drops_stray_rail() {
+        // The live tab-7 dump after the bug: a single-line tab-bar baked deep
+        // in a mixed v/h region and a single-line stray rail left in the
+        // region. Re-transforming it must hoist the tab-bar to a top row and
+        // drop the stray rail — exactly one canonical rail per swap body.
         let url = "file:/tmp/zellij-sidebar.wasm";
-        let out = split_preserving_layout_kdl(dump, url, &jit_config()).unwrap();
+        let out = split_preserving_layout_kdl(single_line_rail_dump(), url, &jit_config()).unwrap();
         assert!(out.contains(
             "tab {\npane size=1 borderless=true {\nplugin location=\"zellij:tab-bar\"\n}\npane split_direction=\"vertical\""
         ));
@@ -3371,6 +3383,18 @@ mod tests {
         assert!(
             !dump_contains_sidebar(floating_only, url),
             "a floating sidebar does not own the tab's tiled region"
+        );
+    }
+
+    #[test]
+    fn dump_with_a_single_line_rail_is_recognized_as_already_retrofitted() {
+        // The server strips only the requesting instance's own rail from a
+        // dump, and a surviving resident's rail serializes on ONE line. The
+        // seeder-abort must see it, or a second instance fires a double
+        // override on an already-docked tab.
+        assert!(
+            dump_contains_sidebar(single_line_rail_dump(), "file:/tmp/zellij-sidebar.wasm"),
+            "single-line resident rail detected"
         );
     }
 
