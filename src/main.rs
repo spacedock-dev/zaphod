@@ -290,7 +290,76 @@ fn brief_path_for_log(log_path: &str) -> Option<String> {
 enum LineTarget {
     Header,
     Row(usize),
+    SessionRow(usize),
+    GateRow(usize),
     None,
+}
+
+// The rail's 1-based line map: pane rows first, then an AGENTS and a GATES
+// section, each a header line plus two-line rows, present only when it has
+// rows — an empty section occupies no lines at all. render prints in this
+// exact order, so deriving click targets from the same counts keeps the
+// click math aligned with the pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SectionLayout {
+    pane_count: usize,
+    session_count: usize,
+    gate_count: usize,
+}
+
+fn section_layout(pane_count: usize, session_count: usize, gate_count: usize) -> SectionLayout {
+    SectionLayout {
+        pane_count,
+        session_count,
+        gate_count,
+    }
+}
+
+impl SectionLayout {
+    // 1-based line of the AGENTS header, when the section renders.
+    fn agents_header(&self) -> Option<usize> {
+        (self.session_count > 0).then(|| 2 + 2 * self.pane_count)
+    }
+
+    // 1-based line of the GATES header, when the section renders.
+    fn gates_header(&self) -> Option<usize> {
+        (self.gate_count > 0).then(|| {
+            let sessions = if self.session_count > 0 {
+                1 + 2 * self.session_count
+            } else {
+                0
+            };
+            2 + 2 * self.pane_count + sessions
+        })
+    }
+
+    fn target(&self, line: isize) -> LineTarget {
+        if line <= 0 {
+            return LineTarget::None;
+        }
+        // The pane region is the shipped pane-rows map, byte for byte.
+        if (line as usize) < 2 + 2 * self.pane_count {
+            return target_for_line(line, self.pane_count);
+        }
+        let line = line as usize;
+        if let Some(header) = self.agents_header() {
+            if line == header {
+                return LineTarget::None;
+            }
+            if line <= header + 2 * self.session_count {
+                return LineTarget::SessionRow((line - header - 1) / 2);
+            }
+        }
+        if let Some(header) = self.gates_header() {
+            if line == header {
+                return LineTarget::None;
+            }
+            if line <= header + 2 * self.gate_count {
+                return LineTarget::GateRow((line - header - 1) / 2);
+            }
+        }
+        LineTarget::None
+    }
 }
 
 // The two sidebar presentation states a tab's swap set encodes: a 28-col
@@ -1145,7 +1214,8 @@ fn decide_click(line: isize, rows: &[Row]) -> ClickAction {
             .get(idx)
             .map(|row| ClickAction::FocusPane(row.pane_id))
             .unwrap_or(ClickAction::None),
-        LineTarget::None => ClickAction::None,
+        // The pane-rows map never yields section rows.
+        LineTarget::None | LineTarget::SessionRow(_) | LineTarget::GateRow(_) => ClickAction::None,
     }
 }
 
@@ -1976,6 +2046,45 @@ mod tests {
         // renders, but its click must never float a wrong file.
         assert_eq!(brief_path_for_log("/pg/brief.jsonl"), None);
         assert_eq!(brief_path_for_log(""), None);
+    }
+
+    #[test]
+    fn sectioned_lines_map_headers_rows_and_beyond_for_p2_s1_g1() {
+        // Hand-counted against the render order: PANES header, two 2-line
+        // pane rows, AGENTS header, one 2-line session row, GATES header,
+        // one 2-line gate row. Section headers are not controls.
+        let layout = section_layout(2, 1, 1);
+        assert_eq!(layout.target(0), LineTarget::None);
+        assert_eq!(layout.target(1), LineTarget::Header);
+        assert_eq!(layout.target(2), LineTarget::Row(0));
+        assert_eq!(layout.target(5), LineTarget::Row(1));
+        assert_eq!(layout.target(6), LineTarget::None); // AGENTS header
+        assert_eq!(layout.target(7), LineTarget::SessionRow(0));
+        assert_eq!(layout.target(8), LineTarget::SessionRow(0));
+        assert_eq!(layout.target(9), LineTarget::None); // GATES header
+        assert_eq!(layout.target(10), LineTarget::GateRow(0));
+        assert_eq!(layout.target(11), LineTarget::GateRow(0));
+        assert_eq!(layout.target(12), LineTarget::None);
+    }
+
+    #[test]
+    fn empty_sections_map_like_the_pane_only_rail() {
+        // Zero footprint: with no agent events received the sectioned map is
+        // the shipped pane-rows map on every line.
+        let layout = section_layout(2, 0, 0);
+        for line in -1..10 {
+            assert_eq!(layout.target(line), target_for_line(line, 2));
+        }
+    }
+
+    #[test]
+    fn gates_section_starts_right_after_pane_rows_when_no_sessions_arrived() {
+        let layout = section_layout(1, 0, 2);
+        assert_eq!(layout.target(3), LineTarget::Row(0));
+        assert_eq!(layout.target(4), LineTarget::None); // GATES header
+        assert_eq!(layout.target(5), LineTarget::GateRow(0));
+        assert_eq!(layout.target(7), LineTarget::GateRow(1));
+        assert_eq!(layout.target(9), LineTarget::None);
     }
 
     #[test]
