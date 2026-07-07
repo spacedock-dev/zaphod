@@ -1,9 +1,10 @@
 ---
 title: Plugin pipe-unblock fix
-status: backlog
+status: ideation
 source: plan sprint 0 (docs/plan-agent-rail.md)
 score: 0.9
 id: 2n00q0w1g33531ewx1azgw4e
+started: 2026-07-07T04:49:25Z
 ---
 
 ## Problem
