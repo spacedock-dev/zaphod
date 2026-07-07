@@ -1,6 +1,7 @@
 // ABOUTME: Clickable pane-switcher sidebar for zellij — lists panes in its own tab with their
 // ABOUTME: last terminal line; Alt-/ flips it between a docked rail and a 1-col sliver.
 
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 use zellij_tile::prelude::*;
@@ -164,6 +165,52 @@ struct Row {
     title: String,
     focused: bool,
     agent: agent::AgentFields,
+}
+
+// One agent-event payload: the two row kinds pinned by plan decision 3
+// (docs/plan-agent-rail.md). Only the fields the rail acts on are declared;
+// everything else (ts, workflow, entity, future additions) is tolerated and
+// ignored, and a declared field that is absent defaults — a session without
+// cwd simply renders unbound.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum AgentEvent {
+    Session(SessionEvent),
+    Gate(GateEvent),
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+struct SessionEvent {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    cwd: String,
+    #[serde(default)]
+    agent: String,
+    #[serde(default)]
+    state: String,
+    #[serde(default)]
+    summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+struct GateEvent {
+    #[serde(default)]
+    log_path: String,
+    #[serde(default)]
+    entity_title: String,
+    #[serde(default)]
+    stage: String,
+    #[serde(default)]
+    round: u32,
+    #[serde(default)]
+    recommendation: String,
+}
+
+// Parses one agent-event payload line. Malformed JSON and unknown kinds are
+// in-band errors; the caller drops the event with the reason traced.
+fn parse_agent_event(payload: &str) -> Result<AgentEvent, String> {
+    serde_json::from_str(payload).map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1686,6 +1733,69 @@ mod tests {
             panes.insert(tab, list);
         }
         PaneManifest { panes }
+    }
+
+    // The two pinned agent-event row kinds (plan decision 3,
+    // docs/plan-agent-rail.md), transcribed with grout's exact field sets —
+    // fixtures from outside this plugin's source.
+    fn session_line() -> &'static str {
+        r#"{"kind":"session","id":"01J9SESS","cwd":"/Users/clkao/git/zaphod","agent":"claude","state":"working","summary":"wiring the rows section","ts":"2026-07-07T05:00:00Z"}"#
+    }
+
+    fn gate_line() -> &'static str {
+        r#"{"kind":"gate","log_path":"/pg/brief.decisions.jsonl","workflow":"agent-rail-dev","entity":"plugin-rows-section","entity_title":"Plugin rows section","stage":"ideation","round":2,"recommendation":"APPROVED","ts":"2026-07-07T05:00:00Z"}"#
+    }
+
+    #[test]
+    fn parses_both_pinned_row_kinds() {
+        assert_eq!(
+            parse_agent_event(session_line()).unwrap(),
+            AgentEvent::Session(SessionEvent {
+                id: "01J9SESS".to_owned(),
+                cwd: "/Users/clkao/git/zaphod".to_owned(),
+                agent: "claude".to_owned(),
+                state: "working".to_owned(),
+                summary: "wiring the rows section".to_owned(),
+            })
+        );
+        assert_eq!(
+            parse_agent_event(gate_line()).unwrap(),
+            AgentEvent::Gate(GateEvent {
+                log_path: "/pg/brief.decisions.jsonl".to_owned(),
+                entity_title: "Plugin rows section".to_owned(),
+                stage: "ideation".to_owned(),
+                round: 2,
+                recommendation: "APPROVED".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn tolerates_missing_fields_and_unknown_extras() {
+        // grout pins exact field sets today; tolerance is the plugin's
+        // concern: extra fields are ignored, missing declared fields default
+        // (a session without cwd simply renders unbound).
+        let event =
+            parse_agent_event(r#"{"kind":"session","id":"s1","next_sprint_field":true}"#).unwrap();
+        assert_eq!(
+            event,
+            AgentEvent::Session(SessionEvent {
+                id: "s1".to_owned(),
+                ..Default::default()
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_kind_and_malformed_json() {
+        let unknown = parse_agent_event(r#"{"kind":"deploy","id":"x"}"#).unwrap_err();
+        assert!(
+            unknown.contains("deploy"),
+            "reason names the unknown kind: {unknown}"
+        );
+        assert!(!parse_agent_event("{not json").unwrap_err().is_empty());
+        // A payload without a kind tag is an error, never a default kind.
+        assert!(parse_agent_event(r#"{"id":"x"}"#).is_err());
     }
 
     #[test]
