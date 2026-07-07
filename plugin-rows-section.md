@@ -360,3 +360,203 @@ gate may strike it.
 ### Summary
 
 The display half is in: pipe() parses grout's two pinned kinds ahead of toggle handling with the recv trace kept first, upserts into AGENTS/GATES sections that occupy zero lines while empty, binds sessions by exact cwd match behind the normalize_cwd seam fed by a budget-bounded get_pane_cwd poll, and acts per kind — bound session → focus_terminal_pane, gate → float `subspace-tui <brief> --log <log>` under the newly requested RunCommands grant (one new prompt, per blast radius). The cwd-shape probe (test plan item 1) remains CL's live step; a divergent shape lands as a rule in normalize_cwd. The cwd wedge-abort branch mirrors the adjacent command wedge branch line for line; the drill knob aborts the pass before reaching it, so it is verified by inspection plus the existing budget tests. Wasm not built — no live demo in this stage.
+
+## Refutation audit — validation, throwaway checkout @b83b302
+
+Throwaway: `git clone` of the repo into the session scratchpad, detached at
+b83b3024e675f6748745418fd393d6b7467430ec (identity = the implementation
+worktree's HEAD, re-checked clean before and after the audit — never the
+worktree itself). Baseline there first: pre-slice suite at 09a4710 is
+104/104 and the slice tip is 130/130, both my own runs. Probes live in five
+throwaway `audit_*` tests appended to `mod tests`, plus two audit-only
+seams; all pass. No REFUTED findings; one cross-slice gap and two caveats.
+
+1. **The cwd wedge-abort branch (by-inspection in implementation).** Why it
+   cannot be exercised unmodified: the shipped drill knob sleeps at the
+   *status* call, which wedge-classifies and breaks the pass before the cwd
+   call is reached; and the real `get_pane_cwd` is a wasm host import
+   (`#[link(wasm_import_module = "zellij")]`, zellij-tile-0.44.1
+   shim.rs:2823-2826) with no native host behind it. Throwaway seam: a
+   `wedge_cwd_secs` knob substituting only the host call (branch under test
+   verbatim), with `wedge_poll_secs = Some(0)` making the status call an
+   instant no-abort Err. Probe: 3 rows, pane 1 pre-seeded cwd `/prev`, cwd
+   call wedges → pane 1's backoff records the failure, panes 2-3 get no
+   backoff entry (abort spares untried panes), `/prev` survives
+   (stale-not-blank), the pass reports no render-worthy change; pass 2 skips
+   backed-off pane 1 and wedges pane 2. Identical posture to the status-call
+   twin. SURVIVES.
+2. **FloatGate argument handling under hostile log_path.** Probe: six
+   hostile paths (embedded spaces, `'` and `"`, `;|&`, `$( )` and
+   backticks, KDL `{}`+backslash, a raw newline) fed through the real
+   `pipe()` → `decide_rail_click` — every one lands in
+   `ClickAction::FloatGate` as two discrete verbatim strings (brief
+   inverted, log untouched). Host path source-verified end to end: the shim
+   protobuf-encodes `CommandToRun` (zellij-tile-0.44.1 shim.rs:622-631), the
+   server unpacks `args` as a `Vec<String>` into `RunCommandAction`
+   (zellij-server-0.44.1 zellij_exports.rs:2221-2259; permission gate
+   `OpenCommandPaneFloating → RunCommands` at :5183-5190), and the exec is
+   `std::process::Command::new(cmd.command).args(&cmd.args).spawn()`
+   (os_input_output_unix.rs:211-232) — an argv vector, no shell at any hop.
+   SURVIVES. Caveat: a hostile path also rides into the `float gate brief=`
+   trace line and the floating pane's title — cosmetic surfaces only.
+3. **Upsert unbounded growth (no expiry).** Probe, measured: 10,000 distinct
+   session lines through `pipe()` ingest in 634ms total (~63µs each; the
+   O(n) find makes ingest O(n²) overall), worst-case single re-upsert
+   (last id) 129µs, and one render-shaped bind pass (10k sessions × 6
+   listed rows) 12.4ms — native debug build; wasm will be slower by a
+   small factor. Nothing hangs or panics; memory is a few MB of small
+   structs. SURVIVES for sprint-0 scope (grout is one-shot, a handful of
+   rows), with the caveat that a chatty sprint-1 grout makes per-render
+   bind cost linear in sessions × rows and render output linear in rows —
+   the entity's row-expiry/lifecycle line item is load-bearing, not
+   optional polish.
+4. **Binding flips under stale pane_cwds entries.** Probe: exhaustive
+   oracle over listed rows {1,2} × cwd assignments from a 3-value pool × a
+   stale map entry for closed pane 99 × 4 session cwds (108 cases +
+   broadened equivalence) — `bind_session` returns a pane iff it is a
+   LISTED row and the ONLY listed match; the stale 99 entry never binds and
+   never breaks a legitimate single match (it can only force ambiguity when
+   its cwd is irrelevant — it is filtered by the row set first). SURVIVES.
+   Residual flip surface is spec'd behavior: a live row's stale cwd value
+   (failed poll) binds by last known value per AC-2, and a second pane
+   entering the session's cwd flips bound → unbound at the next poll
+   (never-guess wins).
+5. **Click math vs render order (drift attack).** Probe: an independent
+   render-order walk (header, 2-line pane rows, conditional AGENTS/GATES
+   headers + 2-line rows) rebuilt per shape and compared against
+   `section_layout().target()` on every line, all P/S/G in 0..4, lines
+   -3..40, plus zero-footprint equivalence broadened to P in 0..8, lines
+   -5..60 (the shipped test covers P=2 only). Byte-for-byte agreement,
+   including out-of-range and negative lines. SURVIVES.
+
+Cross-slice gap (gate finding, not a defect in this slice's letter): grout
+emits agentsview's `termination_status` verbatim as `state`
+(grout/rows.go:39 — e.g. `awaiting_user`), while `marker_for_state` maps
+only `blocked|working|idle|done`; every real live session row therefore
+renders the Unknown marker (two spaces — no dot, no color). Both entities
+scoped state-value mapping to sprint 1, so sprint 0 ships an AGENTS marker
+that carries no live signal. AC-1's marker clause holds only for the plan's
+fixture vocabulary. Named in the demo script so CL is not surprised.
+
+## Demo script — sprint-0 exit gate (AC-I1 + AC-I2), CL drives
+
+Prerequisites (once, before any session):
+
+1. `subspace-tui` is NOT currently on PATH (checked on this machine).
+   Install it in the shell that will launch zellij (the server inherits
+   that shell's PATH):
+
+       cd ~/git/spacedock-research/spacedock-subspace
+       go build -o /opt/homebrew/bin/subspace-tui ./cmd/subspace-tui
+       which subspace-tui   # must resolve before starting the session
+
+2. Build + install the plugin from this branch:
+
+       cd /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-plugin-rows-section
+       ./build.sh && ./install.sh
+
+   Then add `debug "1"` beside each `rail "1"` in the installed
+   `~/.config/zellij/layouts/zaphod.kdl` — the drop-reason traces and the
+   AC-5 receipt check need it; rendered rows are the primary observable.
+3. Pick a LIVE session id: `agentsview session list | head`. grout's no-arg
+   default id is the synthetic fixture id — not in the real DB; always pass
+   a real id. Note its cwd:
+   `agentsview session get <id> --format json | jq -r .cwd` — the demo tab
+   must hold exactly ONE pane whose cwd is that directory (binding is
+   per-tab and exactly-one-match in sprint 0).
+
+Spot-check (seconds, proves the infra before CL's time is spent):
+
+4. Start a fresh zellij session on the zaphod layout. EXPECT exactly one
+   permission prompt whose set now includes RunCommands — grant it. That
+   observation is half of AC-I2; note anything beyond one prompt.
+5. Inside the session: `timeout 10 zellij pipe --name agent-event -- ping; echo exit=$?`
+   Expect exit=0 quickly (pipe-unblock posture holds), the rail visually
+   unchanged, and in `${TMPDIR%/}/zellij-$(id -u)/zellij-log/zellij.log`
+   two trace lines: `pipe recv name=agent-event` then
+   `agent-event dropped: …` naming the parse reason — the branch is live
+   and garbage has zero footprint. Any hang or missing trace: stop, fix
+   infra (debug key / stale plugin), do not spend demo time.
+
+cwd-shape probe (test plan item 1 — run BEFORE the click drill; its result
+explains the drill's outcome):
+
+6. In the tab holding the agent's pane:
+
+       zellij action list-panes --all --json | jq -r '.[] | "\(.id) \(.pane_cwd)"'
+       agentsview session get <id> --format json | jq -r .cwd
+
+   Compare the agent pane's two cwd strings. Match → binding has real data.
+   Normalizable divergence (e.g. `/private` prefix) → record BOTH strings
+   verbatim in this entity; the rule lands in `normalize_cwd` (the seam
+   takes it without redesign) and the session row will show ` ·unbound`
+   until it does. No usable cwd → stop; back to ideation (plan decision 1
+   loses its data source).
+
+AC-I1 — rows render, clicks land:
+
+7. Inside the session, from the worktree root:
+   `time go run ./grout <session-id>` — expect exit 0, wall time ≤10s
+   (spike baseline 1-6s). Rail gains within that window:
+   - inverse-video `▾ AGENTS` header; session row `claude` (NO state dot —
+     known sprint-0 gap: grout sends termination_status verbatim, the
+     plugin maps only blocked|working|idle|done, so live rows wear the
+     Unknown two-space marker) + dim first-message summary;
+     ` ·unbound` appears only on zero/ambiguous cwd match;
+   - inverse-video `▾ GATES` header; gate row red ● +
+     `Playground handoff demo`; dim detail `review r1 · approve`.
+8. Click-to-focus: click the session row → focus moves to the cwd-bound
+   agent pane (post-click focus is the baseline; it can move the wrong
+   way). If the row shows ` ·unbound`, the click must do NOTHING — that is
+   spec'd never-guess behavior; record which outcome with the step-6
+   result.
+9. Gate-row float: baseline first —
+   `wc -l grout/testdata/playground-gate.decisions.jsonl`. Click the gate
+   row → a floating `subspace-tui` opens on the playground brief. Issue a
+   verdict in the TUI → the log gains exactly one line (`wc -l` again),
+   written by the TUI, never the rail. This DIRTIES the vendored fixture:
+   restore with `git checkout -- grout/testdata/playground-gate.decisions.jsonl`
+   (or demo against a real gate log via `go run ./grout <id> <log>`).
+
+AC-I2 — blast radius (alongside the above):
+
+10. Pane rows, statuses, Alt-/ toggle, nav mode, and layout behave exactly
+    as deployed — with and without agent-event traffic; the only new
+    prompt was step 4's RunCommands.
+
+grout AC-5 payload probes (parked from the grout slice; ride this session,
+one size at a time so receipt is attributable):
+
+11.     timeout 10 zellij pipe --name agent-event -- "$(python3 -c 'print("x"*4096)')"
+        timeout 10 zellij pipe --name agent-event -- "$(python3 -c 'print("x"*65536)')"
+        timeout 10 zellij pipe --name agent-event -- "$(python3 -c 'print("x"*262144)')"
+
+    After each: one `pipe recv name=agent-event` + one
+    `agent-event dropped: …` trace pair (x-runs are malformed JSON — state
+    untouched, rail unchanged; AC-3 robustness re-proven live at size).
+    Record the ceiling (or "≥256 KiB") in the grout entity per its AC-5.
+
+## Stage Report: validation
+
+- DONE: Every offline AC re-verified by re-execution in the worktree (your own runs: full suite, the zero-footprint diff check, the section_layout/target_for_line equivalence) — never the implementer's numbers
+  My runs at b83b302: full suite 130/130; the 13 AC-named tests green individually; `cargo check --tests` + `cargo check` warning-free; `git diff 09a4710..HEAD -- src/` removes zero test lines (all 8 removed lines are extended production lines); pre-slice baseline 104/104 re-run myself at 09a4710; equivalence re-run shipped (P=2) and broadened to P 0..8 × lines -5..60 in the audit — all agree.
+- DONE: Refutation audit on a THROWAWAY checkout, priority attacks: the by-inspection cwd wedge-abort branch (find a way to exercise it — e.g. a knob variant or a unit seam — or prove why not), FloatGate argument handling with hostile log_path values (spaces, quotes, KDL/shell metacharacters — args ride as a vec but prove it), upsert unbounded growth (no expiry — what does 10k session lines do), binding flips under stale pane_cwds entries
+  Five probes on a scratchpad clone at b83b302, section above: cwd wedge-abort exercised via a cwd-site knob seam (branch verbatim; why-not-unmodified proven — wasm-only host import + the status knob aborts first); hostile log_paths ride verbatim as discrete argv strings with the no-shell exec chain source-cited; 10k sessions = 634ms ingest / 12.4ms per bind pass, quantified not hung; binding survived a 108-case exhaustive oracle. No REFUTED. One cross-slice gate finding: live state strings (termination_status) all map to the Unknown marker — sprint-0 AGENTS markers carry no live signal; both entities scoped the mapping to sprint 1.
+- DONE: Demo script for CL's joint sprint-0 exit gate: build+install from this branch, grout run, expected rendered AGENTS/GATES rows, click-to-focus drill, gate-row float drill (subspace-tui on PATH prerequisite), the RunCommands one-prompt expectation, the cwd-shape probe folded in, grout's parked AC-5 payload probes riding along — with a cheap spot-check first so CL's time is never spent on broken infra
+  Demo script section above: subspace-tui install verified MISSING from PATH today (build step given); grout must get a REAL session id (its default is the synthetic fixture id, absent from the live DB); expected row text pinned from the fixtures (`Playground handoff demo` / `review r1 · approve`); float drill dirties the vendored fixture (restore step included); cwd probe ordered before the click drill so an unbound outcome is explained, not mysterious; AC-5 sizes verbatim from the grout entity.
+
+### Summary
+
+Independently re-verified all four offline ACs at b83b302 — suite 130/130,
+zero-footprint diff and broadened click-map equivalence all from my own
+runs. Five-probe refutation audit on a scratchpad clone: no REFUTED; the
+previously by-inspection cwd wedge-abort branch now has executed evidence
+via a throwaway seam, the FloatGate argv path is shell-free end to end at
+source, 10k-row growth is quantified (degradation, not hang — sprint-1
+expiry is load-bearing), and binding survived an exhaustive oracle. One
+gate-worthy cross-slice finding: live session rows will all wear the
+Unknown (blank) state marker because grout emits termination_status
+verbatim — named in the demo script (step 7) so the joint demo reads
+correctly. Demo is parked ready for CL with prerequisites verified against
+this machine (subspace-tui missing from PATH today; grout needs a real
+session id) and a seconds-cost spot-check ordered before any real drill.
