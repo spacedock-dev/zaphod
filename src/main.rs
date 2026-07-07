@@ -656,6 +656,31 @@ impl ZellijPlugin for Sidebar {
             let status = agent::status_line(&row.agent, cols.saturating_sub(4));
             println!("    \u{1b}[2m{}\u{1b}[0m", status);
         }
+        // The agent-event sections render only when they have rows: a rail
+        // that never receives an event prints exactly the lines above.
+        if !self.sessions.is_empty() {
+            println!(
+                "\u{1b}[7m▾ AGENTS{}\u{1b}[0m",
+                " ".repeat(cols.saturating_sub(9))
+            );
+            for session in &self.sessions {
+                let bound = bind_session(&session.cwd, &self.rows, &self.pane_cwds).is_some();
+                println!("{}", session_row_line(session, bound, cols));
+                let summary: String =
+                    session.summary.chars().take(cols.saturating_sub(4)).collect();
+                println!("    \u{1b}[2m{}\u{1b}[0m", summary);
+            }
+        }
+        if !self.gates.is_empty() {
+            println!(
+                "\u{1b}[7m▾ GATES{}\u{1b}[0m",
+                " ".repeat(cols.saturating_sub(8))
+            );
+            for gate in &self.gates {
+                println!("{}", gate_row_line(gate, cols));
+                println!("    \u{1b}[2m{}\u{1b}[0m", gate_row_detail(gate, cols));
+            }
+        }
     }
 }
 
@@ -1838,14 +1863,54 @@ fn target_for_line(line: isize, row_count: usize) -> LineTarget {
     }
 }
 
-fn state_marker(fields: &agent::AgentFields) -> &'static str {
-    match fields.state {
+fn state_glyph(state: agent::AgentState) -> &'static str {
+    match state {
         agent::AgentState::Blocked => "\u{1b}[31m\u{25cf}\u{1b}[0m ",
         agent::AgentState::Working => "\u{1b}[33m\u{25cf}\u{1b}[0m ",
         agent::AgentState::Done => "\u{1b}[36m\u{25cf}\u{1b}[0m ",
         agent::AgentState::Idle => "\u{1b}[32m\u{2713}\u{1b}[0m ",
         agent::AgentState::Unknown => "  ",
     }
+}
+
+fn state_marker(fields: &agent::AgentFields) -> &'static str {
+    state_glyph(fields.state)
+}
+
+// First line of a session row: the session's state marker and agent name,
+// with an explicit ·unbound tag when no listed pane matches its cwd.
+fn session_row_line(session: &SessionEvent, bound: bool, cols: usize) -> String {
+    let text = if bound {
+        session.agent.clone()
+    } else {
+        format!("{} \u{b7}unbound", session.agent)
+    };
+    let text: String = text.chars().take(cols.saturating_sub(2)).collect();
+    format!(
+        "{}{}",
+        state_glyph(agent::marker_for_state(&session.state)),
+        text
+    )
+}
+
+// First line of a gate row: a pending gate waits on a verdict, so it wears
+// the blocked marker; the entity title names what is under review.
+fn gate_row_line(gate: &GateEvent, cols: usize) -> String {
+    let title: String = gate
+        .entity_title
+        .chars()
+        .take(cols.saturating_sub(2))
+        .collect();
+    format!("{}{}", state_glyph(agent::AgentState::Blocked), title)
+}
+
+// Second line of a gate row: where the gate sits and what the reviewer
+// recommends, sized like the pane rows' dim status line.
+fn gate_row_detail(gate: &GateEvent, cols: usize) -> String {
+    format!("{} r{} \u{b7} {}", gate.stage, gate.round, gate.recommendation)
+        .chars()
+        .take(cols.saturating_sub(4))
+        .collect()
 }
 
 fn row_marker(row: &Row) -> &'static str {
@@ -2285,6 +2350,59 @@ mod tests {
         let mut sidebar = Sidebar::default();
         assert!(!sidebar.pipe(agent_event(None)));
         assert!(sidebar.sessions.is_empty() && sidebar.gates.is_empty());
+    }
+
+    #[test]
+    fn pinned_protocol_lines_render_and_bind() {
+        // Wire to action: the two pinned lines plus a pane set whose one
+        // matching cwd equals the session's cwd yield a bound session row
+        // and an actionable gate row.
+        let mut sidebar = Sidebar::default();
+        assert!(sidebar.pipe(agent_event(Some(session_line()))));
+        assert!(sidebar.pipe(agent_event(Some(gate_line()))));
+        sidebar.rows = vec![cwd_row(4), cwd_row(8)];
+        sidebar.pane_cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp")]);
+        // The session row's marker reflects the line's state; bound rows
+        // carry no unbound tag and click through to the cwd-bound pane.
+        let session = &sidebar.sessions[0];
+        let bound = bind_session(&session.cwd, &sidebar.rows, &sidebar.pane_cwds);
+        assert_eq!(bound, Some(4));
+        let line = session_row_line(session, bound.is_some(), 28);
+        assert!(line.starts_with(state_glyph(agent::AgentState::Working)));
+        assert!(line.contains("claude"));
+        assert!(!line.contains("\u{b7}unbound"));
+        assert_eq!(
+            decide_rail_click(7, &sidebar.rows, &sidebar.sessions, &sidebar.gates, &sidebar.pane_cwds),
+            ClickAction::FocusPane(4)
+        );
+        // The gate row names the entity under review and its stage detail;
+        // its click floats the TUI on the brief with the verbatim log path.
+        let gate = &sidebar.gates[0];
+        assert!(gate_row_line(gate, 28).contains("Plugin rows section"));
+        assert_eq!(gate_row_detail(gate, 80), "ideation r2 \u{b7} APPROVED");
+        assert_eq!(
+            decide_rail_click(10, &sidebar.rows, &sidebar.sessions, &sidebar.gates, &sidebar.pane_cwds),
+            ClickAction::FloatGate {
+                brief: "/pg/brief.md".to_owned(),
+                log: "/pg/brief.decisions.jsonl".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn unbound_session_rows_carry_the_unbound_tag() {
+        let session = SessionEvent {
+            agent: "claude".to_owned(),
+            state: "blocked".to_owned(),
+            ..Default::default()
+        };
+        let line = session_row_line(&session, false, 28);
+        assert!(line.starts_with(state_glyph(agent::AgentState::Blocked)));
+        assert!(line.ends_with("claude \u{b7}unbound"));
+        // Row text truncates to the rail width like pane rows.
+        let narrow = session_row_line(&session, false, 8);
+        assert!(narrow.ends_with("claude"));
+        assert!(!narrow.contains("\u{b7}unbound"));
     }
 
     #[test]
