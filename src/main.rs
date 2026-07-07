@@ -93,6 +93,11 @@ struct Sidebar {
     // arrival order, never expired (grout is one-shot in sprint 0).
     sessions: Vec<SessionEvent>,
     gates: Vec<GateEvent>,
+    // Each terminal pane's cwd as last polled via get_pane_cwd — the data
+    // session binding matches against. Keyed by pane id, so it survives the
+    // manifest's row rebuilds; pruned to the current rows each poll pass. A
+    // failed poll keeps the previous entry (stale-not-blank).
+    pane_cwds: BTreeMap<u32, PathBuf>,
 }
 
 // One pane's status-poll backoff. get_pane_running_command's timeout Err is
@@ -896,11 +901,13 @@ impl Sidebar {
         Some(())
     }
 
-    // Returns whether any row's agent fields changed (i.e. a render is due).
+    // Returns whether any row's agent fields or polled cwd changed (i.e. a
+    // render is due — a cwd change can flip a session row's binding).
     fn refresh_statuses(&mut self) -> bool {
         let mut backoff = std::mem::take(&mut self.poll_backoff);
         let live: std::collections::BTreeSet<u32> = self.rows.iter().map(|r| r.pane_id).collect();
         backoff.retain(|pane_id, _| live.contains(pane_id));
+        self.pane_cwds.retain(|pane_id, _| live.contains(pane_id));
         let mut changed = false;
         for row in self.rows.iter_mut() {
             let state = backoff.entry(row.pane_id).or_default();
@@ -930,6 +937,29 @@ impl Sidebar {
                     started.elapsed().as_millis()
                 );
                 break;
+            }
+            // The pane's cwd feeds session binding: one more timed call
+            // under the same wedge budget. Its twin get_pane_running_command
+            // produced the observed ~13s wedges despite the export's 100ms
+            // guard, so the guard is not trusted here either. A failed call
+            // keeps the previous entry (stale-not-blank).
+            let cwd_started = Instant::now();
+            let cwd = get_pane_cwd(pane_id);
+            if wedge_aborts_pass(cwd_started.elapsed()) {
+                state.record(true);
+                trace!(
+                    self,
+                    "status pass aborted: pane {} cwd call wedge-classified after {}ms",
+                    row.pane_id,
+                    cwd_started.elapsed().as_millis()
+                );
+                break;
+            }
+            if let Ok(cwd) = cwd {
+                if self.pane_cwds.get(&row.pane_id) != Some(&cwd) {
+                    self.pane_cwds.insert(row.pane_id, cwd);
+                    changed = true;
+                }
             }
             let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
             state.record(command.is_err());
@@ -2370,6 +2400,20 @@ mod tests {
         assert_eq!(failures(&sidebar, 1), Some(1), "the backed-off pane is skipped, not re-recorded");
         assert_eq!(failures(&sidebar, 2), Some(1), "the pass moves to the next due pane");
         assert_eq!(failures(&sidebar, 3), None, "the abort spares the panes behind the wedge");
+    }
+
+    #[test]
+    fn cwd_map_prunes_to_live_rows() {
+        // A closed pane's polled cwd must not linger in the map. The drill
+        // knob stands in for the host calls: the pass aborts at the first
+        // wedge-classified status call, before any cwd call, so the prune is
+        // observable hermetically.
+        let mut sidebar = Sidebar::default();
+        sidebar.wedge_poll_secs = Some(1);
+        sidebar.pane_cwds = cwd_map(&[(1, "/a"), (99, "/gone")]);
+        sidebar.rows = vec![cwd_row(1)];
+        sidebar.refresh_statuses();
+        assert_eq!(sidebar.pane_cwds, cwd_map(&[(1, "/a")]));
     }
 
     #[test]
