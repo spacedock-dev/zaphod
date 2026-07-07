@@ -1,6 +1,6 @@
 ---
 title: Plugin rows section
-status: implementation
+status: validation
 source: plan sprint 0 (docs/plan-agent-rail.md)
 score: 0.8
 id: 5tdw8rckcrsx1qfytsytgp9m
