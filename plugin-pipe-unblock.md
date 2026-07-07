@@ -1,6 +1,6 @@
 ---
 title: Plugin pipe-unblock fix
-status: implementation
+status: validation
 source: plan sprint 0 (docs/plan-agent-rail.md)
 score: 0.9
 id: 2n00q0w1g33531ewx1azgw4e
