@@ -6,7 +6,7 @@ score: 0.8
 id: 5tdw8rckcrsx1qfytsytgp9m
 started: 2026-07-07T05:32:39Z
 worktree: .worktrees/spacedock-ensign-plugin-rows-section
-verdict: passed
+verdict: PASSED
 completed: 2026-07-07T15:48:37Z
 archived: 2026-07-07T15:48:37Z
 ---
