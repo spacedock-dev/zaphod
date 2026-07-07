@@ -1,8 +1,8 @@
 ---
 commissioned-by: spacedock@0.24.0-pre2
-entity-type: sprint_slice
-entity-label: slice
-entity-label-plural: slices
+entity-type: task
+entity-label: task
+entity-label-plural: tasks
 id-style: sd-b32
 state: .spacedock-state
 stages:
@@ -30,7 +30,7 @@ stages:
 Builds the zaphod agent rail per `docs/prd-agent-rail.md`, executing the sprint
 plan in `docs/plan-agent-rail.md`: the grout daemon, the row protocol, and the
 rail's rows section — walking skeleton first, then sessions-for-real,
-gates-for-real, and the M2 verdict seam. Each slice is the smallest demoable
+gates-for-real, and the M2 verdict seam. Each task is the smallest demoable
 unit of a sprint. This workflow is itself the rail's first dogfood tenant: its
 validation reviews run through spacedock-subspace with decision logs at the
 globbable gates location, so the rail being built learns to surface the very
@@ -38,30 +38,30 @@ gates that built it.
 
 ## File Naming
 
-Each slice lives as either:
+Each task lives as either:
 
 - a flat markdown file `{slug}.md` (default), or
 - a folder `{slug}/` containing `index.md` as the canonical entity file, when
-  the slice produces per-stage artifacts (transcripts, drill evidence, design
+  the task produces per-stage artifacts (transcripts, drill evidence, design
   notes) that belong alongside the tracker.
 
 Slugs are lowercase, hyphens, no spaces. Example: `plugin-pipe-unblock.md`.
 
 ## Schema
 
-Every slice file has YAML frontmatter. Fields are documented below; see
-**Slice Template** for a copy-paste starter.
+Every task file has YAML frontmatter. Fields are documented below; see
+**Task Template** for a copy-paste starter.
 
 ### Field Reference
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `id` | string | Unique identifier, SD-B32 (see ID Style) |
-| `title` | string | Human-readable slice name |
+| `title` | string | Human-readable task name |
 | `status` | enum | One of: backlog, ideation, implementation, validation, done |
-| `source` | string | Where this slice came from (plan sprint, retrospective, finding) |
+| `source` | string | Where this task came from (plan sprint, retrospective, finding) |
 | `started` | ISO 8601 | When active work began |
-| `completed` | ISO 8601 | When the slice reached terminal status |
+| `completed` | ISO 8601 | When the task reached terminal status |
 | `verdict` | enum | PASSED or REJECTED — set at validation |
 | `score` | number | Priority score, 0.0–1.0 (optional) |
 | `worktree` | string | Worktree path while a dispatched agent is active; sticky across non-terminal advancements, cleared at terminal merge |
@@ -88,25 +88,25 @@ id-style: sd-b32
 
 ### `backlog`
 
-A slice enters backlog as a seed from the sprint plan (or a finding promoted
-from triage). Ungated: the FO advances slices in sprint-plan order; CL
+A task enters backlog as a seed from the sprint plan (or a finding promoted
+from triage). Ungated: the FO advances tasks in sprint-plan order; CL
 reprioritizes conversationally.
 
-- **Inputs:** `docs/plan-agent-rail.md` sprint ordering; the slice's seed description.
+- **Inputs:** `docs/plan-agent-rail.md` sprint ordering; the task's seed description.
 - **Outputs:** a one-paragraph problem statement and the sprint it serves.
-- **Good:** the slice is the smallest unit that demos on its own; sprint-0 slices lead.
-- **Bad:** a slice that bundles two behaviors; a slice whose exit can't be demoed in the fresh zellij session.
+- **Good:** the task is the smallest unit that demos on its own; sprint-0 tasks lead.
+- **Bad:** a task that bundles two behaviors; a task whose exit can't be demoed in the fresh zellij session.
 
 ### `ideation`
 
-CL greenlit the slice; a worker designs it: problem, approach, acceptance
+CL greenlit the task; a worker designs it: problem, approach, acceptance
 criteria as entity-level end-state properties with `Verified by:` clauses, and
 a test plan matching the AC's level of abstraction.
 
-- **Inputs:** `docs/prd-agent-rail.md`, `docs/plan-agent-rail.md` (the decisions section is binding: binding-in-plugin, Go grout, two typed row kinds over pipe name `agent-event`, glob config), the landmine dossier woven through both, `SPEC.md` landmines, `docs/docking-approach.md` for the shipped container, `docs/review-findings-2026-07-07.md` for open findings that touch the slice's code region.
-- **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; ACs split into **offline** (agent-reproducible) and **interactive** (settled only by CL's live demo); the slice's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan — or the auditable negative `no spike needed: {the proven mechanisms it relies on}` on the record; when the slice changes user-visible behavior (keybinds, rows, layout), a concrete doc diff proposed in the body and reviewed at this gate.
-- **Good:** at least one AC measures the end value the slice exists for, against an independent baseline that can move the wrong way (a count, a timing, a behavior, resulting on-disk state) — a mechanism-only AC counts only when paired with the value-measuring AC it serves; every AC's expected value comes from outside the file under test; fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
-- **Bad:** an AC provable only by reviewing the entity's own prose; a string/substring/regex match over a file the implementer also writes (a tautology — the check polices its own author); a design that reaches beyond the slice's sprint exit criterion; inventing new mechanisms when the spike already proved one.
+- **Inputs:** `docs/prd-agent-rail.md`, `docs/plan-agent-rail.md` (the decisions section is binding: binding-in-plugin, Go grout, two typed row kinds over pipe name `agent-event`, glob config), the landmine dossier woven through both, `SPEC.md` landmines, `docs/docking-approach.md` for the shipped container, `docs/review-findings-2026-07-07.md` for open findings that touch the task's code region.
+- **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; ACs split into **offline** (agent-reproducible) and **interactive** (settled only by CL's live demo); the task's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan — or the auditable negative `no spike needed: {the proven mechanisms it relies on}` on the record; when the task changes user-visible behavior (keybinds, rows, layout), a concrete doc diff proposed in the body and reviewed at this gate.
+- **Good:** at least one AC measures the end value the task exists for, against an independent baseline that can move the wrong way (a count, a timing, a behavior, resulting on-disk state) — a mechanism-only AC counts only when paired with the value-measuring AC it serves; every AC's expected value comes from outside the file under test; fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
+- **Bad:** an AC provable only by reviewing the entity's own prose; a string/substring/regex match over a file the implementer also writes (a tautology — the check polices its own author); a design that reaches beyond the task's sprint exit criterion; inventing new mechanisms when the spike already proved one.
 
 ### `implementation`
 
@@ -116,7 +116,7 @@ strict TDD, one behavior per commit.
 - **Inputs:** the approved ideation body; the repo at the worktree branch.
 - **Outputs:** commits satisfying the AC (each: red test first, red output recorded in the stage report with the failure reason, minimal fix, suite green); a stage report with before/after test counts and the exact red output; for plugin work `cargo test` + `cargo check --tests` are the native verification (`./build.sh` only when a demo needs the wasm; native `cargo build` link-fails by design); for grout work `go test ./...` + `go vet`.
 - **Good:** the red test fails for the predicted reason before the fix; the smallest reasonable diff; surrounding style matched; new dump fixtures use zellij's real single-line shape.
-- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the slice has been handed to validation — confirm no pending round-trip before advancing.
+- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the task has been handed to validation — confirm no pending round-trip before advancing.
 
 ### `validation`
 
@@ -140,10 +140,10 @@ findings.
 
 ### `done`
 
-Terminal: the slice's worktree branch is merged directly into the working
+Terminal: the task's worktree branch is merged directly into the working
 branch by the merge ceremony (no PR — this repo has no remote by choice),
 `completed` set, `verdict: PASSED`, entity archived. Reached via real merge,
-not a manual flag flip. A slice whose only output is a decision with nothing
+not a manual flag flip. A task whose only output is a decision with nothing
 shipped does not terminalize as PASSED — the decision is recorded in the
 sprint plan instead.
 
@@ -157,26 +157,26 @@ sprint plan instead.
   `docs/agent-rail-dev/.spacedock-state/gates/` — globbable at
   `docs/agent-rail-dev/.spacedock-state/gates/*.decisions.jsonl`, versioned on
   the state branch, zero code-branch churn. Manual presentation (CL floats
-  `subspace-tui` in the fresh session) until the rail's sprint-2 slice
+  `subspace-tui` in the fresh session) until the rail's sprint-2 task
   automates discovery. The FO still owns the gate; subspace is the
   presentation and record surface.
 - **Test-first authoring, external-proof ACs, and detached adversarial audit**
   (the dev-shape proof disciplines) are mandatory here, folded into the
   implementation and validation stage definitions above.
 - **Dogfood posture.** The rail fails visible-not-blocking; the plugin
-  pipe-unblock slice leads sprint 0 because it is the one change protecting
+  pipe-unblock task leads sprint 0 because it is the one change protecting
   CL's real sessions. `install.sh` points the layout at the repo wasm in
   place — `./build.sh` hot-swaps what the next fresh session loads.
-- **Park-for-demo is correct posture.** When a slice's next step is CL's live
+- **Park-for-demo is correct posture.** When a task's next step is CL's live
   demo, parking it demo-ready and waiting for CL's window is right — not a
-  stall. The FO keeps other slices moving meanwhile.
+  stall. The FO keeps other tasks moving meanwhile.
 - **Live e2e before merge for output-shape changes.** A change to the
   plugin's pipe payloads, row/pane output shape, or launch wiring must be
   driven in a real zellij session before merge — offline tests prove the
   logic, never the surface.
 - **Spike discipline binds infra too.** Build/install/rollout plumbing
   changes (install.sh, layout wiring, grout deployment) get the same
-  smallest-end-to-end exercise first as feature slices.
+  smallest-end-to-end exercise first as feature tasks.
 - **Approval is explicit.** A live grant, a demo pass, or a merge go-ahead is
   never inferred from silence, from acknowledgment of a summary, or from a
   prior gate approval — only an explicit yes counts.
@@ -189,18 +189,18 @@ View the workflow overview:
 spacedock status --workflow-dir docs/agent-rail-dev
 ```
 
-Find dispatchable slices ready for their next stage:
+Find dispatchable tasks ready for their next stage:
 
 ```bash
 spacedock status --workflow-dir docs/agent-rail-dev --next
 ```
 
-## Slice Template
+## Task Template
 
 ```yaml
 ---
 id:
-title: Slice title here
+title: Task title here
 status: backlog
 source:
 started:
@@ -223,7 +223,7 @@ How the implementation will address the problem. Concrete enough that a worker c
 
 ## Acceptance criteria
 
-Each AC names a property of the finished slice (not a stage action) and how it is verified.
+Each AC names a property of the finished task (not a stage action) and how it is verified.
 
 **AC-1 — End-state property.**
 Verified by: grep / test name / file path / command a future reader can reproduce.
@@ -234,12 +234,12 @@ What tests verify the implementation, estimated cost, whether a live drill is ne
 
 ## Out of scope
 
-What this slice deliberately does not address.
+What this task deliberately does not address.
 ```
 
 ## Commit Discipline
 
 - Commit status changes at dispatch and merge boundaries
-- Commit slice body updates when substantive
+- Commit task body updates when substantive
 - Implementation commits land on the worktree branch; merge to the working
   branch happens directly at terminal (no PR)
