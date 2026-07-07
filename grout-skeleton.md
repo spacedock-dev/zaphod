@@ -281,3 +281,31 @@ and the session-get surface are spike/recon-proven. Surfaced two environment
 facts: PATH agentsview is v0.32.1 vs the plan-pinned v0.36.1 (surface used
 exists in both), and the safehouse sandbox blocks agents from running
 agentsview — fixture recording is a declared CL step.
+
+## Stage Report: implementation
+
+- DONE: Red-first evidence recorded for the five planned tests (TestRowProtocol, TestGateRowFromBrief, TestSessionRowFromFixture, TestEmitEndToEnd, TestPipeKillTimer)
+  Each red preceded its fix; passing count 0 → 6 (the clamp case lives in sibling TestRowProtocolSummaryClamp, matched by `-run TestRowProtocol`). Exact red outputs:
+  - TestRowProtocol: build fail `rows_test.go:46: undefined: sessionInfo` (+ BuildSessionRow/gateInfo/BuildGateRow) → green f6ec63d
+  - TestGateRowFromBrief: build fail `gate_test.go:15: undefined: briefPathForLog`, `undefined: GateFromLog` → green 2c1e5f2
+  - TestSessionRowFromFixture: build fail `agentsview_test.go:18: undefined: decodeSession` → green efdc72e
+  - TestEmitEndToEnd: build fail `emit_test.go:75: undefined: Config`, `undefined: run` → green 32df34e
+  - TestPipeKillTimer: predicted hang — run wedged in cmd.Run's stderr pipe copy against the never-exiting fake, `panic: test timed out after 15s`, `FAIL zaphod/grout 15.284s` → green f74dd75 (exec.CommandContext under PipeTimeout + WaitDelay 2s), now 2.1s elapsed, both rows attempted, children reaped (kill -0 ESRCH)
+- DONE: Hermetic suite green: go test ./... and go vet ./... in grout/ with no network, no real agentsview/zellij
+  With GOPROXY=off GOFLAGS=-mod=readonly: `ok zaphod/grout`, 6/6 pass, vet clean. Fakes are test-written sh scripts in t.TempDir(); nothing binary committed. gofmt clean; `go build` links.
+- DONE: Session fixture recorded binary-authentically and its provenance (version, recipe) noted in grout/README.md; AC-5 payload probe run or explicitly parked demo-ready with reason
+  Recorded off /opt/homebrew/bin/agentsview v0.36.1 (commit 4c4bb56): AGENTSVIEW_DATA_DIR=<tmp> CLAUDE_PROJECTS_DIR=<tmp>, synthetic 2-line session JSONL, `session sync`, `session get <id> --format json`. Recipe + provenance in grout/README.md (2f34b07, 13c4d1f). AC-5 parked demo-ready below.
+
+### AC-5 payload probe — parked demo-ready
+
+Reason: interactive-only. Receipt confirmation needs a live zellij session running the rail (`debug "1"` trace in `$TMPDIR/zellij-<uid>/zellij-log/zellij.log`, or the visible-toggle fallback); the agent shell has no tty or session and cannot observe the rail. The entity already schedules the probe to piggyback on the AC-4 live demo. Ready commands (inside the session; guard each with `timeout 10` until the pipe-unblock slice lands):
+
+    zellij pipe --name agent-event -- "$(python3 -c 'print("x"*4096)')"
+    zellij pipe --name agent-event -- "$(python3 -c 'print("x"*65536)')"
+    zellij pipe --name agent-event -- "$(python3 -c 'print("x"*262144)')"
+
+Fallback without the debug key: the same sizes on pipe name `toggle` — the rail visibly toggling proves the payload traversed. Record the measured ceiling (or "≥256 KiB — unbounded for our purposes") in this entity; a ceiling below ~1 KiB invalidates the protocol.
+
+### Summary
+
+Built the sprint-0 grout skeleton on branch spacedock-ensign/grout-skeleton (7 commits, 2f34b07..13c4d1f), strict red-first TDD, one behavior per commit: row protocol pinned to plan decision 3; brief derivation + frontmatter parse against the vendored playground pair; session decode off the recorded v0.36.1 fixture (termination_status → state, first_message → summary); end-to-end two-row emit on agent-event with no --plugin ever; and the 5s kill timer proving a wedged pipe cannot wedge grout. Environment notes: fixture recording auto-spawned an agentsview daemon (pid 29962) — stopped via `serve stop`, port 8080 verified free; ~/.agentsview untouched. Provenance nuance recorded in grout/README.md: the playground gate pair is a working-copy artifact of spacedock-subspace @ 9be5fbc (gitignored there as /playground*, not in that commit's tree); its shapes match the brief code at 9be5fbc.
