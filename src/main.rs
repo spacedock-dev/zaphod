@@ -505,12 +505,14 @@ impl Sidebar {
         let active_state = active_tab.and_then(|tab| self.tab_states.get(&tab));
         let active_swap_name = active_state.and_then(|state| state.swap_name.clone());
         let active_swap_dirty = active_state.is_some_and(|state| state.swap_dirty);
+        let active_floating_visible = active_state.is_some_and(|state| state.floating_visible);
         let action = decide_toggle(
             self.own_tab,
             self.own_floating,
             active_tab,
             active_swap_name.as_deref(),
             active_swap_dirty,
+            active_floating_visible,
             self.plugin_id,
             &self.instances,
         );
@@ -707,6 +709,7 @@ fn decide_toggle(
     active_tab: Option<usize>,
     active_swap_name: Option<&str>,
     active_swap_dirty: bool,
+    active_floating_visible: bool,
     own_pane_id: u32,
     instances: &[SidebarInstance],
 ) -> ToggleAction {
@@ -727,7 +730,14 @@ fn decide_toggle(
         // a foreign report. Rebuild the swap set instead, like a dirty tab.
         let foreign_swap =
             active_swap_name.is_some_and(|name| !matches!(name, "BASE" | "docked" | "undocked"));
-        if active_swap_dirty || foreign_swap {
+        if active_floating_visible {
+            // While the tab's floating panes are visible, swap_name and
+            // swap_dirty speak for the FLOATING layer (TabState) and a swap
+            // step would cycle that layer; the tiled dock state is
+            // unreadable. The press is dropped rather than parked — a parked
+            // press would collapse the dock whenever the floats next hide.
+            ToggleAction::Ignore
+        } else if active_swap_dirty || foreign_swap {
             ToggleAction::RegenerateSwaps {
                 target: if active_swap_name == Some("undocked") {
                     DockState::Docked
@@ -1828,7 +1838,7 @@ mod tests {
         // reported name avoids the position quirks of blind cycling around
         // BASE and the end of the list.
         let instances = [inst(7, 1, false)];
-        let steer = |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, false, 7, &instances);
+        let steer = |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, false, false, 7, &instances);
         assert_eq!(
             steer(Some("docked")),
             ToggleAction::SteerSwap { backwards: false }
@@ -1856,8 +1866,9 @@ mod tests {
         // anyway. Rebuild the swap set around the current arrangement
         // instead, exactly like a dirty tab.
         let instances = [inst(7, 1, false)];
-        let toggle =
-            |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, false, 7, &instances);
+        let toggle = |name: Option<&str>| {
+            decide_toggle(Some(1), false, Some(1), name, false, false, 7, &instances)
+        };
         assert_eq!(
             toggle(Some("vertical")),
             ToggleAction::RegenerateSwaps {
@@ -1873,12 +1884,29 @@ mod tests {
     }
 
     #[test]
+    fn toggle_is_ignored_while_floating_panes_are_visible() {
+        // While a tab's floating panes are visible, swap_name and swap_dirty
+        // speak for the FLOATING layer (TabState), whose birth entry is the
+        // allowlisted "BASE" — an immediate swap step would cycle the
+        // floating layer while the tiled dock state stays unreadable. The
+        // press is dropped, not parked: pending_steer_disposition likewise
+        // refuses to read the tiled outcome while floats are visible.
+        let instances = [inst(7, 1, false)];
+        let toggle = |name: Option<&str>, dirty: bool| {
+            decide_toggle(Some(1), false, Some(1), name, dirty, true, 7, &instances)
+        };
+        assert_eq!(toggle(Some("BASE"), false), ToggleAction::Ignore);
+        assert_eq!(toggle(Some("docked"), false), ToggleAction::Ignore);
+        assert_eq!(toggle(Some("docked"), true), ToggleAction::Ignore);
+    }
+
+    #[test]
     fn dirty_tab_regenerates_swaps_toward_the_other_state() {
         // A damaged tab (manual split/resize) would snap-fold to a stale
         // template on the next swap; instead the swap set is rebuilt around
         // the current arrangement and steered to the opposite state.
         let instances = [inst(7, 1, false)];
-        let regen = |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, true, 7, &instances);
+        let regen = |name: Option<&str>| decide_toggle(Some(1), false, Some(1), name, true, false, 7, &instances);
         assert_eq!(
             regen(Some("docked")),
             ToggleAction::RegenerateSwaps {
@@ -1903,7 +1931,7 @@ mod tests {
     fn defers_to_the_resident_instance_of_the_active_tab() {
         let instances = [inst(7, 1, false), inst(9, 3, false)];
         assert_eq!(
-            decide_toggle(Some(1), false, Some(3), None, false, 7, &instances),
+            decide_toggle(Some(1), false, Some(3), None, false, false, 7, &instances),
             ToggleAction::Ignore
         );
     }
@@ -1919,11 +1947,11 @@ mod tests {
         // redundant rail closes itself.
         let instances = [inst(7, 1, false), inst(9, 2, false)];
         assert_eq!(
-            decide_toggle(Some(1), false, Some(5), None, false, 7, &instances),
+            decide_toggle(Some(1), false, Some(5), None, false, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(2), false, Some(5), None, false, 9, &instances),
+            decide_toggle(Some(2), false, Some(5), None, false, false, 9, &instances),
             ToggleAction::Retrofit
         );
     }
@@ -1938,7 +1966,7 @@ mod tests {
         // when a lower-id instance lives elsewhere.
         let instances = [inst(14, 2, false), inst(16, 5, false)];
         assert_eq!(
-            decide_toggle(Some(5), false, Some(6), None, false, 16, &instances),
+            decide_toggle(Some(5), false, Some(6), None, false, false, 16, &instances),
             ToggleAction::Retrofit
         );
     }
@@ -1946,7 +1974,16 @@ mod tests {
     #[test]
     fn ignores_toggle_when_active_tab_is_unknown() {
         assert_eq!(
-            decide_toggle(Some(1), false, None, None, false, 7, &[inst(7, 1, false)]),
+            decide_toggle(
+                Some(1),
+                false,
+                None,
+                None,
+                false,
+                false,
+                7,
+                &[inst(7, 1, false)]
+            ),
             ToggleAction::Ignore
         );
     }
@@ -1958,7 +1995,7 @@ mod tests {
         // resident retrofits its own tab instead of dead-cycling.
         let instances = [inst(7, 1, true)];
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), None, false, 7, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, false, 7, &instances),
             ToggleAction::Retrofit
         );
     }
@@ -1970,11 +2007,11 @@ mod tests {
         // every toggle would fire another retrofit.
         let instances = [inst(7, 1, true), inst(9, 1, false)];
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), None, false, 7, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, false, 7, &instances),
             ToggleAction::Ignore
         );
         assert_eq!(
-            decide_toggle(Some(1), false, Some(1), Some("docked"), false, 9, &instances),
+            decide_toggle(Some(1), false, Some(1), Some("docked"), false, false, 9, &instances),
             ToggleAction::SteerSwap { backwards: false }
         );
     }
@@ -1985,11 +2022,11 @@ mod tests {
         // both fire the override.
         let instances = [inst(7, 1, true), inst(9, 1, true)];
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), None, false, 7, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(1), true, Some(1), None, false, 9, &instances),
+            decide_toggle(Some(1), true, Some(1), None, false, false, 9, &instances),
             ToggleAction::Ignore
         );
     }
@@ -2000,12 +2037,12 @@ mod tests {
         // resident acts, whether tiled or floating.
         let instances = [inst(7, 2, true), inst(9, 1, false)];
         assert_eq!(
-            decide_toggle(Some(2), true, Some(1), None, false, 7, &instances),
+            decide_toggle(Some(2), true, Some(1), None, false, false, 7, &instances),
             ToggleAction::Ignore
         );
         let instances = [inst(7, 2, true), inst(9, 1, true)];
         assert_eq!(
-            decide_toggle(Some(2), true, Some(1), None, false, 7, &instances),
+            decide_toggle(Some(2), true, Some(1), None, false, false, 7, &instances),
             ToggleAction::Ignore
         );
     }
@@ -2016,11 +2053,11 @@ mod tests {
         // or not, regardless of pane id.
         let instances = [inst(7, 2, true), inst(9, 3, false)];
         assert_eq!(
-            decide_toggle(Some(2), true, Some(5), None, false, 7, &instances),
+            decide_toggle(Some(2), true, Some(5), None, false, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(3), false, Some(5), None, false, 9, &instances),
+            decide_toggle(Some(3), false, Some(5), None, false, false, 9, &instances),
             ToggleAction::Retrofit
         );
     }
@@ -2040,19 +2077,28 @@ mod tests {
         // would overshoot. So every swap-name reads Retrofit now.
         let instances = [inst(7, 2, false)];
         assert_eq!(
-            decide_toggle(Some(2), false, Some(5), Some("docked"), false, 7, &instances),
+            decide_toggle(Some(2), false, Some(5), Some("docked"), false, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(2), false, Some(5), Some("undocked"), false, 7, &instances),
+            decide_toggle(Some(2), false, Some(5), Some("undocked"), false, false, 7, &instances),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(2), false, Some(5), Some("BASE"), false, 7, &instances),
+            decide_toggle(
+                Some(2),
+                false,
+                Some(5),
+                Some("BASE"),
+                false,
+                false,
+                7,
+                &instances
+            ),
             ToggleAction::Retrofit
         );
         assert_eq!(
-            decide_toggle(Some(2), false, Some(5), None, false, 7, &instances),
+            decide_toggle(Some(2), false, Some(5), None, false, false, 7, &instances),
             ToggleAction::Retrofit
         );
     }
