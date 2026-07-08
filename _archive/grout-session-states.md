@@ -1,11 +1,14 @@
 ---
 title: Grout session-state mapping + default-path fix
-status: validation
+status: done
 source: plan sprint 1 + sprint-0 gate findings
 score: 0.9
 id: kawd2h37e2rhn9t9ynf61ppe
 started: 2026-07-07T23:00:49Z
 worktree: .worktrees/spacedock-ensign-grout-session-states
+verdict: passed
+completed: 2026-07-08T09:02:13Z
+archived: 2026-07-08T09:02:13Z
 ---
 
 ## Problem
