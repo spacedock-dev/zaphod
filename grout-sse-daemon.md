@@ -470,6 +470,58 @@ from CL's stated requirements once corrected):
 Routed to implementation fresh (no addressable worker handle from this
 session for the prior implementation/validation ensigns).
 
+**Cycle 2 (2026-07-08) — REJECTED at validation, routed to implementation.**
+
+Cycle 2's fix (drop `--include-automated --include-children` from grout's
+`listSessions` argv, trusting agentsview's own default to exclude subagents)
+does not work. Confirmed live: CL left `grout watch` running and observed
+more Claude subagent sessions accumulating in the rail over time, not fewer.
+Root-caused directly against real `agentsview session list --json` output
+(200 real sessions on CL's machine, not a fixture):
+
+- `is_automated` is `false` for every single session in the dataset,
+  including all 59 sessions that are unambiguously Task-tool-spawned
+  subagents (every dispatched ensign, plus every nested `Explore`/refutation
+  sub-agent those ensigns themselves spawned). Whatever `is_automated`/
+  `--include-automated`/`--include-children` actually mean in agentsview's
+  model, it is not "spawned via the Claude Code Task tool" — dropping those
+  flags could never have filtered these out, confirming cycle 2's fix
+  addressed the wrong signal.
+- The real, exact, 100%-reliable signal (zero false positives, zero false
+  negatives across all 200 sessions): the session **`id`** field. Every
+  Task-tool-spawned subagent's id starts with the literal prefix `agent-`
+  (e.g. `agent-aspacedock-ensign-pzw1ctjmej-validation-8713cbb7da09cfc1`,
+  `agent-a53bbd2c12c218b7a`). Every genuine top-level session has a
+  UUID-format id (`38b9fa21-6d78-42cf-b0a3-49407ce290e0`) or a
+  `codex:`-prefixed id for Codex sessions. No non-subagent session in the
+  200-session sample has an `agent-`-prefixed id.
+
+**Fix for cycle 3:** filter sessions whose `id` starts with `agent-` out of
+what grout emits (or what the plugin renders — implementation's call which
+layer, consistent with cycle 1's framing), regardless of the
+`--include-automated`/`--include-children` flags (which can stay dropped or
+be restored; they are orthogonal to this filter and don't need to gate on
+each other). Re-verify against real, live `agentsview` data — not only a
+synthetic/fixture session — since cycle 2's fixture-based verification
+attempt was exactly what missed this (the validation ensign's own synthetic
+subagent fixture wasn't recognized as a child session either, which in
+hindsight was itself a clue: agentsview's own classifiers were never going
+to be the answer).
+
+**AC revisions for cycle 3:**
+- **AC-6**'s baseline restates again: count parity against sessions (a)
+  whose cwd falls under the demo tab's own project scope and (b) whose `id`
+  does not start with `agent-` — not "excluding automated/child sessions"
+  (that phrasing is now known to be the wrong mechanism; restate in terms of
+  the id-prefix filter).
+- Add or extend the AC-4 same-tab test (or a new AC) asserting a session
+  with an `agent-`-prefixed id is filtered regardless of cwd match — a
+  subagent whose cwd happens to match the tab's own project must still not
+  render.
+
+Routed to implementation fresh (no addressable worker handle from this
+session for the prior implementation/validation ensigns).
+
 ## Stage Report: implementation (cycle 2)
 
 - DONE: Revert/replace cross-tab binding: bind_session (and terminal_panes_all_tabs's call sites) must only match sessions against panes in the sidebar's own tab; drop the "own-tab-first, then a lone cross-tab match" fallback and the cross-tab FocusPane click entirely, per Feedback Cycles cycle 1.
