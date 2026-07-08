@@ -1,13 +1,13 @@
 ---
 id: 7vdbkanwev18zxfkpgkvhvja
 title: Agent kind/state classification regresses to Unknown on partial poll failure, masking working/blocked signals
-status: ideation
+status: implementation
 source: finding — live session dogfooding, 2026-07-08
 started: 2026-07-08T08:12:13Z
 completed:
 verdict:
 score: 0.75
-worktree:
+worktree: .worktrees/spacedock-ensign-agent-classification-regresses-on-partial-failure
 issue:
 pr:
 mod-block:
