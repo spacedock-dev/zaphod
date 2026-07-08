@@ -1,7 +1,7 @@
 ---
 id: 7vdbkanwev18zxfkpgkvhvja
 title: Agent kind/state classification regresses to Unknown on partial poll failure, masking working/blocked signals
-status: implementation
+status: validation
 source: finding — live session dogfooding, 2026-07-08
 started: 2026-07-08T08:12:13Z
 completed:
