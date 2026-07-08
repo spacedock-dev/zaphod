@@ -429,3 +429,16 @@ is ready to ship independently of that investigation.
 ### Summary
 
 Two of three original ideation questions are resolved by direct investigation rather than further design: the pane-split is inherent to the only validated dock mechanism (override_layout retrofit) and should be documented, not re-engineered; the "new tab" sighting is refuted as an actual tab and most likely explained by a separate, serious floating-instance leak found live in CL's WORK session (62 stray panes). A new live finding arrived mid-pass from team-lead — a dirty-tab regenerate relocating the tab-bar pane into the content region — which was folded in as AC-4 but could not be reproduced in a clean session in the time available, so it remains open pending a concurrency-focused repro. AC-1/AC-2/AC-3 are rewritten to verifiable, non-tautological checks and the concrete doc diff for them is ready for review at this gate; AC-4 is not ready and should not block shipping the AC-1/AC-2/AC-3 doc diff, but should stay open as a tracked item (possibly merged with the floating-leak follow-on) rather than closed out with this entity.
+
+## Stage Report: implementation
+
+- DONE: Apply the proposed doc diff to docs/docking-approach.md:266-270 (the pane-count exception paragraph) exactly as drafted in the ideation body.
+  Applied verbatim: replaced the unconditional invariant sentence and inserted the "Pane-count exception" paragraph after the docked/undocked bullets, before the `hide_self`/`show_self` line. Diff matches the drafted text character-for-character (verified with `git diff`).
+- DONE: Apply the proposed doc diff to SPEC.md landmine #16 and the "If building v2 from scratch" item 3, exactly as drafted in the ideation body.
+  Both sites replaced verbatim per the drafted diff. Cross-checked citations: `src/main.rs:1512-1517` matches the `tab_kdl` closure building `pane split_direction="vertical" { rail; main }` inside `split_preserving_layout_kdl`; SPEC landmine #35 / fidelity-ceiling citation confirmed present at `docs/docking-approach.md:674-702` and `SPEC.md:366`.
+- DONE: Confirm no code changes are needed (AC-1/AC-2/AC-3 are doc-only per the ideation's own conclusion) and record that confirmation in the stage report rather than silently assuming it.
+  Confirmed: only `docs/docking-approach.md` and `SPEC.md` were touched, no `src/` changes. Ran `cargo check --tests` (clean, `Finished dev profile` in 1m08s) and `cargo test` (130 passed; 0 failed; 0 ignored) on the worktree after the doc edit — suite is unaffected, consistent with the ideation's conclusion that AC-1/AC-2/AC-3 need no new test beyond what already exists (the AC-1 KDL fixture is named in Test plan as future work, not part of this doc-only stage). AC-4 remains explicitly out of this stage's scope (open, per entity body).
+
+### Summary
+
+Applied both doc diffs from the ideation body verbatim to `docs/docking-approach.md` (pane-count exception paragraph) and `SPEC.md` (landmine #16, "If building v2 from scratch" item 3), committed to the worktree branch as `baff70e`. Verified the diffs' code citations still hold and ran the full native test suite (130/130 passing, no code changes) to confirm this stage is doc-only as the ideation concluded. AC-4 stays open and untouched, as scoped.
