@@ -46,6 +46,35 @@ func TestMapSessionState(t *testing.T) {
 	}
 }
 
+func TestLastActivityCoalesces(t *testing.T) {
+	rfc := func(s string) time.Time {
+		t.Helper()
+		v, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			t.Fatalf("bad fixture time %q: %v", s, err)
+		}
+		return v
+	}
+	cases := []struct {
+		name string
+		si   sessionInfo
+		want time.Time
+	}{
+		{"ended_at wins", sessionInfo{EndedAt: "2026-07-07T05:00:05Z", StartedAt: "2026-07-07T04:00:00Z", CreatedAt: "2026-07-07T03:00:00Z"}, rfc("2026-07-07T05:00:05Z")},
+		{"started_at when ended absent", sessionInfo{StartedAt: "2026-07-07T05:00:00Z", CreatedAt: "2026-07-07T03:00:00Z"}, rfc("2026-07-07T05:00:00Z")},
+		{"created_at when others absent", sessionInfo{CreatedAt: "2026-07-07T05:34:59.331Z"}, rfc("2026-07-07T05:34:59.331Z")},
+		{"all absent -> zero time", sessionInfo{}, time.Time{}},
+		{"chosen field unparseable -> zero time", sessionInfo{EndedAt: "not-a-time"}, time.Time{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := lastActivity(tc.si); !got.Equal(tc.want) {
+				t.Errorf("lastActivity(%+v) = %v, want %v", tc.si, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMapSessionStateZeroTimeIsInfiniteAge(t *testing.T) {
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 	// An unparseable/absent timestamp arrives as the zero time: effectively
