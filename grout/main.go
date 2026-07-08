@@ -12,8 +12,8 @@ import (
 
 type Config struct {
 	AgentsviewBin     string        // "agentsview"
-	SessionID         string        // default demo session; argv[1] overrides
-	GateLog           string        // default grout/testdata/playground-gate.decisions.jsonl; argv[2] overrides
+	SessionID         string        // required argv[1]
+	GateLog           string        // required argv[2]
 	ZellijBin         string        // "zellij"
 	ZellijSession     string        // "" = inherit env; non-empty sets ZELLIJ_SESSION_NAME on the child
 	PipeName          string        // "agent-event" — protocol constant
@@ -21,11 +21,12 @@ type Config struct {
 	SummaryClampBytes int           // 512
 }
 
+// defaultConfig carries only cwd-independent knobs. SessionID and GateLog have
+// no default: a demo session id exists only in one machine's DB and a relative
+// gate-log path resolves against the cwd, so both must come from argv.
 func defaultConfig() Config {
 	return Config{
 		AgentsviewBin:     "agentsview",
-		SessionID:         "31dbb8ee-1d55-40ad-aa71-66c58790b708",
-		GateLog:           "grout/testdata/playground-gate.decisions.jsonl",
 		ZellijBin:         "zellij",
 		ZellijSession:     "",
 		PipeName:          "agent-event",
@@ -66,13 +67,13 @@ func run(cfg Config, stderr io.Writer) error {
 }
 
 func main() {
+	if len(os.Args) < 3 {
+		fmt.Fprintln(os.Stderr, "usage: grout <session-id> <gate-log>")
+		os.Exit(2)
+	}
 	cfg := defaultConfig()
-	if len(os.Args) > 1 {
-		cfg.SessionID = os.Args[1]
-	}
-	if len(os.Args) > 2 {
-		cfg.GateLog = os.Args[2]
-	}
+	cfg.SessionID = os.Args[1]
+	cfg.GateLog = os.Args[2]
 	if err := run(cfg, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

@@ -11,9 +11,10 @@ session, read one gate log, emit two rows, exit.
 
 Run from the repo root, inside the target zellij session:
 
-    go run ./grout [session-id [gate-log]]
+    go run ./grout <session-id> <gate-log>
 
-Both positionals optional; defaults live in `main.go` (`defaultConfig`).
+Both positionals required — no default session or gate log, so runs
+behave identically from any cwd; missing arguments exit 2 with usage.
 One JSON object per line, one line per `zellij pipe` invocation, pipe name
 `agent-event`:
 
