@@ -22,9 +22,11 @@ Long-running `grout watch`: attach to (or start) the agentsview daemon,
 consume SSE `data_changed` from `/api/v1/events`, re-list the active session
 window via `session list --server`, and emit session rows on `agent-event` —
 the skeleton's row protocol, builders, and kill-timer emit path unchanged.
-Plugin side: session→pane binding widens from own-tab to all tabs, and a
-bound click switches tabs via `focus_terminal_pane`'s documented
-tab-switching semantics.
+Plugin side: session→pane binding and rendering both stay scoped to the
+rail's own tab — CL structures projects by tab, so a session belongs to
+whichever tab's pane cwd it matches, and one matching no pane in this tab
+does not render as a row here at all. (Cycle 1 shipped cross-tab binding
+and a cross-tab click; cycle 2 reverted both per CL's feedback below.)
 
 ### Mechanism facts pinned at ideation (probe on the record, 2026-07-08)
 
@@ -73,9 +75,10 @@ sandbox blocks the real data dirs but the binary runs):
 
 No spike needed beyond the above: transport (sprint-0 spike + shipped
 skeleton), row protocol + kill-timer emit (shipped, validated), brief shapes
-(subspace recon @9be5fbc). The remaining unproven residue is live-only —
-foreign-tab `focus_terminal_pane`/`get_pane_cwd` behavior in a real session —
-and is the first item in the test plan.
+(subspace recon @9be5fbc). (Cycle 1 feedback dropped cross-tab binding and
+click entirely — CL wants projects scoped strictly by tab — so the
+foreign-tab `focus_terminal_pane`/`get_pane_cwd` probe above is retained as
+historical record only; it no longer gates any acceptance criterion.)
 
 ### Grout: watch mode
 
@@ -95,12 +98,15 @@ new subcommand; the one-shot invocation and its tests stay untouched.
   refresh costs ~60 ms — cheaper than scope bookkeeping), and on a `-tick`
   wall-clock timer (60s default) — required because a session leaving the
   active window emits no event. Refresh = `session list --server <URL>
-  --json --include-one-shot --include-automated --include-children
-  --active-since <now − since>` (shelling out to the agentsview binary — the
-  enrichment surface the plan pins, since events carry no content), decode
-  `{"sessions":[…]}`, build one row per entry via the existing
-  `BuildSessionRow`, emit each via the existing `EmitRow` (5s kill timer,
-  sequential, never `--plugin` — all shipped semantics).
+  --json --include-one-shot --active-since <now − since>` (shelling out to
+  the agentsview binary — the enrichment surface the plan pins, since events
+  carry no content; automated and child/subagent sessions stay excluded —
+  agentsview's default — so no subagent session ever reaches a row; cycle 2
+  dropped `--include-automated --include-children` per CL's feedback that
+  subagents must never be listed), decode `{"sessions":[…]}`, build one row
+  per entry via the existing `BuildSessionRow`, emit each via the existing
+  `EmitRow` (5s kill timer, sequential, never `--plugin` — all shipped
+  semantics).
 - **Emit policy: full re-emit per refresh.** Every refresh emits every
   in-window session row with fresh `ts`. The plugin upserts idempotently and
   re-renders only on change; the re-stamped `ts` is the seam the
@@ -126,28 +132,33 @@ new subcommand; the one-shot invocation and its tests stay untouched.
   parseSSEEvents), `list.go` (session-list exec + decode). Pure decision
   fns carry the decide_toggle test discipline.
 
-### Plugin: cross-tab binding + click
+### Plugin: same-tab binding + tab-scoped rows
 
-- **Binding domain widens to all tabs' terminal panes** (same pane filter as
-  `rows_for_own_tab`: !is_plugin, is_selectable, !is_suppressed — applied
-  per tab across the manifest) via a new pure sibling
-  `terminal_panes_all_tabs(manifest)`; `pane_cwds` polling extends over that
-  set under the existing wedge budget (one wedge-classified call aborts the
-  pass) and per-pane backoff — no new polling mechanism, a bigger set
-  (own-tab ~5 → all-tab ~20 on CL's layout).
-- **Bind rule (extends `bind_session`):** exactly one cwd match in the
-  rail's own tab → bind there (preserves today's behavior — the operator is
-  already in front of it); else exactly one match across all tabs → bind
-  cross-tab; else unbound (two same-cwd panes in different tabs render
-  unbound — honest, never guessed; flap smoothing is hj's).
-- **Click (extends `decide_rail_click`):** a bound row click stays
+CL's cycle-1 feedback: "I want the sidebar's agent/pane/gate bound to panes
+of the same tab, so that I can structure projects by tab." Cycle 2 reverted
+cross-tab binding/click entirely rather than adjusting it.
+
+- **Binding domain stays the rail's own tab** — the shipped
+  `rows_for_own_tab` pane set (!is_plugin, is_selectable, !is_suppressed):
+  `bind_session` never looks at another tab's panes. The cycle-1
+  `terminal_panes_all_tabs(manifest)` widening, its `TabPane` type, and the
+  foreign-tab cwd-poll extension are removed — not merely unused.
+- **Bind rule (`bind_session`):** exactly one own-tab cwd match → bind
+  there; zero or two-plus matches → unbound (never guessed). No fallback to
+  any other tab.
+- **Scope filter (new, `sessions_in_own_tab`):** a session whose cwd matches
+  no own-tab pane is filtered out of the AGENTS section entirely, before
+  both render and click decisions — it does not appear as an unbound row,
+  it does not appear at all. This is a strictly looser test than binding:
+  "in scope" needs at least one own-tab cwd match; "bound" needs exactly
+  one, so an in-scope-but-ambiguous session still renders, unbound.
+- **Click (`decide_rail_click`):** a bound row click stays
   `ClickAction::FocusPane(id)` → `focus_terminal_pane(id, false, false)`,
-  which per the 0.44.1 contract switches to the pane's tab. If the live
-  check refutes the view-switch, the fallback is `go_to_tab(tab)` first —
-  the bind set carries the tab index. Nav-mode exit on click (F8 fix)
-  already shipped.
-- Rendering unchanged: bound/unbound marker as shipped; state markers are
-  ka's.
+  always within the rail's own tab. There is no cross-tab click and no
+  `go_to_tab` fallback — that mechanism is dropped along with the binding
+  it served. Nav-mode exit on click (F8 fix) already shipped.
+- Rendering unchanged otherwise: bound/unbound marker as shipped; state
+  markers are ka's.
 
 ### Sibling seams (explicit)
 
@@ -161,19 +172,21 @@ new subcommand; the one-shot invocation and its tests stay untouched.
   which expiry is a pure function of `ts`. Until hj lands, an ended session
   keeps its last row (stale-not-removed) — acceptable interim dogfood.
 
-### Doc diff (proposed)
+### Doc diff (applied, revised cycle 2)
 
-README.md, the Agent & gate rows bullet — replace the first sentence:
+README.md, the Agent & gate rows bullet:
 
     - **Agent & gate rows**: a companion `grout watch` daemon streams
       `agent-event` rows into the rail — every agent session active in the
-      last 30 minutes appears with its state, updates as agentsview sees new
-      activity (≈10 s coalescing), and stops refreshing once it leaves the
-      window (visible row expiry lands with the row-lifecycle task). Click a
-      session row to focus its cwd-bound pane — switching tabs when the pane
-      lives elsewhere (unbound is shown, never guessed); click a gate row to
-      float `subspace-tui` on the gate's artifact with `--log` pointed at
-      its decision log. Requires the `RunCommands` permission (prompted once)
+      last 30 minutes and belonging to the tab's own project appears with its
+      state, updates as agentsview sees new activity (≈10 s coalescing), and
+      stops refreshing once it leaves the window (visible row expiry lands
+      with the row-lifecycle task). Binding never crosses tabs: a session
+      outside the tab's own project scope, or a subagent/automated session,
+      never appears as a row in any tab. Click a session row to focus its
+      cwd-bound pane; click a gate row to float `subspace-tui` on the gate's
+      artifact with `--log` pointed at its decision log. Requires the
+      `RunCommands` permission (prompted once)
 
 grout/README.md — reword the skeleton framing to cover both modes and add:
 
@@ -185,11 +198,18 @@ grout/README.md — reword the skeleton framing to cover both modes and add:
     if none answers), consumes `data_changed` from `/api/v1/events`, and on
     each event — plus every `-tick` — re-lists sessions active in the last
     `-since` via `session list --server … --include-one-shot
-    --include-automated --include-children --active-since …`, emitting one
-    session row per zellij pipe with fresh `ts`. Reconnects with backoff on
-    stream loss (90 s of silence forces it). One refresh in flight at a
-    time; a wedged pipe costs ≤5 s per row (kill timer) and never wedges
-    grout. Ctrl-C exits cleanly. Grout never stops the shared daemon.
+    --active-since …`, emitting one session row per zellij pipe with fresh
+    `ts`. Automated and child (subagent) sessions stay excluded —
+    agentsview's default — so no subagent ever reaches a row; one-shot
+    sessions stay included as a distinct top-level invocation. Reconnects
+    with backoff on stream loss (90 s of silence forces it). One refresh in
+    flight at a time; a wedged pipe costs ≤5 s per row (kill timer) and
+    never wedges grout. Ctrl-C exits cleanly. Grout never stops the shared
+    daemon.
+
+(Cycle 1 proposed and applied a cross-tab-binding version of the README
+bullet, with `--include-automated --include-children` on the list command;
+cycle 2 replaced both with the text above per CL's feedback below.)
 
 ## Acceptance criteria
 
@@ -223,14 +243,16 @@ during a stuck refresh coalesces to exactly one follow-up refresh, and
 SIGTERM ends the process within 10s leaving no children.
 Verified by: `cd grout && go test -run TestWatchWedgedPipe ./...`
 
-**AC-4 — Cross-tab bind and click decisions.** Over a synthetic multi-tab
-manifest: a unique own-tab cwd match binds to the own-tab pane even when a
-foreign tab also matches; own-tab zero + exactly one foreign match binds
-cross-tab and the click decision is FocusPane(that pane id); duplicate
-matches anywhere → unbound with a dead click. Expected pane ids come from
-the constructed manifest fixture.
-Verified by: `cargo test bind_cross_tab` (full suite:
-`cargo test && cargo check --tests`)
+**AC-4 — Same-tab-only bind decisions; out-of-scope sessions never render.**
+A session whose cwd matches no pane in the rail's own tab is out of scope:
+it does not bind — even when a foreign tab's pane shares the cwd, and even
+though cycle 1's design would have bound it cross-tab — and it is filtered
+out of the AGENTS section entirely, not merely rendered unbound. Zero
+cross-tab rows and zero cross-tab clicks exist anywhere in the fixture. A
+unique own-tab cwd match still binds and its click decides
+`FocusPane(that pane id)`; two own-tab panes sharing a cwd keep the session
+in scope but unbound (dead click).
+Verified by: `cargo test -- bind_never_crosses_tabs sessions_outside_own_tab_scope_are_filtered_entirely out_of_scope_sessions_do_not_occupy_a_click_line` (full suite: `cargo test && cargo check --tests`)
 
 **AC-5 — One-shot mode regression-free.** The existing grout suite passes
 unchanged under GOPROXY=off — the watch addition leaves the skeleton's
@@ -240,21 +262,28 @@ Verified by: `cd grout && go test ./... && go vet ./...`
 Interactive (settled only by CL's live demo):
 
 **AC-6 — Value: the rail fills and stays true without CL running anything,
-against an independent baseline.** In CL's fresh zellij session, one
-`grout watch` start fills AGENTS within 30s with the same session count
-`agentsview session list --include-one-shot --include-automated
---include-children --active-since <horizon> --json` reports at that moment
-(count parity — the baseline moves the wrong way if grout drops or ghosts
-sessions); a brand-new Claude session started in another tab appears ≤30s
-after its first message with no grout interaction (10s coalesce + refresh
-headroom over the probe's ≤12s).
-Verified by: demo script steps including the count-parity check.
+against an independent baseline scoped to the tab's own project.** In CL's
+fresh zellij session, one `grout watch` start fills the demo tab's AGENTS
+section within 30s with the same session count that `agentsview session
+list --include-one-shot --active-since <horizon> --json` reports, filtered
+to sessions whose cwd matches one of the demo tab's own pane cwds
+(automated/child sessions are excluded from both sides by omitting
+`--include-automated --include-children` — agentsview's default, so a
+subagent can never inflate either count); count parity — the baseline moves
+the wrong way if grout drops, ghosts, wrongly includes an out-of-scope
+session, or wrongly includes a subagent session. A brand-new Claude session
+started in another tab's project does not appear in the demo tab at all; one
+started in the demo tab's own project appears ≤30s after its first message
+with no grout interaction (10s coalesce + refresh headroom over the probe's
+≤12s).
+Verified by: demo script steps including the scoped count-parity check.
 
-**AC-7 — Cross-tab click lands the operator on the agent.** Clicking a
-session row whose bound pane lives in another tab switches the view to that
-tab with that pane focused (the 0.44.1 doc contract observed live;
-refutation → go_to_tab fallback, back through implementation).
-Verified by: demo script; also test-plan item 1, the first live check.
+**AC-7 — Superseded by AC-4.** Cross-tab click is out of scope: binding and
+rendering never cross tabs (see AC-4). There is no cross-tab
+`focus_terminal_pane` behavior left to confirm live — the out-of-scope-row
+assertion is AC-4's offline, agent-reproducible test, not a demo-gated live
+check. Do not re-add a cross-tab-click AC.
+Verified by: n/a — folded into AC-4.
 
 **AC-8 — Dogfood exit: alt-tab scanning replaced.** After a real dogfood
 window (a working day with ≥2 concurrent workflows), CL confirms at the gate
@@ -265,16 +294,7 @@ Verified by: CL's verdict at the validation gate.
 
 ## Test plan
 
-1. **FIRST — cross-tab live check (minutes, piggybacks on any session):**
-   two tabs, a terminal pane in tab 2 with a unique cwd, rail visible in
-   tab 1; from tab 1 click that session's bound row (or drive
-   `focus_terminal_pane` from a scratch keybind pre-wiring); expect the view
-   to land on tab 2 with the pane focused, and the bound marker to appear
-   for the foreign-tab session (proves foreign-tab `get_pane_cwd` reads).
-   Refutes-or-confirms the one remaining unproven mechanism (AC-7); on
-   refute, fall back to go_to_tab+focus — an implementation-level change
-   only, the bind set already carries the tab.
-2. **SSE + enrichment — already proven at ideation** (probe on the record
+1. **SSE + enrichment — already proven at ideation** (probe on the record
    above): daemon start/status/stop, `/api/v1/events` data_changed on a
    watched-file write (≤12s), heartbeat frames, list/get `--server`
    enrichment (~60ms), server-side `--active-since`. Re-runnable recipe:
@@ -282,23 +302,29 @@ Verified by: CL's verdict at the validation gate.
    at a scratch dir), `curl -N` the events URL, write a synthetic session
    JSONL under `<projects>/<munged-cwd>/<uuid>.jsonl`, `session list
    --server`.
-3. **Offline TDD suite** (red-first per the implementation stage):
+2. **Offline TDD suite** (red-first per the implementation stage):
    TestParseSSEEvents (the probe's recorded frames: data_changed +
    heartbeat), TestWatchSessionsFlow (AC-1), TestWatchAutoStart +
    TestWatchReconnect (AC-2), TestWatchWedgedPipe (AC-3), cargo
-   bind_cross_tab + click-decision cases (AC-4). Fakes: httptest SSE server
-   (loopback only), fake agentsview/zellij scripts in t.TempDir() — nothing
-   binary committed.
-4. **Hermeticity:** `go test ./... && go vet ./...` under GOPROXY=off — no
+   `bind_never_crosses_tabs` + `sessions_outside_own_tab_scope_are_filtered_entirely`
+   + `out_of_scope_sessions_do_not_occupy_a_click_line` (AC-4). Fakes:
+   httptest SSE server (loopback only), fake agentsview/zellij scripts in
+   t.TempDir() — nothing binary committed.
+3. **Hermeticity:** `go test ./... && go vet ./...` under GOPROXY=off — no
    real agentsview/zellij/daemon; the only sockets are the tests' own
    loopback httptest listeners.
-5. **Live demo (validation gate):** spot-check first (test-plan item 1's
-   click check plus one `zellij pipe --name agent-event -- ping`), then
-   AC-6 fill/parity/appear, AC-7 click, and the dogfood window for AC-8.
+4. **Live demo (validation gate):** the scoped AC-6 fill/parity/appear check
+   and the AC-8 dogfood window. (Cycle 1's cross-tab click live check —
+   formerly item 1 here, gating the now-superseded AC-7 — no longer
+   applies: there is no cross-tab mechanism left to confirm live.)
    Demo script prepared at validation per workflow rules.
 
 ## Out of scope
 
+- Cross-tab session binding and cross-tab click (dropped per cycle 1
+  feedback — CL wants projects scoped strictly by tab); `go_to_tab` and
+  foreign-tab `focus_terminal_pane`/`get_pane_cwd` are not used anywhere in
+  this task.
 - Gate glob discovery, folding via the subspace binary, parked/defer rows
   (sprint 2) — watch mode's `-gate-log` stays the skeleton's single-log
   emit.
@@ -443,3 +469,31 @@ from CL's stated requirements once corrected):
 
 Routed to implementation fresh (no addressable worker handle from this
 session for the prior implementation/validation ensigns).
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Revert/replace cross-tab binding: bind_session (and terminal_panes_all_tabs's call sites) must only match sessions against panes in the sidebar's own tab; drop the "own-tab-first, then a lone cross-tab match" fallback and the cross-tab FocusPane click entirely, per Feedback Cycles cycle 1.
+  Commit 2a7b8c6. Red: rewrote the bind_session/decide_rail_click test call sites to the 3-arg/5-arg (no all_panes) shape while the source still had the 4-/6-arg cross-tab signature — `error[E0061]: this function takes 4 arguments but 3 arguments were supplied` (bind_session) across ~6 call sites. Green after reverting bind_session/decide_rail_click to own-tab-only, deleting TabPane/terminal_panes_all_tabs/all_tab_panes and the foreign-tab cwd-poll extension in refresh_statuses. New test `bind_never_crosses_tabs` pins a lone foreign-tab cwd match staying unbound with a dead click.
+- DONE: Filter sessions outside a tab's own project scope (cwd not matching one of that tab's own pane cwds) out of the emitted/rendered rows entirely for that tab -- not merely labeled unbound -- and exclude automated/child (subagent) sessions from what grout emits or the plugin renders, in every tab.
+  Two commits. Plugin (3d5abbd): red — `error[E0425]: cannot find function 'sessions_in_own_tab'` for two new tests; green after adding `sessions_in_own_tab` (in-scope test: any own-tab cwd match, looser than bind_session's exactly-one) and wiring it into render() and handle_click() ahead of section_layout/decide_rail_click. Grout (23ccd7d): red — `TestListSessionsArgv` asserted the argv without `--include-automated --include-children` against the still-flagged `listSessions`, failing on the recorded argv mismatch; green after dropping both flags (agentsview's own default already excludes automated/child sessions; `--include-one-shot` stays since a one-shot run is a distinct top-level session, not a subagent).
+- DONE: Update AC-4 (same-tab-only bind decisions, asserting zero cross-tab rows/clicks), AC-6 (baseline restated for tab-scoped, non-subagent count parity), and AC-7 (drop cross-tab click, replace with an assertion that out-of-scope sessions never render as rows) to match, with red-test-first evidence for each changed behavior.
+  AC-4/6/7 rewritten in this entity's Acceptance criteria section above (AC-7 marked superseded by AC-4, kept as a numbered placeholder per feedback rather than renumbering AC-8). Test plan's former item 1 (the cross-tab live check gating the old AC-7) removed and the list renumbered; the "Plugin: cross-tab binding + click" and "Doc diff" design sections rewritten to match the shipped same-tab design; README.md and grout/README.md updated (commit 8b04a4f) since they still described cross-tab switching and the automated/children flags. Red/green evidence for the underlying behavior changes is the two items above; this item is documentation, not a new test.
+
+### Summary
+
+Reverted cycle 1's cross-tab session binding entirely per CL's cycle-1
+feedback (own-tab-only again: `bind_session`/`decide_rail_click` back to
+their pre-cross-tab signatures, `TabPane`/`terminal_panes_all_tabs`/
+`all_tab_panes` and the foreign-tab cwd-poll deleted, not merely disabled),
+then added the two behaviors cycle 1 was missing: `sessions_in_own_tab`
+filters a tab's AGENTS section to sessions whose cwd matches at least one
+own-tab pane (out-of-scope sessions render nowhere, not just unbound), and
+grout's `listSessions` dropped `--include-automated --include-children` so
+agentsview's own default keeps subagent/automated sessions out of every row
+grout ever emits. Four commits, each red-first (`cargo test`/`go test`
+failures recorded above); `cargo test` (133/133) + `cargo check --tests`
+and `go test ./... && go vet ./...` (GOPROXY=off) both green. Rust test
+count: 136 → 133 (net −3: six cycle-1 cross-tab tests removed, three
+same-tab/scope tests added). Go test count unchanged at 16 (only an
+existing test's expected argv changed). Updated AC-4/6/7, the test plan,
+the design narrative, and both READMEs to match; AC-1/2/3/5/8 untouched.
