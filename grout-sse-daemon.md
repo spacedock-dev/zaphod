@@ -497,3 +497,28 @@ count: 136 → 133 (net −3: six cycle-1 cross-tab tests removed, three
 same-tab/scope tests added). Go test count unchanged at 16 (only an
 existing test's expected argv changed). Updated AC-4/6/7, the test plan,
 the design narrative, and both READMEs to match; AC-1/2/3/5/8 untouched.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: Independently re-run AC-1/2/3/5 (unaffected by cycle 2) and AC-4 (rewritten: same-tab-only bind decisions, zero cross-tab rows/clicks) against the worktree's cycle-2 commit, re-executed not re-read
+  All 5 PASS, fresh `-count=1` at `8b04a4f`: AC-1 `TestWatchSessionsFlow`, AC-2 `TestWatchAutoStart|TestWatchReconnect`(+bonus silence test), AC-3 `TestWatchWedgedPipe`, AC-4 the 3 named cargo tests + full `cargo test` (133/133) + `cargo check --tests`, AC-5 `go test ./... && go vet ./...`. Full table in `docs/agent-rail-dev/.spacedock-state/gates/grout-sse-daemon-validation.md` under "Cycle 2".
+- DONE: Refutation audit on a throwaway checkout (never the implementation worktree) targeting same-tab-only filtering and the dropped --include-automated/--include-children flags, naming concrete attacks and documenting survivors or REFUTED with file:line
+  Fresh `git clone` + `checkout 8b04a4f` (discarded after). Cross-tab click/bind REFUTED as structurally impossible (`bind_session`/`decide_rail_click` only ever receive tab-scoped `rows_for_own_tab` output, main.rs:542/2038/2026 — no foreign-tab pane id can reach them). Shared-cwd-across-two-tabs SURVIVES (reproduced with a throwaway test): the same session binds independently in two tabs that happen to share a pane cwd — not a code defect (no cross-tab data flow), but a named residual scope ambiguity for CL's awareness. Subagent-leak-via-one-shot-mode's `session get` path considered and set aside (different threat model, out of scope per AC-5). No redundant automated/child check exists anywhere outside the omitted argv (confirmed by grep — single point of enforcement). Empirical probe of agentsview's own child-session classifier against a real env-isolated v0.36.1 daemon was INCONCLUSIVE — my synthetic sidechain-shaped session wasn't recognized as a child session at all, and this sandbox can't read agentsview's source to confirm the true mechanism; flagged honestly rather than claimed as verified. Full detail in the gate file's "Cycle 2" refutation section.
+- DONE: Revised demo script for AC-6's interactive half (tab-scoped, non-subagent count parity; unattended new-session appearance), AC-7 dropped with no cross-tab click step, AC-8 kept separate
+  Written to the gate file's "Cycle 2" section: scoped baseline command (per-own-tab-pane-cwd `jq` filter, no `--include-automated`/`--include-children`), fill+parity check, unattended same-tab appearance check, and a negative check that an out-of-scope tab's new session never appears — no cross-tab click step anywhere in this script.
+
+### Summary
+
+Independently re-ran AC-1..5 fresh against cycle-2 commit `8b04a4f` — all PASS,
+matching the implementer's counts (Rust 133/133, Go 16 funcs) without trusting
+them. Ran a refutation audit on a throwaway clone (discarded after) targeting
+exactly the two cycle-2 behavior changes: proved cross-tab bind/click is
+structurally impossible by tracing the tab-scoped data flow, but found and
+named one real residual (two tabs sharing a pane cwd double-list the same
+session — not a defect, a design edge case) and one honest verification gap
+(couldn't confirm agentsview's own automated/child classifier from this
+sandbox — no source access, and my synthetic subagent fixture didn't trigger
+its classification at all). Rewrote the AC-6 demo script for tab-scoped,
+non-subagent count parity with an unattended-appearance check and an
+out-of-scope negative check; dropped the cross-tab click step entirely since
+AC-7 is superseded. AC-8 stays a separate dogfood-window question for CL.
