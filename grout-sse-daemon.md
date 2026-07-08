@@ -335,3 +335,25 @@ refreshes, reconnect with backoff. Plugin side: binding widens to all tabs
 whose 0.44.1 contract switches tabs — the one live-only residue, listed
 first in the test plan with a `go_to_tab` fallback. Sibling seams to ka
 (state vocabulary) and hj (expiry) drawn explicitly.
+
+## Stage Report: implementation
+
+- DONE: Each commit: red test first with the failure reason recorded, then the minimal fix, one behavior per commit
+  10 commits (c356a4e…d08d8b5), each red-first. Representative behavioral red — AC-3: `burst coalesced to 3 refreshes, want exactly 2 (one follow-up)` (synchronous loop drained events one-by-one); green after async single-flight + dirty-coalesce. Other reds were compile-fail on the new symbol/signature (`undefined: sseEvent/parseSSEEvents`, `undefined: watchConfig/runWatch`, `unknown field backoffStart`, `undefined: TabPane/terminal_panes_all_tabs` + 12 arity errors). Polling red: `the wedge lands in the foreign pane's backoff` left `None` right `Some(1)`, plus prune red left `{}` right `{20: "/proj"}`.
+- DONE: go test ./... + go vet green (grout: watch.go/sse.go/list.go) AND cargo test + cargo check --tests green (plugin: cross-tab binding + click) — both suites
+  Go 16/16 test funcs pass under GOPROXY=off, `go vet` clean (also `-race -count=3` clean). Rust 136 tests pass, `cargo check --tests` clean. New files: grout/{sse,list,watch}.go; plugin changes in src/main.rs.
+- DONE: Stage report includes before/after test counts and the exact red output; the live cross-tab focus_terminal_pane check (test-plan item 1 / AC-7) is a validation-gate demo, not an implementation-stage requirement — note it as deferred
+  Go: 6 → 16 test funcs. Rust: 130 → 136 tests. AC-7 (foreign-tab `focus_terminal_pane`/`get_pane_cwd` live behavior) is DEFERRED to the validation gate — host-call paths (`refresh_statuses` cwd poll) are drillable but the real focus/switch is live-only; not faked offline.
+
+### Summary
+
+Shipped `grout watch` (Go): a pure `parseSSEEvents`, `session list --server`
+enrichment, and a single-flight refresh loop that attaches-or-starts the
+daemon, consumes `/api/v1/events` `data_changed`, full-re-emits the active
+window with fresh `ts`, reconnects with backoff (90s-silence forced), and
+exits cleanly on SIGTERM without orphaning a wedged pipe (ctx threaded
+through EmitRow). Plugin (Rust): `terminal_panes_all_tabs` widens the bind
+domain; `bind_session` is own-tab-first then a lone cross-tab match else
+unbound; `decide_rail_click` and the cwd poll extend over the all-tabs set
+under the existing wedge/backoff budget. One-shot behavior and its tests are
+untouched (AC-5). AC-6/7/8 settle live at the validation gate.
