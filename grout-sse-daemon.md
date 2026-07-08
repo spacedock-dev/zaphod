@@ -357,3 +357,30 @@ domain; `bind_session` is own-tab-first then a lone cross-tab match else
 unbound; `decide_rail_click` and the cwd poll extend over the all-tabs set
 under the existing wedge/backoff budget. One-shot behavior and its tests are
 untouched (AC-5). AC-6/7/8 settle live at the validation gate.
+
+## Stage Report: validation
+
+- DONE: Per-offline-AC verdict (AC-1..5) with independently re-run commands/evidence (both go test and cargo test suites), not re-reading the implementer's stage report
+  All 5 PASS, re-run fresh (`-count=1`, no cache) at `d08d8b5`: AC-1 `TestWatchSessionsFlow`, AC-2 `TestWatchAutoStart|TestWatchReconnect` (+bonus `TestWatchReconnectOnSilence`), AC-3 `TestWatchWedgedPipe`, AC-4 `cargo test bind_cross_tab` (4/4) + full `cargo test` (136/136) + `cargo check --tests`, AC-5 `go test ./... && go vet ./...`. Independently recounted 16 Go test funcs / 136 Rust tests (matches stage report). Full table in `docs/agent-rail-dev/.spacedock-state/gates/grout-sse-daemon-validation.md`.
+- DONE: Refutation audit executed on a throwaway checkout (never the implementation worktree) naming concrete attack scenarios attempted and why each failed, or a REFUTED with file:line
+  Fresh `git clone` + checkout at `d08d8b5` (discarded clean after). 6 attacks run: truncated-final-SSE-frame (real parser-level false negative, `sse.go:27` — but mitigated end-to-end by reconnect-always-refreshes, confirmed via `TestWatchReconnect`'s own reconnect-refresh assertion), malformed session-list JSON (no panic), render line-index bounds (no panic), `"watch"` argv shadowing one-shot's SessionID (no real caller impact — session ids are UUIDs), own-tab-duplicate coverage gap (untested but not a distinct code path), `serve stop` never called. No REFUTED against AC-1..5. Full detail in the gate file above.
+- DONE: Demo script prepared for AC-6/AC-7 (interactive) and the AC-8 dogfood-exit framing; subspace review record with decisions logged under docs/agent-rail-dev/.spacedock-state/gates/
+  Written to `docs/agent-rail-dev/.spacedock-state/gates/grout-sse-daemon-validation.md`: build/install steps (rebuild required — this task touches `src/main.rs`, unlike the sibling ka task), fresh-session count-parity check, cross-tab click check, and the AC-8 framing question. A live spot-check beyond the prepared script was also run in this review (see below) to de-risk the demo before handing it to CL.
+
+### Summary
+
+Independently re-ran every offline AC (AC-1..5) fresh against `d08d8b5` in the
+implementation worktree — all PASS, no reliance on the implementer's reported
+numbers. Ran a 6-attack refutation audit on a throwaway clone (never the
+worktree): found one real parser-level false negative (a truncated final SSE
+frame is silently dropped) but traced it as non-blocking because reconnect
+always forces a full refresh, independently confirmed by an existing test. As
+an extra spot-check beyond the offline suites, ran `grout watch` against a
+real, env-isolated `agentsview` v0.36.1 daemon (not fakes) with a recording
+`zellij` stub standing in for the pipe target (no live zellij session was
+available in this review's sandbox): a synthetic session appeared within ~1s,
+re-emitted with a fresh `ts` every tick, and `session list --server` reported
+exact count parity with what grout piped — proving the shipped mechanism
+end-to-end ahead of CL's live demo. Wrote the demo script for AC-6/AC-7 and
+the AC-8 dogfood framing to the gate file; CL settles those three live — no
+fabricated decision log, since only CL's actual review can populate one.
