@@ -316,3 +316,179 @@ tab's panes already opened at the project(s) whose sessions should count
 
 **AC-8 — unchanged, a separate dogfood-window question** (see the framing
 above); not part of this demo script.
+
+---
+
+## Cycle 3 (2026-07-08) — revalidation after the id-prefix subagent filter
+
+Cycle 2 was REJECTED at the live demo: dropping `--include-automated
+--include-children` did not stop subagent sessions from accumulating, because
+`is_automated` was `false` for every real Task-tool subagent CL captured (59
+of them). Implementation cycle 3 (commits `e3619bb`, `153862d`) replaced that
+trust boundary with `excludeSubagents`: drop any session whose `id` starts
+with the literal prefix `agent-`, the shape every Task-tool-spawned subagent
+gets. This section independently re-validates that fix. **Diff scope this
+cycle is grout-only** (`git diff --stat 8b04a4f..153862d`: `grout/list.go`,
+`grout/list_test.go`, `grout/README.md` — no `src/main.rs`/wasm change), so
+unlike cycles 1/2 no plugin rebuild is required for this fix specifically.
+
+Worktree at review: `.worktrees/spacedock-ensign-grout-sse-daemon` @
+`153862da9c7409c4533d99c3442894d9c8089b7d` (HEAD, clean).
+
+### Offline AC verdicts (independently re-run, fresh `-count=1`)
+
+| AC | Verdict | Command | Evidence |
+|---|---|---|---|
+| AC-1 (unaffected) | PASS | `cd grout && GOPROXY=off go test -count=1 -run TestWatchSessionsFlow -v ./...` | `--- PASS: TestWatchSessionsFlow (0.49s)` |
+| AC-2 (unaffected) | PASS | `cd grout && GOPROXY=off go test -count=1 -run 'TestWatchAutoStart\|TestWatchReconnect' -v ./...` | `TestWatchAutoStart`, `TestWatchReconnect`, `TestWatchReconnectOnSilence` all PASS |
+| AC-3 (unaffected) | PASS | `cd grout && GOPROXY=off go test -count=1 -run TestWatchWedgedPipe -v ./...` | `--- PASS: TestWatchWedgedPipe (0.90s)` |
+| AC-4 (unaffected, plugin untouched this cycle) | PASS | `cargo test -- bind_never_crosses_tabs sessions_outside_own_tab_scope_are_filtered_entirely out_of_scope_sessions_do_not_occupy_a_click_line` (full: `cargo test && cargo check --tests`) | 3/3 named tests PASS; full suite 133/133 PASS; `cargo check --tests` clean |
+| AC-5 | PASS | `cd grout && GOPROXY=off go test -count=1 ./... && go vet ./...` | `ok zaphod/grout`, `go vet` silent |
+| Subagent-id filter | PASS | `cd grout && GOPROXY=off go test -count=1 -run 'TestExcludeSubagents\|TestListSessionsFiltersSubagents' -v ./...` | both PASS; cwd-collision case (`TestExcludeSubagents`) confirmed a shared cwd does not save the `agent-`-prefixed row |
+
+Function names verified verbatim against source (`grep -n "fn bind_never_crosses_tabs\|fn sessions_outside..."  src/main.rs`), not assumed from the AC text.
+
+### Live-data verification (independently pulled, not the implementer's captured sample)
+
+Queried the currently-running local `agentsview` daemon (pid 66006, v0.36.1)
+myself, across three independent slices totaling ~2,500 real sessions (not
+reusing the implementer's 500-session capture): most-recent 500
+(`--sort started:desc`), oldest 500 (`--sort started:asc`, spans
+2025-11-18..2026-01-30, versions 2.1.15..2.1.25), and a mid-range 500
+(`--date-from 2026-04-01 --date-to 2026-04-15`). Cross-checked the `id`
+prefix against `relationship_type`/`parent_session_id` — an independent
+ground-truth field neither the implementer's nor my own filter logic
+consults — as the oracle for "is this really a subagent":
+
+- **False positives** (id starts with `agent-` but `relationship_type` ≠
+  `subagent`): **0 of ~2,500** sampled sessions, across `claude`/`codex`
+  history, multiple CC versions, and one live real-time confirmation (my own
+  ensign session, `agent-aspacedock-ensign-grout-sse-daemon-validation-…`,
+  classified `subagent` the instant `agentsview` observed it — no
+  classification lag).
+- **False negatives** (real subagent, `id` does not start with `agent-`):
+  **0 for `claude`** across all samples. **Found for `codex`**: real
+  Codex-spawned subagents (`relationship_type: "subagent"`, real
+  `parent_session_id`) use `codex:<uuid>` ids, never `agent-`-prefixed —
+  e.g. `codex:019d4f0d-cf13-7480-ac25-295491b7a9a7`, parent
+  `codex:019d4c95-f95c-7ea1-bd9f-792057b3e689`, a real dispatched worker in
+  CL's own `spacedock` project. Confirmed on the shipped code, not just by
+  inspection: a throwaway `TestRefutation_CodexSubagentIDShapeSurvivesFilter`
+  fed that exact captured record through the real `excludeSubagents` — it
+  survives the filter (not dropped).
+
+### Refutation audit (throwaway checkout, never the implementation worktree)
+
+Fresh `git clone` of the repo + `git checkout 153862d` in an isolated scratch
+dir (`/private/tmp/.../scratchpad/throwaway-clone`), discarded clean after
+(`rm -rf`, no working-tree changes left behind).
+
+- **Attack: construct a real non-subagent session whose id starts with
+  `agent-` (false positive).** Not found in ~2,500 live samples or by
+  construction — the prefix is generated by a single internal code path
+  (Task-tool spawn), never user- or session-content-controlled; no other
+  agent family (`codex:`, `pi:`, `cowork:`, `gemini:`) or top-level session
+  shares the scheme. **Survives** (no false positive found).
+- **Attack: find a real subagent whose id does NOT start with `agent-`
+  (false negative) — different spawn mechanism.** **Confirmed real and
+  reproducible**: Codex's own subagent/exec mechanism produces
+  `codex:<uuid>` ids for genuine children (`relationship_type: "subagent"`),
+  which `excludeSubagents`' `strings.HasPrefix(id, "agent-")` check cannot
+  catch by construction — proven against the shipped code with the captured
+  record above, not just reasoned about. **Currently masked end-to-end**:
+  `listSessions` never passes `--include-children`, and I independently
+  confirmed `agentsview`'s own default already excludes every
+  `relationship_type: "subagent"` session server-side for both `codex`
+  (807→198 total with the flag dropped) and `claude` (19348→2408) in today's
+  live data — so this specific gap has no live path to a rendered row today.
+  **Residual risk named for CL's awareness, not blocking this gate**: the
+  design narrative and AC frame the id-prefix filter as *the* subagent
+  defense (chosen specifically because cycle 2 showed `agentsview`'s
+  classifiers "don't reliably catch" Task-tool subagents); for Codex
+  sessions the actual defense today is silently the opposite — agentsview's
+  own default, the exact kind of layer cycle 2 already caught failing once
+  for Claude. CL actively dispatches Codex-based workers (the captured
+  example is a real `spacedock` ensign), so if agentsview's default
+  classification ever regresses for `codex` the way it did for `claude` in
+  cycle 2, no backstop exists. Scope note: CL's cycle-1/2 complaints named
+  "Claude subagent sessions" specifically, and the AC's literal wording
+  (`id` does not start with `agent-`) only ever promised Task-tool/Claude
+  coverage — so this is not a violation of the AC as written, but a gap in
+  the AC's coverage relative to the general "we shouldn't list subagents"
+  intent.
+- **Attack: nested sub-subagent (an Explore/refutation agent spawned from
+  within a Task-tool subagent).** Searched ~1,000 of the most recent
+  sessions (including today's heavy spacedock dispatch activity) for any
+  session whose `parent_session_id` itself starts with `agent-`: **0
+  found**. Inconclusive rather than a clean survive/refute — no nested
+  example exists in the searched window to test against, and coverage was
+  ~1,000 of 20,235 total sessions system-wide. Flagging the gap honestly
+  rather than claiming proof either way.
+- **Attack: malformed/garbage session id (empty string, no prefix at
+  all).** `excludeSubagents` is a plain `strings.HasPrefix`; an empty or
+  garbage id simply fails the prefix check and passes through unfiltered —
+  no panic, matches every other session's treatment. Survives.
+
+No REFUTED against any stated AC. One real, live-data-confirmed, code-proven
+false-negative class found (Codex subagent ids) — currently non-blocking
+because a different, already-once-unreliable layer (agentsview's own
+default) happens to mask it today; named explicitly rather than left buried
+in a PASS.
+
+### Final demo script for AC-6 / subagent-id filter (interactive, CL drives live)
+
+**Setup.** This cycle's fix is grout-only (Go); no plugin/wasm change. If
+your zellij layout is already running the plugin build validated at cycle 2
+or later, skip straight to the watcher. If unsure, rebuild to be safe:
+
+    cd /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-grout-sse-daemon
+    ./build.sh && ./install.sh
+
+Start (or reuse) a zellij session on the installed layout, with the demo
+tab's panes already open at the project(s) whose sessions should count.
+
+1. **Scoped, subagent-excluded baseline.** Compute the baseline by the exact
+   mechanism grout now uses — cwd scope AND `id` does not start with
+   `agent-` — not by trusting `agentsview`'s own default (this is
+   deliberate: the default's `--include-children` exclusion would mask a
+   regression in grout's own filter, since cycle 2 already showed that kind
+   of classifier can be wrong). Pull the superset yourself and filter by id
+   prefix in `jq`:
+
+       agentsview session list --include-one-shot --include-children --include-automated \
+         --active-since "$(date -u -v-30M +%FT%TZ)" --json \
+       | jq --arg cwd "<demo tab's pane cwd>" \
+         '[.sessions[] | select(.cwd == $cwd) | select(.id | startswith("agent-") | not)] | length'
+
+   Note this number as **N**. Repeat/sum per distinct own-tab pane cwd if the
+   tab has panes in more than one project.
+2. **Start the watcher:**
+
+       cd /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-grout-sse-daemon/grout
+       go run . watch
+
+3. **Fill + count parity.** Within 30s, the demo tab's AGENTS section shows
+   **N** rows, no more, no fewer. A mismatch is REJECTED with the observed
+   vs. expected counts and which session(s) diverged.
+4. **Unattended appearance.** In the demo tab's own project, start a new
+   Claude/agent session and send its first message. Within ≤30s, no grout
+   interaction, a new row appears.
+5. **Subagent-cwd-collision check (the crux of this cycle's fix).** While
+   `grout watch` is running, dispatch a Task-tool subagent (e.g. an `Explore`
+   agent, or any sub-agent) whose cwd is the *same* project as the demo tab's
+   own panes. Confirm it never appears as a row, at any point, even though
+   its cwd is in-scope — a cwd match must not save a subagent from the
+   filter (this is the exact scenario `TestExcludeSubagents`/
+   `TestListSessionsFiltersSubagents` pin offline; this step is the live
+   confirmation).
+6. **Out-of-scope negative check.** In another tab's project, start a new
+   session; confirm it never appears in the demo tab. No cross-tab click
+   step exists anywhere in this script — AC-7 stays superseded by AC-4, and
+   binding/rendering never cross tabs by construction (cycle 2's structural
+   REFUTED-as-impossible finding still holds; this cycle changed no
+   tab-scoping code).
+7. **Cleanup.** `Ctrl-C` the `go run . watch` process — clean exit, no
+   orphaned `agentsview` process (grout never stops the shared daemon).
+
+**AC-8 — unchanged, a separate dogfood-window question**, not part of this
+script.
