@@ -1,9 +1,9 @@
 ---
 id: s60erz6gam8d9yc238askrz1
 title: Gate-click subspace-tui pane never closes — response discarded, CommandPaneExited not subscribed
-status: backlog
+status: ideation
 source: finding — live session dogfooding, 2026-07-08
-started:
+started: 2026-07-08T08:31:05Z
 completed:
 verdict:
 score: 0.6
