@@ -1,13 +1,13 @@
 ---
 id: j5zfk59gesvg0zfyw23haf56
 title: Dock toggle restructures panes on first activation — contradicts docking-approach.md invariant
-status: ideation
+status: implementation
 source: finding — CL live session, Alt-/ dock regression, 2026-07-08
 started: 2026-07-08T07:03:01Z
 completed:
 verdict:
 score: 0.8
-worktree:
+worktree: .worktrees/spacedock-ensign-dock-toggle-restructures-panes
 issue:
 pr:
 mod-block:
