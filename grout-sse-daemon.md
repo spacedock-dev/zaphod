@@ -1,6 +1,6 @@
 ---
 title: Grout SSE daemon — sessions for real
-status: implementation
+status: validation
 source: plan sprint 1 (docs/plan-agent-rail.md)
 score: 0.8
 id: ybqh2eyp10qjbv05bd7njtbw
