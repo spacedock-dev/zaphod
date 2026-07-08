@@ -36,7 +36,7 @@ func BuildSessionRow(si sessionInfo, now time.Time, clampBytes int) SessionRow {
 		ID:      si.ID,
 		Cwd:     si.Cwd,
 		Agent:   si.Agent,
-		State:   si.TerminationStatus,
+		State:   MapSessionState(si.TerminationStatus, lastActivity(si), now),
 		Summary: clampSummary(si.FirstMessage, clampBytes),
 		TS:      now.UTC().Format(time.RFC3339),
 	}

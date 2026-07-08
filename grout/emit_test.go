@@ -105,7 +105,7 @@ func TestEmitEndToEnd(t *testing.T) {
 		"id":      "31dbb8ee-1d55-40ad-aa71-66c58790b708",
 		"cwd":     "/Users/clkao/git/zaphod",
 		"agent":   "claude",
-		"state":   "awaiting_user",
+		"state":   "blocked",
 		"summary": "Wire the grout skeleton fixture",
 	}
 	for k, want := range wantSession {

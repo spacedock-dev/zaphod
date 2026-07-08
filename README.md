@@ -37,7 +37,8 @@ tab and what does it want from me?**
   keeps its arrangement (the swap set is regenerated from the live layout)
 - Per-tab instances that toggle independently
 - **Agent & gate rows**: a companion `grout` process pipes `agent-event`
-  rows into the rail — agent sessions with state, and pending gate
+  rows into the rail — agent sessions with state (blocked / working /
+  idle / done, mapped from agentsview status + activity), and pending gate
   decisions. Click a session row to focus its cwd-bound pane (unbound is
   shown, never guessed); click a gate row to float `subspace-tui` on the
   gate's artifact with `--log` pointed at its decision log. Requires the
