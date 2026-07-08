@@ -123,6 +123,62 @@ mystery) and is **not** fixed here — see Out of scope. It fully answers the
 root-cause checklist item (the "new tab" was not a tab), while leaving the
 leak's exact trigger for a follow-on finding.
 
+### New live finding (mid-ideation, from team-lead): chrome misplacement on a dirty-tab regenerate — OPEN, not yet reproduced
+
+Team-lead captured a second live dump of `WORK`'s tab "Tab #6" after this
+report's first pass: rail docked already, then CL closed one of the tab's
+other panes (a manual removal — dirtying the swap layout, same mechanism as
+AC-3), then toggled. The result: `zellij:tab-bar` is missing from its
+canonical `pane size=1 borderless=true` top row and instead appears as a
+`pane size="50%" borderless=true { plugin location="zellij:tab-bar" }`
+**sibling inside the vertical split**, next to the surviving `command=
+"spacedock"` pane (also `size="50%"`) — the tab bar visibly breaks
+(cramped to 40% width per CL, nothing below it). `status-bar` stayed
+correctly placed. This is a more severe failure mode than the plain
+pane-count change (AC-1): chrome, not just region nesting, ends up wrong.
+
+**Investigation this pass, before concluding:**
+
+- **Static trace.** Walked `extract_chrome_panes` (`src/main.rs:1613-1667`)
+  against the reported shape: a 3-line `pane size="50%" borderless=true {
+  plugin location="zellij:tab-bar" }` sitting as a direct child of the
+  top-level vertical-split block is exactly the multi-line case the
+  function's `children.iter().find_map(plugin_location)` branch is built to
+  catch (not the single-line-inline case `bce89a4` fixed, and not a case
+  `830f7b1`/`b5eeb97` left unhandled by inspection) — classification would
+  return `PluginRole::Chrome` and drop it, if this pane really is a direct
+  child of that block at the point the dump is read. No obvious
+  classification bug found for the shape as reported.
+- **Live repro attempts (disposable `ztestrepro` session, 2026-07-08),
+  none reproduced it:** (1) dock 1 pane → add 2 more (3 total) → toggle
+  (regenerate) → clean; (2) toggle back to docked → close 1 of 3 (down to
+  2) → toggle → clean; (3) close a 2nd (down to 1) → toggle → clean; (4)
+  replace a plain-shell pane with a `command=`/`start_suspended true` pane
+  (matching CL's `spacedock` pane's shape) → close the other pane, leaving
+  only the command pane → toggle twice → clean both times. All four
+  variants toggled correctly with chrome staying in place. The exact
+  trigger is narrower than "dock, add/remove panes, toggle."
+- **Working hypothesis, not confirmed: concurrency.** My disposable session
+  only ever had one sidebar instance. `WORK`'s "Tab #6" sits in a session
+  that (per this same report's AC-2 finding) is carrying dozens of stray
+  floating zombie instances in *other* tabs, and the relaxed election lets
+  any instance that perceives a sidebar-less or dirty active tab act on it
+  (`docs/docking-approach.md`'s "Tab ids vs positions" section already
+  documents a stale `tab_id → position` translation race under load). A
+  zombie elsewhere racing a regenerate on Tab #6 — each building its
+  transform from a dump taken at a slightly different instant, then both
+  calling `override_layout` on the same tab — is a plausible way to
+  corrupt a layout that neither actor's transform alone would produce, and
+  would explain why a clean single-instance session can't reproduce it.
+  This is not verified; it is the leading lead for a follow-up spike, and
+  it ties this finding to the floating-leak finding above as possibly one
+  root cause surfacing two symptoms, not two unrelated bugs.
+
+This is not resolved to the standard AC-1/AC-2/AC-3 were: it is confirmed
+real (direct live evidence, not a hypothesis) but not yet reproducible on
+demand, so no fix — doc-only or otherwise — can be designed for it yet. See
+AC-4 and Out of scope.
+
 ### Fix direction: document the first-toggle pane-count change — chosen over a non-invasive rewrite
 
 Direction **(b)** from the original approach: correct
@@ -187,17 +243,46 @@ root cause and fix is out of scope for this entity (see Out of scope /
 Follow-on finding).
 
 **AC-3 — Manual pane moves into a docked tab do not change pane count on
-a regenerate; only documented nesting-fidelity loss can occur.**
+a regenerate; the only *accepted* degradation is documented nesting-fidelity
+loss, not chrome relocation.**
 Verified by: existing coverage — `install_split_preserving_swaps`'s dump
 abort (`src/main.rs:912-919`) plus `retain_existing_plugin_panes=true`
 already re-seat the resident rail by identity rather than duplicating it on
-a dirty-tab regenerate, and the one known degradation mode (split-nesting
-flattening on a rail-width flip, not pane count) is already live-validated
-in `docs/docking-approach.md`'s fidelity-ceiling section and SPEC landmine
-#35. No new test or mechanism is needed; the fix is the doc diff below
-citing the ceiling from the toggle invariant directly.
+a dirty-tab regenerate, and the pane-count/nesting-flattening degradation
+mode is already live-validated in `docs/docking-approach.md`'s
+fidelity-ceiling section and SPEC landmine #35 — this part needs a
+citation, not a new mechanism. **Caveat added this pass:** AC-4 (below)
+found a dirty-tab regenerate can also relocate a *chrome* pane, which is
+not part of the accepted ceiling. AC-3 is satisfied for pane count and
+region nesting; it is not yet fully satisfied until AC-4 is resolved,
+since both are the same `regenerate_swaps` code path.
+
+**AC-4 — A dirty-tab regenerate never relocates a chrome pane
+(tab-bar/status-bar) out of its canonical top/bottom row into the content
+region. OPEN — confirmed real, not yet reproducible on demand.**
+Verified by (interactive, live, 2026-07-08): CL's `WORK` session, tab
+"Tab #6" — `dump-layout` after "rail docked, close a pane, toggle" shows
+`zellij:tab-bar` as a `size="50%"` sibling inside the vertical split
+instead of its canonical top row; `status-bar` unaffected (see Proposed
+approach). Attempted (offline-equivalent, live disposable session,
+2026-07-08): four repro variants — plain 3-pane dock/close/toggle,
+close-to-2, close-to-1, and a `command=`/`start_suspended` pane matching
+CL's `spacedock` pane's shape — all toggled cleanly, none reproduced the
+relocation. Static trace of `extract_chrome_panes` did not find an
+obvious classification bug for the reported shape. Not satisfied yet: this
+AC needs a repro that actually triggers the defect (leading hypothesis:
+a concurrent regenerate/retrofit race from one of the leaked floating
+instances found under AC-2 — see Out of scope) before a fix — doc-only or
+code — can be designed. The doc diff below covers AC-1/AC-2/AC-3 only; it
+does not close AC-4.
 
 ## Proposed doc diff
+
+This diff closes AC-1, AC-2, and AC-3. It does **not** close AC-4 (the
+chrome-misplacement finding above is not yet reproducible on demand, so no
+doc statement or code fix can be written for it responsibly yet) — a
+follow-up pass must either extend this diff with AC-4's resolution or file
+it as its own finding once root-caused.
 
 **`docs/docking-approach.md:266-270`** — replace the unconditional
 invariant with a scoped one and a new exception paragraph:
@@ -262,18 +347,37 @@ shown, hidden, or spawned."):
 
 ## Test plan
 
-Riskiest-first: the pane-restructuring mechanism (AC-1) was already
-confirmed both offline-in-spirit (the KDL-generation structure is
-deterministic and inspectable without a live session) and live (disposable
-session repro, 2026-07-08) during this ideation pass — no further spike
-needed before implementation. The one net-new test this task should land is
-the AC-1 fixture described above (assert the generated swap KDL always
+Riskiest-first, revised: **AC-4's chrome-misplacement repro is now the
+riskiest open item** — riskier than anything else in this entity, since
+it's the one confirmed-real defect this pass could not pin down, and it
+may invalidate the "doc-only" fix direction if it turns out to be a code
+defect rather than a zellij-side quirk. Before any implementation work: run
+a **concurrency repro** — two-plus sidebar instances alive at once (one
+tiled resident in the target tab, one or more floating elsewhere, as
+`WORK` actually has), close a pane in the tiled tab, toggle, and check
+whether a race between instances reproduces the tab-bar relocation that a
+clean single-instance session (four variants tried, 2026-07-08) could not.
+If that reproduces it, the fix is almost certainly a dedup/locking
+concern shared with the AC-2 floating-leak follow-on, not a
+`extract_chrome_panes` classification bug (static trace found none for the
+reported shape). If it still does not reproduce, the next lead is
+`debug "1"` tracing on `WORK`'s actual next occurrence, since the exact
+live sequence may carry a detail (timing, a third instance, a specific
+pane count) not yet captured.
+
+The pane-restructuring mechanism (AC-1) was already confirmed both
+offline-in-spirit (the KDL-generation structure is deterministic and
+inspectable without a live session) and live (disposable session repro,
+2026-07-08) during this ideation pass — no further spike needed before
+implementing that part. The one net-new test this task should land for
+AC-1 is the fixture described above (assert the generated swap KDL always
 nests exactly one rail pane, N-independent) — small, offline, fast, and it
 pins the structural invariant the doc diff now documents. AC-2 and AC-3
 need no new tests: AC-2 resolves to a doc statement (nothing to test, the
-absence of a `new_tab` call is a static fact), and AC-3 is already covered
-by existing tests (`is_redundant_tiled_sidebar` suite,
-`src/main.rs:3405-3415`) plus the live-validated fidelity-ceiling writeup.
+absence of a `new_tab` call is a static fact), and AC-3 (pane count/nesting
+only) is already covered by existing tests (`is_redundant_tiled_sidebar`
+suite, `src/main.rs:3405-3415`) plus the live-validated fidelity-ceiling
+writeup.
 
 ## Out of scope
 
@@ -281,8 +385,14 @@ Redesigning the swap-cycling docking architecture wholesale, or re-opening
 the "runtime tiled docking is unwinnable" question `docs/docking-approach.md`
 already settled — this task is about the undocumented pane-restructuring
 side effect and the new-tab mystery, not the overall docking approach.
+**AC-4 (chrome misplacement) is explicitly not out of scope** — it was
+folded into this entity's ACs at team-lead's request because it shares the
+same `regenerate_swaps` code path as AC-3 — but it is not yet resolved
+(see AC-4, Test plan).
 
-**Follow-on finding (not fixed here): floating sidebar-instance leak.**
+**Follow-on finding (not fixed here, likely one root cause behind two
+symptoms): floating sidebar-instance leak, possibly the same concurrency
+condition behind AC-4.**
 Live inspection during this ideation pass found 62 stray floating
 `zellij-sidebar.wasm` panes accumulated across the live `WORK` session's
 tabs (14/"Noteplan", 47/"CEO", 1/"Tab #6") — config-matched bootstrap
@@ -296,8 +406,14 @@ compile per launch, and the shared `zellij.log` shows ENOENT bursts for the
 sidebar wasm path at points across the session, though the log is shared
 across concurrently running sessions/worktrees so the correlation is not
 conclusive) needs its own clean, single-session repro with tracing on.
-Recommend filing a new finding entity for it rather than folding it into
-this one.
+Working hypothesis added this pass: the same population of leaked
+instances is the leading (unconfirmed) explanation for AC-4's chrome
+relocation too — a zombie racing a legitimate regenerate. If a follow-up
+spike confirms that link, the leak and AC-4 should be root-caused and fixed
+together rather than as two separate findings; recommend filing one new
+finding entity for the instance-lifecycle/concurrency problem rather than
+folding either into this one, since this entity's own fix (the doc diff)
+is ready to ship independently of that investigation.
 
 ## Stage Report: ideation
 
@@ -306,8 +422,10 @@ this one.
 - DONE: Decide and record the fix direction for the first-toggle pane-split
   Direction (b) — document the exception — chosen over a non-invasive rewrite, because docs/docking-approach.md already ruled out every non-invasive alternative (floating overlay, hide/show, blind absorb); recorded under "Fix direction" with citations.
 - DONE: Propose the doc diff for docs/docking-approach.md and SPEC.md
-  Diffs for docking-approach.md:266-270 plus a new exception paragraph, SPEC.md landmine #16, and SPEC.md's "If building v2 from scratch" item 3 (a third over-broad-invariant site the original finder didn't cite) are in "Proposed doc diff" above.
+  Diffs for docking-approach.md:266-270 plus a new exception paragraph, SPEC.md landmine #16, and SPEC.md's "If building v2 from scratch" item 3 (a third over-broad-invariant site the original finder didn't cite) are in "Proposed doc diff" above. Covers AC-1/AC-2/AC-3 only, not AC-4.
+- FAILED: Reproduce team-lead's live chrome-misplacement finding (tab-bar relocated into the region on a dirty-tab regenerate after a manual pane close) in a controlled disposable session
+  Folded into the entity as AC-4 and a new "Root cause" subsection; four repro variants on 2026-07-08 (plain 3-pane close-down, command-pane variant) all toggled cleanly with chrome correctly placed, and a static trace of `extract_chrome_panes` found no obvious classification bug for the reported shape. Leading unconfirmed hypothesis recorded: a concurrent regenerate/retrofit race from one of the AC-2 leaked floating instances. AC-4 is open; Test plan names the concurrency repro as the next riskiest step.
 
 ### Summary
 
-Both ideation questions are resolved by direct investigation rather than further design: the pane-split is inherent to the only validated dock mechanism (override_layout retrofit) and should be documented, not re-engineered; the "new tab" sighting is refuted as an actual tab and most likely explained by a separate, serious floating-instance leak found live in CL's WORK session (62 stray panes), which is flagged as its own follow-on finding rather than fixed here. AC-1/AC-2/AC-3 are rewritten to verifiable, non-tautological checks, and the concrete doc diff is ready for review at this gate.
+Two of three original ideation questions are resolved by direct investigation rather than further design: the pane-split is inherent to the only validated dock mechanism (override_layout retrofit) and should be documented, not re-engineered; the "new tab" sighting is refuted as an actual tab and most likely explained by a separate, serious floating-instance leak found live in CL's WORK session (62 stray panes). A new live finding arrived mid-pass from team-lead — a dirty-tab regenerate relocating the tab-bar pane into the content region — which was folded in as AC-4 but could not be reproduced in a clean session in the time available, so it remains open pending a concurrency-focused repro. AC-1/AC-2/AC-3 are rewritten to verifiable, non-tautological checks and the concrete doc diff for them is ready for review at this gate; AC-4 is not ready and should not block shipping the AC-1/AC-2/AC-3 doc diff, but should stay open as a tracked item (possibly merged with the floating-leak follow-on) rather than closed out with this entity.
