@@ -1,9 +1,9 @@
 ---
 id: pzw1ctjmej8bjy9t4td91yy8
 title: Gate feedback discovery and resolution automation — walking skeleton across the sprint 2/3 seam
-status: backlog
+status: ideation
 source: finding — live session dogfooding, 2026-07-08 (CL left subspace-tui feedback that sat unread with no automated consumer)
-started:
+started: 2026-07-08T08:48:18Z
 completed:
 verdict:
 score: 0.85
