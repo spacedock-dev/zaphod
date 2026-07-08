@@ -1,6 +1,6 @@
 ---
 title: Grout session-state mapping + default-path fix
-status: implementation
+status: validation
 source: plan sprint 1 + sprint-0 gate findings
 score: 0.9
 id: kawd2h37e2rhn9t9ynf61ppe
