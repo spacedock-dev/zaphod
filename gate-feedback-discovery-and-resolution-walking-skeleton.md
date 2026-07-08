@@ -1,13 +1,13 @@
 ---
 id: pzw1ctjmej8bjy9t4td91yy8
 title: Gate feedback discovery and resolution automation — walking skeleton across the sprint 2/3 seam
-status: ideation
+status: implementation
 source: finding — live session dogfooding, 2026-07-08 (CL left subspace-tui feedback that sat unread with no automated consumer)
 started: 2026-07-08T08:48:18Z
 completed:
 verdict:
 score: 0.85
-worktree:
+worktree: .worktrees/spacedock-ensign-gate-feedback-discovery-and-resolution-walking-skeleton
 issue:
 pr:
 mod-block:
