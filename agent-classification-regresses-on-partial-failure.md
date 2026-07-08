@@ -237,3 +237,36 @@ follow-up finding.
 ### Summary
 
 Confirmed the `enrich_fields` fix is a single conditional after the existing three-source `kind` derivation: fall back to `previous.kind` only when the fresh result is `Unknown` AND at least one of `command`/`viewport` failed this tick, leaving the existing all-succeeded-Unknown clearing path (`successful_unknown_sources_clear_stale_agent_kind`) untouched. No staleness ceiling — the codebase's existing `pane_cwds`/`PollBackoff` "stale-not-blank" precedent argues against one, and none of the current ACs need it. The `preserve_agent_fields`/`pane_id` gap is real but confirmed as a separate, out-of-scope finding (different trigger: manifest/pane_id churn, not poll `Result::Err`).
+
+## Stage Report: implementation
+
+- DONE: Implement the enrich_fields fallback exactly as designed in ideation: capture command_failed/viewport_failed before .ok() discards the Err, fall back kind to previous.kind only when fresh kind is Unknown and previous.kind is not, and at least one of command/viewport failed.
+  src/agent.rs:180-181 captures `command_failed`/`viewport_failed` from the `Result`s before `.ok()`; src/agent.rs:197-212 adds the `mut kind` fallback conditional exactly matching the ideation diff. Commit 8d754e1.
+- DONE: Write AC-1/AC-2/AC-3's three unit tests as designed (kind survives partial failure; working/blocked signal detected via the fallback; existing test suite passes unmodified), red test first, minimal fix, suite green.
+  Added `partial_failure_preserves_known_kind_when_fresh_result_is_unknown` (AC-1) and `partial_failure_fallback_kind_still_detects_working_signal` (AC-2) to src/agent.rs mod tests; both failed red before the fix, both pass after. AC-3 verified by the full pre-existing suite passing unmodified (no test bodies changed). Commit 8d754e1.
+- DONE: Confirm no staleness ceiling was added, per ideation's explicit rejection of one, and record before/after test counts plus the exact red output in the stage report.
+  No clock/counter/new AgentFields field added — fallback is a pure comparison against `previous.kind` and the two `Result`s already in scope. Before: `cargo test` 130 passed (20 tests in agent.rs). After: 132 passed (22 in agent.rs), 0 failed. `cargo check --tests` clean.
+
+  Red output (both new tests, before the fix):
+  ```
+  test agent::tests::partial_failure_fallback_kind_still_detects_working_signal ... FAILED
+  test agent::tests::partial_failure_preserves_known_kind_when_fresh_result_is_unknown ... FAILED
+
+  ---- agent::tests::partial_failure_fallback_kind_still_detects_working_signal stdout ----
+  thread '...' panicked at src/agent.rs:516:9:
+  assertion `left == right` failed
+    left: Unknown
+   right: Claude
+
+  ---- agent::tests::partial_failure_preserves_known_kind_when_fresh_result_is_unknown stdout ----
+  thread '...' panicked at src/agent.rs:501:9:
+  assertion `left == right` failed
+    left: Unknown
+   right: Claude
+
+  test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 130 filtered out
+  ```
+
+### Summary
+
+Added the single fallback conditional to `enrich_fields` designed in ideation: `kind` falls back to `previous.kind` only when the fresh three-source derivation is `Unknown`, `previous.kind` is known, and at least one of `command`/`viewport` failed this poll — leaving the all-succeeded-Unknown clearing path untouched. Two new unit tests (AC-1, AC-2) went red for the predicted reason (`Unknown` where `Claude` expected) before the fix and green after; the full pre-existing suite (AC-3) passed unmodified, 130 to 132 total. No staleness ceiling was added, matching ideation's rejection.
