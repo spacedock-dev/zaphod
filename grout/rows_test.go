@@ -39,6 +39,35 @@ func assertExactKeys(t *testing.T, line []byte, want []string) map[string]json.R
 	return m
 }
 
+// markerVocabulary transcribes the plugin's marker states from src/agent.rs:24-28
+// (blocked/working/idle/done) — the baseline lives here, outside the code under
+// test. Any other state string renders the neutral Unknown marker.
+var markerVocabulary = map[string]bool{"blocked": true, "working": true, "idle": true, "done": true}
+
+// surveyStatuses transcribes the 2026-07-08 vocabulary survey (the entity body's
+// survey table): the four observed termination_status values, absent as "".
+var surveyStatuses = []string{"awaiting_user", "clean", "tool_call_pending", ""}
+
+// TestSurveyStatusesRenderInsideMarkerVocabulary is AC1: every surveyed status,
+// on a fresh-activity session, yields a row state inside the marker vocabulary —
+// the count rendering Unknown drops from 4/4 (verbatim pass-through) to 0/4.
+func TestSurveyStatusesRenderInsideMarkerVocabulary(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	fresh := now.Format(time.RFC3339) // started_at == now -> live
+	unknown := 0
+	for _, status := range surveyStatuses {
+		si := sessionInfo{TerminationStatus: status, StartedAt: fresh}
+		row := BuildSessionRow(si, now, 512)
+		if !markerVocabulary[row.State] {
+			unknown++
+			t.Errorf("status %q -> state %q renders the Unknown marker", status, row.State)
+		}
+	}
+	if unknown != 0 {
+		t.Errorf("%d/%d survey statuses render Unknown, want 0", unknown, len(surveyStatuses))
+	}
+}
+
 func TestRowProtocol(t *testing.T) {
 	// Non-UTC instant: ts must come out RFC3339 in UTC regardless.
 	now := time.Date(2026, 7, 7, 13, 0, 0, 0, time.FixedZone("CST", 8*3600))

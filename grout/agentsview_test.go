@@ -20,7 +20,9 @@ func TestSessionRowFromFixture(t *testing.T) {
 		t.Fatalf("decodeSession: %v", err)
 	}
 
-	// Field baselines are the recorded fixture's values (agentsview v0.36.1).
+	// Field baselines are the recorded fixture's values (agentsview v0.36.1);
+	// State is the mapped value — the fixture's awaiting_user is blocked (row 1)
+	// at any age, so a decoded row carries a real marker, not the raw status.
 	now := time.Date(2026, 7, 7, 5, 0, 0, 0, time.UTC)
 	row := BuildSessionRow(si, now, 512)
 	want := SessionRow{
@@ -28,7 +30,7 @@ func TestSessionRowFromFixture(t *testing.T) {
 		ID:      "31dbb8ee-1d55-40ad-aa71-66c58790b708",
 		Cwd:     "/Users/clkao/git/zaphod",
 		Agent:   "claude",
-		State:   "awaiting_user",
+		State:   "blocked",
 		Summary: "Wire the grout skeleton fixture",
 		TS:      "2026-07-07T05:00:00Z",
 	}

@@ -11,14 +11,26 @@ session, read one gate log, emit two rows, exit.
 
 Run from the repo root, inside the target zellij session:
 
-    go run ./grout [session-id [gate-log]]
+    go run ./grout <session-id> <gate-log>
 
-Both positionals optional; defaults live in `main.go` (`defaultConfig`).
+Both positionals required — no default session or gate log, so runs
+behave identically from any cwd; missing arguments exit 2 with usage.
 One JSON object per line, one line per `zellij pipe` invocation, pipe name
 `agent-event`:
 
     {"kind":"session","id":"…","cwd":"…","agent":"…","state":"…","summary":"…","ts":"2026-07-07T05:00:00Z"}
     {"kind":"gate","log_path":"/abs/…/x.decisions.jsonl","workflow":"…","entity":"…","entity_title":"…","stage":"…","round":1,"recommendation":"…","ts":"2026-07-07T05:00:00Z"}
+
+## Session state
+
+The row's `state` maps agentsview's `termination_status` plus transcript
+recency (`ended_at ?? started_at ?? created_at`) onto the plugin's marker
+vocabulary; first match wins: `awaiting_user` → `blocked`; last activity
+< 60s → `working`; `clean` → `done`; < 10 min → `idle`; otherwise the
+status passes through verbatim and the rail shows the unknown marker.
+Thresholds mirror agentsview v0.36.1's own liveness derivation; vocabulary
+surveyed 2026-07-08 over a 20k-session corpus (awaiting_user, clean,
+tool_call_pending, absent; `truncated` exists in code, unobserved).
 
 ## Failure posture
 
