@@ -154,6 +154,45 @@ in one of these three existing layers (or in `KeybindPipe`'s own timeout/
 retry behavior, which none of the three cover), not a new locking mechanism
 layered on top.
 
+### Third possible symptom raised mid-pass (team-lead): `GetPaneRunningCommand`
+timeout correlation with the leak — checked, inconclusive from the shared log
+
+Team-lead reported a live `WORK` observation: the FO pane's `self.rows`
+classification (`agent.rs`, a separate code path from AC-1/2/3's toggle/
+retrofit scope) showed "unknown . unknown" for a stretch, then
+self-corrected a few minutes later with no user action — consistent with a
+transient `GetPaneRunningCommand` timeout that `enrich_fields` doesn't retry
+aggressively. Asked whether timeout frequency correlates with live
+floating-instance count (more instances → more host-call contention → more
+misclassification).
+
+Checked against this pass's own log window (retrospective, no new live
+test): bucketing every `GetPaneRunningCommand`/`GetPaneCwd` timeout in the
+shared log by minute across 12:30-16:07 shows continuous timeout activity
+throughout, including 20-33/minute bursts at 14:44-14:57 — well before this
+pass's spike started (~15:07) — of the same magnitude as the 20-31/minute
+bursts seen during this pass's heaviest hammering (15:53-16:01). The five
+plugin ids carrying nearly all the volume (4, 16, 73, 82, 85; 302/186/135/
+84/58 timeouts respectively) look at first like a stable set of long-lived
+residents, but plugin ids are reused across process lifetimes (id 4 logged
+its own "Bye" — a close — at 13:00:22, then resumed timing out under the
+same id number two hours later), so they cannot be attributed to a specific
+session from this log alone — the log has no session tag, only process-local
+ids, exactly the shared-log ambiguity this entity's own Problem section
+already flagged for the ENOENT correlation. **Inconclusive, not settled**:
+the data is consistent with team-lead's hypothesis (this pass's own
+heaviest-activity window does show elevated timeouts) but equally
+consistent with ambient contention from `WORK`/other concurrent sessions
+unrelated to this pass's induced instance count — the pre-spike 14:44-14:57
+burst proves elevated timeout rates happen independent of anything this
+pass did. Settling it needs either session-tagged log instrumentation (a
+code change) or an isolated single-session before/after measurement (no
+other zellij sessions competing for the same PTY thread) — bigger than a
+retrospective check on the existing shared log can deliver. Recommend
+folding this into whichever follow-up (soak test or live tracing, see
+Proposed approach) is chosen next: instrument or isolate enough to make the
+correlation answerable, rather than re-attempting it from this log.
+
 ## Proposed approach
 
 Run a concurrency-focused spike as the first step, since it's the one
