@@ -73,25 +73,117 @@ fully-successful poll re-establishes both fields together.
 
 ## Proposed approach
 
-Ideation should confirm and detail the exact fix (the mechanism is already
-pinned down; this is design-and-test work, not further root-causing):
+Confirmed fix, in `enrich_fields` (`src/agent.rs:174-218`):
 
-1. `enrich_fields` should fall back to `previous.kind` when the freshly
-   computed `kind` is `Unknown` but `previous.kind` was not — mirroring the
-   fallback `previous.state`/`previous.status` already get in the
-   viewport-absent branch. Open question for ideation: should this fallback
-   have a staleness ceiling (e.g. don't trust a `previous.kind` from more
-   than N polls ago, in case the pane's actual running program genuinely
-   changed to something unrecognized)?
-2. `detect_viewport` (or its caller) should still evaluate
-   `blocker_line`/`has_working_signal` against the viewport even when kind
-   is only known via the fallback in (1), not just when freshly detected —
-   otherwise a stale-but-still-correct kind still blinds state detection.
-3. Check `preserve_agent_fields` (`src/main.rs:1965`) and
-   `rows_for_own_tab` for a related gap: does a `Row` losing its `pane_id`
-   match (e.g. after a layout rebuild) reset straight to
-   `AgentFields::default()` (Unknown) with no analogous grace period? If
-   so, name whether that's in scope here or a separate finding.
+Before:
+
+```rust
+let command_kind = current_command
+    .as_deref()
+    .map(agent_from_command)
+    .unwrap_or(AgentKind::Unknown);
+let running_command = current_command.or_else(|| previous.running_command.clone());
+let title_kind = agent_from_title(title);
+let viewport_kind = viewport
+    .as_deref()
+    .map(agent_from_viewport)
+    .unwrap_or(AgentKind::Unknown);
+let kind = [command_kind, title_kind, viewport_kind]
+    .into_iter()
+    .find(|kind| *kind != AgentKind::Unknown)
+    .unwrap_or(AgentKind::Unknown);
+```
+
+After (new lines marked):
+
+```rust
+let command_failed = command.is_err();          // NEW
+let viewport_failed = viewport.is_err();          // NEW — read before `.ok()` shadows `viewport`
+let command_kind = current_command
+    .as_deref()
+    .map(agent_from_command)
+    .unwrap_or(AgentKind::Unknown);
+let running_command = current_command.or_else(|| previous.running_command.clone());
+let title_kind = agent_from_title(title);
+let viewport_kind = viewport
+    .as_deref()
+    .map(agent_from_viewport)
+    .unwrap_or(AgentKind::Unknown);
+let mut kind = [command_kind, title_kind, viewport_kind]        // NEW: mut
+    .into_iter()
+    .find(|kind| *kind != AgentKind::Unknown)
+    .unwrap_or(AgentKind::Unknown);
+// A partial poll failure (exactly one of command/viewport missing) must not
+// by itself erase a previously known kind: the missing source, not a change
+// in the pane's program, is why nothing matched this tick. A poll where both
+// sources succeeded and still came up Unknown is trusted immediately — that
+// is a real classification, not a gap (see
+// `successful_unknown_sources_clear_stale_agent_kind`).
+if kind == AgentKind::Unknown                                    // NEW
+    && previous.kind != AgentKind::Unknown
+    && (command_failed || viewport_failed)
+{
+    kind = previous.kind;
+}
+```
+
+`command_failed`/`viewport_failed` must be captured from the `Result`s
+*before* `command.ok()`/`viewport.ok()` discard the `Err` — the existing
+code only keeps the `Ok` payloads. No other lines in `enrich_fields` change;
+the rest of the function (the viewport-absent early return, the
+`detect_viewport` call) already consumes `kind` by value, so both consumers
+automatically see the fallback.
+
+This resolves checklist item 2 (`detect_viewport` running
+`blocker_line`/`has_working_signal` off the AC-1 fallback) for free: the
+`detect_viewport(kind, viewport.as_slice())` call at the end of
+`enrich_fields` already passes the (now possibly-fallback) `kind` — no
+separate change is needed there. It only runs when `viewport` is `Some`
+(command-failed/viewport-ok, the AC-2 shape); when viewport itself failed,
+the function already takes the early-return branch that preserves
+`previous.state`/`previous.status` directly, so there is no viewport text to
+re-scan that tick regardless of `kind`.
+
+**Staleness ceiling: rejected, no ceiling added.** Two reasons:
+1. There is no clock or counter available to a pure function like
+   `enrich_fields`, and none of the callers thread poll-tick counts into
+   `AgentFields` today. Adding one means growing `AgentFields` with a new
+   field purely to support an edge case with no reported symptom — the kind
+   of invented mechanism this stage is supposed to avoid.
+2. The codebase already has a named, precedented policy for exactly this
+   trade-off: "stale-not-blank." `pane_cwds`'s doc comment
+   (`src/main.rs:96-99`, "A failed poll keeps the previous entry
+   (stale-not-blank)") and `refresh_statuses`'s wedge-abort comments
+   (`src/main.rs:989-992`, `1002-1006`) both keep prior data indefinitely
+   across consecutive failed/skipped polls rather than blanking it after N
+   tries. `PollBackoff::record` (`src/main.rs:128-136`) reinforces this: a
+   single successful poll — not a timeout — is what clears staleness. Kind
+   should follow the same rule its sibling fields already follow: any
+   ceiling that force-expires `kind` after N failed polls would reintroduce
+   exactly the flicker this fix exists to remove, on the one signal
+   (`kind`) that currently gets *worse* treatment than `state`/`status`/
+   `pane_cwds` already get.
+
+**Related gap, confirmed out of scope, separate finding.**
+`preserve_agent_fields` (`src/main.rs:1965-1971`) and `rows_for_own_tab`
+(`src/main.rs:1985-2004`) are a different code path from `enrich_fields`,
+triggered by `Event::PaneUpdate` manifest rebuilds
+(`src/main.rs:510-515`), not by the 2s poll timer. `rows_for_own_tab`
+always constructs fresh `Row`s with `agent: AgentFields::default()`;
+`preserve_agent_fields` restores prior agent fields only via an *exact*
+`pane_id` match against the old row set. If zellij ever hands out a new
+`pane_id` for what a user perceives as the same terminal across a manifest
+rebuild, the match fails and the row resets straight to
+`AgentFields::default()` (Unknown/Idle/empty) with no fallback and no
+self-correction path — worse than the bug this entity fixes, since nothing
+here ever re-derives the old identity from title/position. This is a
+distinct trigger (manifest/pane_id churn, not poll `Result::Err`), a
+distinct code path, and would need a distinct, riskier remediation
+(matching identity across a `pane_id` change needs a heuristic — title or
+position — with its own false-positive risk, e.g. mis-attributing one
+pane's agent state to a different pane that happens to reuse a
+position). It is not the same fix and is **not in scope here**; filed as a
+follow-up finding rather than folded into this entity's AC set.
 
 ## Acceptance criteria
 
@@ -128,5 +220,20 @@ The `GetPaneRunningCommand`/`GetPaneCwd` host-call timeout frequency itself
 territory (an inconclusive timeout-correlation check already ran there).
 This entity is about the classification logic not regressing *when* a poll
 fails, regardless of why it fails. Also out of scope: the `Row`/`pane_id`
-identity-loss question named in Proposed approach step 3, unless ideation
-finds it's the same fix.
+identity-loss gap in `preserve_agent_fields`/`rows_for_own_tab` — ideation
+confirmed (see Proposed approach) it is a distinct trigger and code path
+from the `enrich_fields` fix here, not the same fix; tracked as a separate
+follow-up finding.
+
+## Stage Report: ideation
+
+- DONE: Confirm the exact fallback fix for enrich_fields (kind falls back to previous.kind on partial poll failure) and decide whether it needs a staleness ceiling, with concrete code before/after.
+  Read src/agent.rs:174-218; wrote before/after diff in Proposed approach — capture `command_failed`/`viewport_failed` ahead of `.ok()`, fall back `kind` to `previous.kind` only when fresh classification is Unknown and one poll axis failed. Ceiling rejected: no ceiling added, citing the existing "stale-not-blank" precedent (src/main.rs:96-99, 128-136, 989-1006).
+- DONE: Confirm detect_viewport (or its caller) still runs blocker_line/has_working_signal when kind is only known via the AC-1 fallback, not only on fresh detection.
+  Traced enrich_fields's existing `detect_viewport(kind, viewport.as_slice())` call: it already consumes the (now fallback-capable) `kind` by value, so no separate change to detect_viewport or its caller is needed — confirmed in Proposed approach.
+- DONE: Check preserve_agent_fields/rows_for_own_tab for a related pane_id-identity-loss gap and state explicitly whether it's in scope here or a separate finding.
+  Read src/main.rs:510-515, 1965-2004: confirmed a real gap (exact pane_id match, no fallback, full reset to default on manifest rebuild) but a distinct trigger/code path from enrich_fields; recorded as out of scope, filed as a separate follow-up finding, not folded into this entity's ACs.
+
+### Summary
+
+Confirmed the `enrich_fields` fix is a single conditional after the existing three-source `kind` derivation: fall back to `previous.kind` only when the fresh result is `Unknown` AND at least one of `command`/`viewport` failed this tick, leaving the existing all-succeeded-Unknown clearing path (`successful_unknown_sources_clear_stale_agent_kind`) untouched. No staleness ceiling — the codebase's existing `pane_cwds`/`PollBackoff` "stale-not-blank" precedent argues against one, and none of the current ACs need it. The `preserve_agent_fields`/`pane_id` gap is real but confirmed as a separate, out-of-scope finding (different trigger: manifest/pane_id churn, not poll `Result::Err`).
