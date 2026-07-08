@@ -384,3 +384,62 @@ exact count parity with what grout piped — proving the shipped mechanism
 end-to-end ahead of CL's live demo. Wrote the demo script for AC-6/AC-7 and
 the AC-8 dogfood framing to the gate file; CL settles those three live — no
 fabricated decision log, since only CL's actual review can populate one.
+
+### Feedback Cycles
+
+**Cycle 1 (2026-07-08) — REJECTED at validation, routed to implementation.**
+
+CL's live demo (2026-07-08) surfaced a real spec mismatch, independent of a
+build mixup along the way (Tab #6's rail was loaded from the main-repo wasm,
+not this worktree's build — the "AC-7 doesn't switch tabs" symptom CL first
+saw was that mixup, not this finding; re-confirmed the real gap directly
+from CL's stated requirements once corrected):
+
+1. **AC-4/AC-7 direction is wrong.** The implemented design
+   (`terminal_panes_all_tabs`, `bind_session`'s "own-tab-first, then a lone
+   cross-tab match, else unbound," `ClickAction::FocusPane` switching tabs)
+   is exactly what AC-4/AC-7 asked for — but CL does not want cross-tab
+   binding or cross-tab click at all. CL's words: "I want the sidebar's
+   agent/pane/gate bound to panes of the same tab, so that I can structure
+   projects by tab." Fix: revert to (or design fresh) strict same-tab-only
+   binding — a session whose cwd doesn't match a pane in the sidebar's own
+   tab is out of scope, not "unbound" — see point 2, it should not appear
+   as a row at all, not merely be unclickable.
+2. **Out-of-scope sessions must not be listed, not just be unclickable.**
+   Confirmed via explicit follow-up (CL chose "filter out entirely" over
+   "list but mark unbound"): a tab's AGENTS section must show only sessions
+   whose cwd falls under that tab's own project scope (matched against the
+   panes/cwds already visible to that tab's sidebar instance). Sessions
+   outside that scope should not be emitted as rows in that tab at all —
+   this is a real filtering change (likely in the plugin's session-render
+   path, matching `self.pane_cwds`/`self.rows` for the tab), not a label
+   change.
+3. **Subagent/automated/child sessions must never be listed, in any tab.**
+   CL: "we shouldn't list subagents." The current design queries
+   `agentsview` with `--include-automated --include-children` (per AC-6's
+   own baseline command) and grout emits whatever it gets back undifferentiated.
+   Fix: exclude automated/child (subagent) sessions from what grout emits,
+   or from what the plugin renders — implementation decides which layer is
+   the right place, but the end state is that no subagent session ever
+   appears as a row, in any tab.
+
+**Revisions needed to this entity's own ACs, not just the code:**
+- **AC-4** must change from "cross-tab bind and click decisions" to
+  "same-tab-only bind decisions: a session whose cwd doesn't match a pane
+  in the given tab's own set is out of scope, not bound, and not rendered
+  as a row" — the synthetic multi-tab fixture test should assert zero
+  cross-tab rows/clicks, not a cross-tab FocusPane decision.
+- **AC-6**'s baseline changes from system-wide
+  `agentsview session list --include-one-shot --include-automated
+  --include-children` count parity to: count parity against sessions (a)
+  whose cwd falls under the demo tab's own project scope and (b) excluding
+  automated/child sessions — restate the exact baseline command implementation
+  lands on.
+- **AC-7** is dropped/superseded — replaced by an assertion that a session
+  outside the current tab's scope never appears as a row (already covered
+  by the revised AC-4's rendering-side assertion); do not re-add a
+  cross-tab-click AC.
+- **AC-8** unaffected.
+
+Routed to implementation fresh (no addressable worker handle from this
+session for the prior implementation/validation ensigns).
