@@ -215,3 +215,23 @@ Top-level `README.md`, AGENTS bullet:
 ### Summary
 
 Surveyed agentsview v0.36.1's real termination_status vocabulary end to end (full-corpus API survey plus the UI bundle's own liveness derivation): status alone cannot carry liveness, so the design maps status + transcript recency onto the plugin's four states, with one named deviation (awaiting_user never decays — the rail's return-after-an-hour scenario) and verbatim pass-through for vocabulary drift. The default-path fix resolves as "both positionals required" (resolve-from-executable breaks under go run). Direct DB/source reads were OS-blocked this session; the daemon's HTTP API carried the survey.
+
+## Stage Report: implementation
+
+- DONE: Each commit: red test first with the failure reason recorded, then the minimal fix, one behavior per commit
+  4 commits (0e60540, 0ed1052, e661dea, c2954d2), each red→green; exact red per commit below. Behaviors: MapSessionState; lastActivity coalescing; BuildSessionRow wiring; CLI both-positionals-required.
+- DONE: go test ./... and go vet green for grout (plugin untouched — vocabulary/rendering stay as shipped)
+  `go test ./...` → ok zaphod/grout; `go vet ./...` clean. `git diff --name-only main...HEAD` touches no `src/` — src/agent.rs marker vocabulary and rendering unchanged.
+- DONE: Stage report includes before/after test counts and the exact red output for each commit
+  Top-level tests 6 → 11 (subtests 59 total); red output per commit recorded below.
+
+### Red output per commit
+
+- **0e60540 MapSessionState (AC2, AC4):** `./state_test.go:22:50: undefined: workingWindow` … `:41:11: undefined: MapSessionState` → `FAIL zaphod/grout [build failed]`. Fix: new state.go with the 5-row mapping + 60s/600s windows. Green: TestMapSessionState (17 subtests) + TestMapSessionStateZeroTimeIsInfiniteAge.
+- **0ed1052 lastActivity coalescing:** `./state_test.go:63:33: unknown field EndedAt in struct literal of type sessionInfo` … `:71:14: undefined: lastActivity` → `[build failed]`. Fix: sessionInfo gains ended_at/started_at/created_at; lastActivity picks first non-empty, parses, zero-time on absent/unparseable. Green: TestLastActivityCoalesces (5 subtests).
+- **e661dea wire BuildSessionRow (AC1, AC3, AC6):** `--- FAIL: TestSessionRowFromFixture … State:awaiting_user, want … State:blocked`; `--- FAIL: TestEmitEndToEnd … session row state = awaiting_user, want blocked`; `--- FAIL: TestSurveyStatusesRenderInsideMarkerVocabulary … 4/4 survey statuses render Unknown, want 0`. Fix: BuildSessionRow uses MapSessionState(status, lastActivity(si), now); READMEs document the derivation. Green: 0/4 Unknown.
+- **c2954d2 CLI both-positionals-required (AC5):** `--- FAIL: TestCLIRequiresBothPositionals … exit code = 1, want 2` with stderr `agentsview session get 31dbb8ee…: exec: "agentsview": executable file not found in $PATH` missing `usage` (the hidden machine dependency, from both cwds). Fix: drop demo SessionID + cwd-relative GateLog defaults; `len(os.Args) < 3` → usage on stderr, exit 2. Green: exit 2 + usage from grout/ and repo root.
+
+### Summary
+
+Two grout-side changes, plugin contract untouched. Session rows now derive `state` via `MapSessionState(termination_status, lastActivity, now)` onto the plugin's blocked/working/idle/done vocabulary (verbatim pass-through for drift), coalescing `ended_at ?? started_at ?? created_at` with a zero-time fallback so stale rows never guess a live state; windows mirror agentsview v0.36.1's decoded derivation. The CLI now requires both positionals, exiting 2 with usage — removing the demo-session-id and cwd-relative gate-log defaults that bit CL under `go run .`. Offline ACs (AC1–AC6) covered by Go tests; AC-I1 remains CL's live demo. Note for reconcile: agentsview.go (+3 sessionInfo fields) and rows.go (1-line BuildSessionRow) overlap the sibling grout-sse-daemon surface — kept minimal.
