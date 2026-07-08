@@ -312,3 +312,53 @@ Reconned subspace at HEAD 9be5fbc and found three plan assumptions inaccurate: `
 ### Summary
 
 Built the walking skeleton across the sprint 2/3 seam. grout: glob discovery (both decision-log forms), addr captured from the server's stderr (no `<log>.addr`), and a `watch` poll loop that launches each gate's server and emits rows carrying the addr. plugin: the gate row's detail line issues an `approve` verdict by running `curl` through the existing RunCommands path (title line still floats the review TUI — additive); a source scan asserts only `approve` is wired. Test counts: plugin 130→134 (`cargo test` + `cargo check --tests` clean); grout 41 test funcs green (`go test ./...` + `go vet` clean, AC-2 runs with the binary present). Smoke-tested the full live `grout watch` path against a fresh subspace build at 9be5fbc: it emitted a gate row with a captured `http://127.0.0.1:PORT/` addr. Decisions for the gate: (1) approve gesture is the detail-line click with no confirmation step — accidental-approve risk, deferred to CL's AC-5 read; (2) grout owns the server launch for the skeleton (F-2 `<log>.addr` removes it); (3) AC-2 and `grout watch` need the cross-repo `spacedock-subspace` binary (not vendored) — tests skip without it, run via `SPACEDOCK_SUBSPACE_BIN`/PATH.
+
+## Stage Report: validation
+
+Identity: re-ran against worktree HEAD `1e390dd` (clean, no uncommitted changes). subspace built fresh from `spacedock-research/spacedock-subspace@9be5fbc` (matches recon).
+
+- DONE: Independently re-run AC-1/AC-2/AC-3/AC-4's evidence against the implementation worktree's final commit -- re-execute the tests yourself (including the AC-2 drill, TestRailVerdictUnblocksRealWaiter), not a re-read of the implementer's stage report.
+  All PASS re-executed by me. AC-1 `TestDiscoverEmitsGateRowOnFilesystemChange` (0.23s: emission 0→1 driven by `writeGate`, a fs change grout did not make). AC-3 `TestParseServerURL`+`TestGateRowCarriesCapturedAddr`. AC-2 `TestRailVerdictUnblocksRealWaiter` (2.04s) with binary; SKIP 0.00s without it → proves the binary is genuinely exercised, not a silent pass. AC-4 four tests + source scan, `cargo test` 134 passed / 0 failed. `go vet` + `cargo check --tests` clean.
+- DONE: Review the implementer's flagged interpretation (grout's watch loop does not shell `spacedock-subspace wait`; FO gate-loop is the real waiter; grout-side wait-probing YAGNI).
+  CONFIRMED — does NOT undermine AC-2. grout production code never shells `wait`: the only `exec.Command` of the subspace binary is the SERVER launch `spacedock-subspace <brief>` (`grout/watch.go:40`); the sole `wait` shell-out in the whole module is the AC-2 drill test (`grout/verdict_unblock_test.go:127`); the "wait" in `grout/state.go:19,44` is the word "awaiting_user". The waiter is architecturally a separate process (FO gate-loop), so grout not owning it is correct separation, and a grout-side second poller on the same log would be redundant → YAGNI is sound. AC-2's value claim is proven regardless: the drill spawns a REAL `spacedock-subspace wait` poller (same binary+verb the FO runs), confirms it blocked, POSTs approve, asserts exit 0 + one verdict line.
+- DONE: Run a refutation audit on a throwaway checkout against the curl verdict path and poll+glob discovery loop, naming concrete attack scenarios; prepare the AC-5 live demo script.
+  Audit run on a detached throwaway worktree at `1e390dd` (never the impl worktree; removed after). Attacks + verdicts below. Demo script below. AC-5 NOT faked — it is CL's to drive.
+
+### Refutation audit — attacks attempted
+
+Curl verdict path (`src/main.rs`):
+- SURVIVES — existing float-review click unregressed: gate TITLE line still floats `subspace-tui` (`main.rs:1411-1418`); approve is additive on the DETAIL line only (`1419-1421`), asserted by `gate_detail_click_approves_via_captured_addr`.
+- SURVIVES — no POST-to-nowhere: an addr-less gate row decides to `ClickAction::None` (`main.rs:1419,1422`), asserted by `gate_detail_click_without_addr_does_nothing`.
+- SURVIVES (with named limit) — approve-only: body is the hardcoded literal `{"verdict":"approve"}` (`main.rs:431`); the AC-4 source-scan guard `only_approve_verdict_is_wired` catches any LITERAL non-approve body but has a blind spot for a dynamically-built body (e.g. `format!` with a variable) — no such path exists in this diff, so AC-4 holds; flagged for F-1.
+- SURVIVES by construction — no shell injection: curl runs as an argv vector via `CommandToRun{path:"curl", args:…}` (`main.rs:797-805`), not a shell string; addr also originates from a localhost server grout launched, not attacker input. Trailing slashes normalized by `trim_end_matches('/')` (`main.rs:424`).
+
+Poll+glob discovery (`grout/`), probed live in the throwaway:
+- CONFIRMED (accepted for 1-gate scope) — one malformed brief poisons the WHOLE pass: `discoverGates` folds every gate and returns on the first error (`grout/discover.go:34-38`), so a single broken sibling suppresses valid gates' rows too (probe: emitted=0, 0 rows piped). Fine for the one-gate skeleton; a multi-gate robustness gap → F-4. Same shape for server-launch failure aborting `runWatch` at startup (`grout/watch.go:68-70`).
+- SURVIVES — per-row addr-resolution failure is isolated: inside a tick `discoverAndEmit` logs+skips a failed row and emits the rest (`grout/discover.go:54-72`) (probe: 1 healthy row still piped while the other failed).
+- SURVIVES — no double-count (the two glob forms are structurally disjoint); empty decision-log is fine (row identity comes from the brief, not log content).
+
+Semantic drift / cross-checks:
+- Sprint-0 one-shot `run` unaffected: `addr` is `json:",omitempty"` (`grout/rows.go:30`) + plugin `#[serde(default)]` — old gate rows serialize unchanged.
+- Drift risk flagged: the Go drill's curl argv (`verdict_unblock_test.go:147`) and the Rust plugin's `verdict_post_args` (`main.rs:424-432`) are independently-maintained literals. I ran the rail's EXACT argv-as-written live against a real grout-launched server + real `wait` poller → `{"status":"recorded"}`, waiter EXIT 0, fold `{"verdict":"approve",…}`, exactly 1 verdict line. They currently agree byte-for-byte.
+- Minor: the body's recon cites `docs/dev/gate-loop-recipe.md` (lines 82,99) which does not exist in the repo — a recon citation, not a code claim; the `spacedock-subspace wait` mechanism it names is real (exit 0=resolved / 5=timeout, `wait.go`) and matches AC-2's baseline. Does not affect any AC.
+
+### Pre-demo infra spot-check (done — proves the drill before CL's live time)
+
+Drove the full live `grout watch` path with a real subspace server and only zellij faked as the sink: grout launched `spacedock-subspace <brief>`, captured `http://127.0.0.1:56489/` from its stderr, and piped one `agent-event` gate row carrying that addr + folded fields (`kind=gate, entity=playground, stage=review, round=1, recommendation=approve`). Combined with the live rail-argv POST→resume above, the entire headless half of AC-5 is proven; only the live click remains for CL.
+
+### AC-5 demo script (CL drives, live zellij session)
+
+Prereqs: run everything from INSIDE the fresh zellij session that has the rail docked (so grout's `zellij pipe` reaches it). `spacedock-subspace` on PATH or `SPACEDOCK_SUBSPACE_BIN` set; `curl` on PATH; the plugin's RunCommands permission already granted (reuses the subspace-tui float path — no new grant). IMPORTANT coupling: grout owns the server launch, so do NOT also launch a second `spacedock-subspace <brief>` server for the same gate — run only the `wait` poller. Only the detail (2nd) line of the gate row approves; the title line still floats the review TUI.
+
+1. Build grout: `cd <worktree>/grout && go build -o /tmp/grout .`
+2. Create a fixture gate dir `GATES=$(mktemp -d)/gates; mkdir -p $GATES/playground`, write `$GATES/playground/brief.md` (verdict-mode: `subspace: v0`; `gate:` with workflow/entity/entity-title/stage/round; `recommendation: {verdict: approve}`; `artifact: {kind: draft, path: ./playground.md}`), a `playground.md`, and an empty `decision-log.jsonl`. (A real open zaphod-dev gate works too.)
+3. Start the FO's waiter in a visible pane: `spacedock-subspace wait --interval 2s $GATES/playground/decision-log.jsonl` — it blocks.
+4. Start discovery: `SPACEDOCK_SUBSPACE_BIN=… /tmp/grout watch $GATES`. Expect: a gate row appears in the rail WITHOUT CL hunting — line 1 = blocked glyph + "Playground handoff demo", line 2 = "review r1 · approve".
+5. CL clicks the gate row's DETAIL line (line 2). Expect: a floating curl pane fires `POST <addr>/api/verdict {"verdict":"approve"}` → `{"status":"recorded"}`.
+6. Expect: the waiter from step 3 resumes EXIT 0 with fold `{"verdict":"approve",…}`; the log gains exactly one `"event":"verdict"` line; the entity advances. This is the exact loop that failed live tonight (feedback left, nothing consumed) now closing end-to-end.
+
+Watch-fors during the demo: the row must carry a non-empty addr (else the detail click is a no-op by design); accidental-approve — the detail click approves with no confirmation step (implementer decision (1), CL's call); if CL launched its own server, the flock contends — let grout be the sole launcher.
+
+### Summary
+
+Independently reproduced all four offline ACs against worktree HEAD `1e390dd` by re-executing the tests (AC-1/AC-3/AC-4 hermetic; AC-2 drill 2.04s with a fresh subspace@9be5fbc build, and SKIP-without-binary proving it is genuinely exercised); `go vet`, `cargo check --tests`, `cargo test` (134/0) all clean. Confirmed the flagged interpretation with file:line — grout never shells `wait`, the FO gate-loop is the real waiter, and AC-2's value claim holds because the drill drives a real `wait` poller; the YAGNI call is sound. Refutation audit on a throwaway checkout: the curl verdict path SURVIVES all attacks (additive click, addr-less no-op, argv-vector no-injection, approve-only guard with a named dynamic-body blind spot); the poll+glob loop is per-row resilient but all-or-nothing on a malformed brief (acceptable for one gate, named F-4) — no REFUTED. Also proved the rail's exact argv-as-written unblocks a real waiter live (Go-drill/Rust-literal agree). Prepared the AC-5 live demo script; AC-5 remains OPEN for CL to drive. Recommendation: the offline ACs pass gate; present AC-5 to CL for the live close.
