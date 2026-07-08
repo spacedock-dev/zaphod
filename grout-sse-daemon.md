@@ -100,13 +100,15 @@ new subcommand; the one-shot invocation and its tests stay untouched.
   active window emits no event. Refresh = `session list --server <URL>
   --json --include-one-shot --active-since <now − since>` (shelling out to
   the agentsview binary — the enrichment surface the plan pins, since events
-  carry no content; automated and child/subagent sessions stay excluded —
-  agentsview's default — so no subagent session ever reaches a row; cycle 2
-  dropped `--include-automated --include-children` per CL's feedback that
-  subagents must never be listed), decode `{"sessions":[…]}`, build one row
-  per entry via the existing `BuildSessionRow`, emit each via the existing
-  `EmitRow` (5s kill timer, sequential, never `--plugin` — all shipped
-  semantics).
+  carry no content; cycle 2 dropped `--include-automated --include-children`
+  but cycle 3 found agentsview's own classifiers don't reliably catch
+  Task-tool subagents anyway — `is_automated` was false for every subagent
+  session in a 200-session live sample — so `excludeSubagents` filters by id
+  prefix instead: any session id starting with `agent-`, the shape every
+  Task-tool-spawned subagent gets, never reaches a row), decode
+  `{"sessions":[…]}`, build one row per entry via the existing
+  `BuildSessionRow`, emit each via the existing `EmitRow` (5s kill timer,
+  sequential, never `--plugin` — all shipped semantics).
 - **Emit policy: full re-emit per refresh.** Every refresh emits every
   in-window session row with fresh `ts`. The plugin upserts idempotently and
   re-renders only on change; the re-stamped `ts` is the seam the
@@ -199,17 +201,20 @@ grout/README.md — reword the skeleton framing to cover both modes and add:
     each event — plus every `-tick` — re-lists sessions active in the last
     `-since` via `session list --server … --include-one-shot
     --active-since …`, emitting one session row per zellij pipe with fresh
-    `ts`. Automated and child (subagent) sessions stay excluded —
-    agentsview's default — so no subagent ever reaches a row; one-shot
-    sessions stay included as a distinct top-level invocation. Reconnects
-    with backoff on stream loss (90 s of silence forces it). One refresh in
-    flight at a time; a wedged pipe costs ≤5 s per row (kill timer) and
-    never wedges grout. Ctrl-C exits cleanly. Grout never stops the shared
-    daemon.
+    `ts`. Subagent sessions are filtered by id prefix (any session id
+    starting with `agent-`) — not by agentsview's own
+    `--include-automated`/`--include-children` flags, which don't reliably
+    catch them — so no subagent ever reaches a row; one-shot sessions stay
+    included as a distinct top-level invocation. Reconnects with backoff on
+    stream loss (90 s of silence forces it). One refresh in flight at a
+    time; a wedged pipe costs ≤5 s per row (kill timer) and never wedges
+    grout. Ctrl-C exits cleanly. Grout never stops the shared daemon.
 
 (Cycle 1 proposed and applied a cross-tab-binding version of the README
 bullet, with `--include-automated --include-children` on the list command;
-cycle 2 replaced both with the text above per CL's feedback below.)
+cycle 2 replaced both with a version trusting agentsview's own default;
+cycle 3 replaced that with the id-prefix filter described above, per CL's
+feedback below.)
 
 ## Acceptance criteria
 
@@ -266,16 +271,17 @@ against an independent baseline scoped to the tab's own project.** In CL's
 fresh zellij session, one `grout watch` start fills the demo tab's AGENTS
 section within 30s with the same session count that `agentsview session
 list --include-one-shot --active-since <horizon> --json` reports, filtered
-to sessions whose cwd matches one of the demo tab's own pane cwds
-(automated/child sessions are excluded from both sides by omitting
-`--include-automated --include-children` — agentsview's default, so a
-subagent can never inflate either count); count parity — the baseline moves
-the wrong way if grout drops, ghosts, wrongly includes an out-of-scope
-session, or wrongly includes a subagent session. A brand-new Claude session
-started in another tab's project does not appear in the demo tab at all; one
-started in the demo tab's own project appears ≤30s after its first message
-with no grout interaction (10s coalesce + refresh headroom over the probe's
-≤12s).
+to sessions whose cwd matches one of the demo tab's own pane cwds and whose
+`id` does not start with `agent-` (not "excluding automated/child
+sessions" — that phrasing named the wrong mechanism; `--include-automated`/
+`--include-children` don't reliably catch Task-tool subagents, confirmed
+against 200 real sessions where `is_automated` was false for all of them);
+count parity — the baseline moves the wrong way if grout drops, ghosts,
+wrongly includes an out-of-scope session, or wrongly includes an
+`agent`-prefixed subagent session. A brand-new Claude session started in
+another tab's project does not appear in the demo tab at all; one started in
+the demo tab's own project appears ≤30s after its first message with no
+grout interaction (10s coalesce + refresh headroom over the probe's ≤12s).
 Verified by: demo script steps including the scoped count-parity check.
 
 **AC-7 — Superseded by AC-4.** Cross-tab click is out of scope: binding and
@@ -284,6 +290,12 @@ rendering never cross tabs (see AC-4). There is no cross-tab
 assertion is AC-4's offline, agent-reproducible test, not a demo-gated live
 check. Do not re-add a cross-tab-click AC.
 Verified by: n/a — folded into AC-4.
+
+**Subagent-id filter (offline, agent-reproducible).** A session whose id
+starts with `agent-` is filtered out of what `listSessions` returns, even
+when its cwd matches another in-window session's cwd exactly — a cwd match
+must not save a subagent from the filter.
+Verified by: `cd grout && go test -run 'TestExcludeSubagents|TestListSessionsFiltersSubagents' ./...`
 
 **AC-8 — Dogfood exit: alt-tab scanning replaced.** After a real dogfood
 window (a working day with ≥2 concurrent workflows), CL confirms at the gate
