@@ -642,6 +642,12 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::RunCommands,
             ]);
         }
+        if cols < STATUS_MIN_COLS {
+            for line in sliver_lines(&self.rows, &self.sessions, &self.gates) {
+                println!("{line}");
+            }
+            return;
+        }
         // Header: any click runs the same dock toggle as Alt-/ (the ⇄ marks
         // it).
         println!(
