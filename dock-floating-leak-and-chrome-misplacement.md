@@ -426,11 +426,205 @@ does not, the population-size theory is itself falsified and the
 mid-rebuild-timing / other explanations proposed above (the entity's own
 prior leads) move back to the front.
 
+**Fix designed (2026-07-09, cycle 3).** An adversarial verification pass
+(`wf_a0149a90-999`) confirmed the TOCTOU race at high confidence — no lock
+exists anywhere in `src/main.rs`, and the transform functions were
+empirically proven clean (temporary tests fed the exact corrupted-shape
+input). This cycle's job shifts from further root-causing to designing and
+validating the actual fix.
+
+**Chosen design: a population-gated recheck immediately before
+`override_layout` fires.** In `install_split_preserving_swaps`
+(`main.rs:895-969`), after `split_preserving_layout_kdl` builds the KDL and
+before `override_layout` is called, when `self.instances.len() > 1` (2+
+config-matched sidebar instances known session-wide — a single instance
+cannot race itself, so this is skipped, and the cost is paid only when a
+race is actually possible), take a second `dump_session_layout_for_tab`
+call and re-run `dump_contains_sidebar` on it. If it now shows a sidebar,
+another instance's install landed in the gap between this instance's own
+first dump and this point — abort (the same `Some(())` no-op convention the
+existing dump-abort already uses) instead of firing a redundant,
+corrupting override. This closes the race window from "however long the
+*first* dump's round trip took" (up to a documented 1s server-side timeout)
+down to "the latency of one more dump round trip taken immediately before
+firing" — the residual window left is only the async dispatch latency of
+`override_layout` itself, not a full round trip.
+
+**Alternative considered and rejected: gate WHO ATTEMPTS via a lowest-pane-id
+election.** This was the verification pass's leading candidate, and it is
+structurally the *same* mechanism `docs/docking-approach.md`'s Toggle v3.8
+"Relaxed retrofit election" (`:573-589`) already tried and *removed*: a
+session-wide "lowest pane id acts" gate caused deadlock/starvation, because
+instances disagree on which tab is active under `tab_id → position`
+staleness — the elected instance often had a *stale* view and didn't even
+see the tab needing retrofit, while correctly-seeing instances were barred
+from acting. This entity's race is a different shape of problem (multiple
+instances *correctly* agreeing a tab needs retrofit, racing on timing, not
+disagreeing on which tab) — but a hard pre-attempt eligibility gate would
+still resurrect the same failure mode, since gate-then-decide-who-may-try
+is exactly what v3.8 proved unsafe under staleness. **Rejected**: reintroduces
+a known, documented, previously-fixed bug class to fix a different one.
+(A softer identity-based *stagger*, not a hard gate — every instance still
+eventually attempts, none is ever forbidden, only reordered — was considered
+as a possible latency optimization on top of the recheck, but adds real
+complexity for a benefit the recheck alone already delivers structurally;
+not pursued, see YAGNI.)
+
+**Alternative considered and folded in: re-check immediately before firing.**
+This *is* the chosen design (above), not a rejected alternative — restated
+here because the verification pass's dispatch named it as the fallback
+candidate; the reasoning above is why it is preferred over the election gate,
+not merely a fallback.
+
+### Fix validation (2026-07-09, cycle 3) — fixture-level red/green plus a named, honest limit
+
+**What is and isn't testable, checked first.** Researched whether
+`install_split_preserving_swaps` can be unit-tested end to end: no. Both
+`dump_session_layout_for_tab` and `override_layout` are host imports from
+`zellij_tile::prelude::*` that bottom out in `unsafe { host_run_plugin_command() }`;
+the crate's only native-test-mode stub for that symbol is the no-op at
+`main.rs:2055-2056` (`extern "C" fn host_run_plugin_command() {}`, present
+solely to satisfy the linker per `README.md:130-132`) — it does not simulate
+a controlled dump or a controlled override, so calling
+`install_split_preserving_swaps` from a test would not exercise a real race,
+only an error path. No trait/DI/mock seam exists over this boundary anywhere
+in the file (confirmed by grep for `trait `, `dyn `, `Box<dyn`, `mockall`).
+Building one would be a disproportionate abstraction for this fix and is not
+proposed.
+
+**What was built and run instead — a temporary patch, applied, tested, and
+reverted (not shipped this cycle; ideation validates the mechanism,
+implementation ships it).** Implemented the chosen design exactly as
+specified above in a local, uncommitted patch to `src/main.rs` (reverted
+after validation via `git checkout -- src/main.rs`; the exact diff is
+reproduced in full below, under "Patch for implementation to apply
+verbatim," so the implementation stage does not need to re-derive it from
+this prose) and added one new test,
+`recheck_dump_distinguishes_a_race_the_first_check_alone_cannot`, placed
+beside the existing `dump_with_a_tiled_sidebar_is_recognized_as_already_retrofitted`
+test. The new test asserts, using `dump_fixture()` (existing, no-sidebar
+fixture) and an inline "already retrofitted" fixture matching the existing
+suite's established shape: (1) both racers' first dump looks identical and
+safe — `!dump_contains_sidebar(dump_fixture(), url)` — the exact gap that
+makes the race possible with a single check; (2) a recheck taken after a
+concurrent instance's install lands correctly sees its rail —
+`dump_contains_sidebar(after_a_concurrent_install_lands, url)`. Ran
+`cargo test`: full suite **133/133 passed, 0 failed** (132 pre-existing +
+this new test), including all of `decide_toggle`'s and
+`install_split_preserving_swaps`'s existing coverage — no regressions.
+Confirmed via `git stash`/`cargo build --release --target wasm32-wasip1`
+that this environment's wasm target build fails identically on unmodified
+HEAD (`can't find crate for core`, a pre-existing local toolchain gap, not
+caused by this patch) — `cargo test` (native) is the project's documented
+dev-loop check (`README.md:130`) and the only one available here.
+
+**Honest limit, stated plainly, not papered over.** The new test proves the
+*discrimination primitive* the fix leans on — that `dump_contains_sidebar`
+correctly tells "before either racer lands" from "after one has landed"
+apart — but that claim was already true *before* this patch (it doesn't
+call any new production code; it exercises the pre-existing, already-tested
+`dump_contains_sidebar`). What is new in this patch — the actual recheck
+*call site* inside `install_split_preserving_swaps`, gated on
+`self.instances.len() > 1` — is exactly the piece the host-call boundary
+makes untestable without a live session, for the reason stated above. This
+is not a full red-before/green-after cycle for the integration wiring
+itself; it is the honest ceiling of what a fixture-level check can prove
+given this codebase's real constraints, plus a real, run, zero-regression
+`cargo test` pass proving the change doesn't break anything already
+covered. Closing this residual gap needs either the population-seeded
+disposable-session spike already proposed above, or observing the next
+organic `WORK` occurrence once implementation ships the fix — recommended
+to implementation as a post-ship check, not required before this design is
+accepted.
+
+#### Patch for implementation to apply verbatim
+
+Validated this cycle (133/133 `cargo test` passed with this patch applied,
+0 regressions; reverted from the working tree afterward — not committed):
+
+```diff
+diff --git a/src/main.rs b/src/main.rs
+index 3a209b7..d774041 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -930,6 +930,30 @@ impl Sidebar {
+                 return None;
+             }
+         };
++        // The dump above and this point are separated by the KDL build, but
++        // more importantly by however long it took OTHER instances to reach
++        // their own override_layout call: with 2+ config-matched instances
++        // session-wide, another may have dumped this same tab before either
++        // of us landed and be racing to override it too. A single instance
++        // cannot race itself, so this recheck — and its host round trip — is
++        // skipped when none is possible.
++        if self.instances.len() > 1 {
++            match dump_session_layout_for_tab(tab_id) {
++                Ok((recheck, _)) if dump_contains_sidebar(&recheck, &url) => {
++                    trace!(
++                        self,
++                        "rebuild aborted tab={}: a concurrent retrofit landed first (recheck)",
++                        tab
++                    );
++                    return Some(());
++                }
++                Ok(_) => {}
++                Err(e) => {
++                    trace!(self, "rebuild failed tab={}: recheck dump error: {}", tab, e);
++                    return None;
++                }
++            }
++        }
+         trace!(
+             self,
+             "action install_split_preserving_swaps tab={} tab_id={} target={:?}",
+@@ -4502,6 +4526,39 @@ mod tests {
+         );
+     }
+ 
++    #[test]
++    fn recheck_dump_distinguishes_a_race_the_first_check_alone_cannot() {
++        // The race install_split_preserving_swaps's pre-override recheck
++        // guards against: two instances both dump the same sidebar-less tab
++        // before either has installed anything, so both see an identical
++        // "safe to proceed" dump from the first check alone -- one check
++        // cannot tell them apart. A recheck taken immediately before
++        // override_layout fires, after the other instance's install has
++        // landed, sees a tab that now carries a rail and aborts instead.
++        let url = "file:/tmp/zellij-sidebar.wasm";
++        assert!(
++            !dump_contains_sidebar(dump_fixture(), url),
++            "both racers' first dump looks identical and safe -- the gap the recheck closes"
++        );
++        let after_a_concurrent_install_lands = r#"layout {
++    tab name="t" {
++        pane split_direction="vertical" {
++            pane size=28 borderless=true name="sidebar" {
++                plugin location="file:/tmp/zellij-sidebar.wasm" {
++                    rail "1"
++                }
++            }
++            pane cwd="/a"
++        }
++    }
++}
++"#;
++        assert!(
++            dump_contains_sidebar(after_a_concurrent_install_lands, url),
++            "a recheck taken after a concurrent instance's install lands sees its rail and aborts"
++        );
++    }
++
+     #[test]
+     fn dump_with_a_single_line_rail_is_recognized_as_already_retrofitted() {
+         // The server strips only the requesting instance's own rail from a
+```
+
 ## Acceptance criteria
 
 **AC-1 — The floating-instance leak's trigger is reproduced on demand and
-either fixed or bounded. OPEN — trigger named and evidenced live, not yet
-reproduced on demand in a controlled setting.**
+either fixed or bounded. OPEN — design complete and fixture-validated;
+not yet shipped or live-confirmed.**
 Verified by: a disposable-session repro that reliably produces at least one
 stray floating instance (not a hypothesis), plus a fix (preventing the leak)
 or a bound (a cleanup sweep, a cap, or a self-terminating timeout for an
@@ -443,17 +637,23 @@ plus code/config tracing names a concrete trigger — `Alt /`'s `MessagePlugin`
 launch-if-missing (`~/.config/zellij/config.kdl:59-67`) spawns a fresh
 floating instance on *every* sidebar-less tab's first toggle regardless of
 existing population (proven via plugin-id ordering, see Live re-verification
-above), and a spawned instance that loses a concurrent retrofit race has no
-promotion or self-close path — a plausible persistence mechanism, not yet a
-disposable-session repro. Not satisfied yet: needs the population-seeded
-spike proposed in Proposed approach (cycle 2) to turn this from a named
-mechanism into an on-demand repro before a fix or bound can be designed.
+above). **Cycle 3 (2026-07-09):** a fix is designed and fixture-validated
+(see Fix design and validation, and the Patch for implementation to apply
+verbatim) for the *corruption* symptoms (AC-2/AC-3) this same race causes,
+but it is **not** a fix for AC-1's own two sub-mechanisms named in cycle 2:
+the *initial* per-tab spawn trigger (`MessagePlugin`'s launch-if-missing,
+untouched by this design) and the *persistence* question (whether a losing
+racer's own plugin pane gets promoted, self-closes, or stays floating
+regardless) — this cycle did not determine which, and does not claim to;
+overclaiming that would be exactly the kind of confident-but-unearned prose
+this entity's own cycle-2 pass warned against. AC-1 remains open pending a
+fix or bound aimed specifically at the leak's creation/persistence, which
+was out of this cycle's design scope (corruption prevention, not leak
+prevention).
 
 **AC-2 — The dirty-tab chrome-misplacement defect is reproduced on demand.
-OPEN — not reproduced this pass; precondition (multiple live floating
-instances) was never established synthetically, but a second, structurally
-related live corruption (terminal duplication, not chrome relocation) was
-independently confirmed twice under the exact precondition this AC needs.**
+OPEN — design complete and fixture-validated for the shared underlying
+race; the specific chrome-relocation shape was never itself reproduced.**
 Verified by: a disposable-session repro using the concurrency setup from
 the Proposed approach that triggers the tab-bar relocation into the content
 region at will, not just the single live sighting in `WORK`. Attempted
@@ -464,34 +664,66 @@ landed correctly placed in every tab every round (see Spike results).
 **Cycle 2 (2026-07-09):** AC-4's chrome-misplacement path
 (`RegenerateSwaps`, dirty tab) and this pass's terminal-duplication finding
 (`Retrofit`, fresh tab) share the identical unguarded
-`install_split_preserving_swaps` machinery (see Live re-verification,
-"Shared root cause" above) — the same race window, different `decide_toggle`
-entry points. Not satisfied yet: still needs a repro of *this* AC's specific
-shape (chrome relocated, not pane count changed) on demand; the population-
-seeded spike proposed above targets the shared precondition and may surface
-either shape.
+`install_split_preserving_swaps` machinery — the same race window, different
+`decide_toggle` entry points. **Cycle 3 (2026-07-09):** the fix designed and
+fixture-validated this cycle (see Fix design and validation above) closes
+the shared race window both entry points fire through — since the recheck
+sits in the common `install_split_preserving_swaps` code both
+`RegenerateSwaps` and `Retrofit` call, it applies to AC-2's chrome-relocation
+shape exactly as it does to this entity's terminal-duplication shape,
+without any AC-2-specific code. Not fully satisfied: the design was never
+tested against a live/disposable *chrome-relocation* occurrence specifically
+(none has recurred since the original `WORK` "Tab #6" sighting) — the fix's
+generality across both entry points is a code-structure argument (both call
+the same guarded function), not a directly observed chrome-shape repro.
 
 **AC-3 — Chrome placement (and pane count) cannot be corrupted by a
 concurrent regenerate/retrofit race, regardless of how many stray instances
-exist. Unverified — blocked on AC-1/AC-2, but the gap is now named.**
+exist. OPEN — design complete and fixture-validated; not yet shipped or
+live-confirmed.**
 Verified by: a test or live repro showing that with AC-1's leak trigger
 reproduced (multiple live instances) and a legitimate regenerate firing
 concurrently, `extract_chrome_panes`/`override_layout`'s output still places
 `tab-bar`/`status-bar` in their canonical rows and pane count stays N+1 every
-time — not just when the leak happens to be absent. Cannot be exercised
-until AC-1 establishes a live leak scenario to regenerate against.
-**Cycle 2 (2026-07-09):** the gap is no longer a blank slate among the three
-existing dedup layers — code tracing narrows it to a specific one:
+time — not just when the leak happens to be absent. **Cycle 2 (2026-07-09):**
+code tracing narrowed the gap to one specific layer:
 `install_split_preserving_swaps`'s `dump_contains_sidebar` check
-(`main.rs:918-925`, the "dump-abort seeder dedup" layer) is a
-check-then-act race with no lock between the dump and the
-`override_layout` call, so it only dedupes a second retrofit whose dump is
-taken *after* the first's install lands — not two dumps taken before either
-lands. The other two layers (relaxed election, defer-never-blind-absorb)
-are not implicated by this pass's trace. A fix candidate (not designed this
-pass): serialize `install_split_preserving_swaps` per tab_id, or have the
-dump-abort re-check immediately before `override_layout` fires rather than
-only at dump time.
+(`main.rs:918-925`) is a check-then-act race with no lock between the dump
+and the `override_layout` call. **Cycle 3 (2026-07-09):** designed and
+fixture-validated the fix — a population-gated (`self.instances.len() > 1`)
+recheck of `dump_contains_sidebar` immediately before `override_layout`
+fires, closing the window from a full dump round trip (up to 1s) down to
+`override_layout`'s own async dispatch latency. `cargo test`: 133/133
+passed (132 pre-existing + 1 new fixture test), 0 regressions. An election-
+based alternative (gate who may attempt, by lowest pane id) was considered
+and explicitly rejected — it is the same shape as `docs/docking-approach.md`
+Toggle v3.8's already-removed session-wide election, which caused
+deadlock/starvation under `tab_id → position` staleness; re-adding a hard
+eligibility gate risks reintroducing that documented failure mode to fix a
+different one. See Fix design and validation above for the full design,
+rejected alternatives, and the honest limit on what a fixture-level test can
+prove given this codebase's unmockable host-call boundary. Not satisfied
+yet: the patch is designed and validated but not shipped (reverted from the
+working tree this cycle, on record above for implementation to apply) or
+confirmed against a live/disposable occurrence post-ship.
+
+**Explicit cross-check against `dock-toggle-restructures-panes` (`j5`)
+AC-1, per the Scope merge above.** `j5`'s AC-1 (`j5.md:217-243`) is "First
+dock into a bare tab installs the rail as a stated, reviewed pane-count
+change" — its Cycle 1 caveat records the same live counter-example this
+entity investigates (`WORK` Tab #7, N=1 → N=3, not N→N+1). This cycle's fix
+targets exactly that mechanism: the recheck sits in
+`install_split_preserving_swaps`, the single function both this entity's
+`Retrofit` path and `j5`'s first-toggle retrofit go through — there is no
+second code path for `j5` to fix independently. Once shipped, a first
+toggle into a bare tab under any racer population lands at most one install
+(the recheck aborts every loser before it fires `override_layout`), which
+is precisely `j5`'s AC-1 restated: pane count is N→N+1, not N→N+k for any
+k>1, regardless of concurrent racers. `j5` needs no separate design work;
+its remaining work, per the Scope merge, is a closing doc pass once this
+entity ships (state the restored true N→N+1 invariant, citing this fix,
+rather than the current hedged "unreliable" language `j5`'s implementation
+cycle 2 shipped as a stopgap).
 
 ## Test plan
 
@@ -531,11 +763,40 @@ population-seeded spike in Proposed approach (cycle 2). This test was not
 run this pass (checklist scoped this pass to read-only snapshots and code
 tracing, not a new spike); it is the recommended next step.
 
+**Cycle 3 (2026-07-09): riskiest-first re-targeted again — the mechanism
+check moved from "does the race exist" to "does the fix hold."** Cycle 2
+narrowed the riskiest unproven mechanism to a specific, named gap
+(`dump_contains_sidebar`'s check-then-act race). This cycle's riskiest
+untested assumption was no longer "does the race exist" (settled, high
+confidence, per the verification pass) but "does a recheck immediately
+before `override_layout` correctly distinguish the race" — run first, at
+the fixture level, per Fix design and validation above: `cargo test`,
+133/133 passed including the new `recheck_dump_distinguishes_a_race_the_first_check_alone_cannot`
+test, 0 regressions. The smallest end-to-end check this cycle's design
+depends on is proven; the population-seeded spike from cycle 2 remains the
+next open test, now reframed as a post-ship confirmation of the fix rather
+than a repro of the raw bug — see Fix validation's "Honest limit" for why a
+live/disposable check is still needed to close the integration-level gap a
+fixture test cannot reach.
+
 ## Out of scope
 
-The first-toggle pane-count invariant (AC-1/AC-2/AC-3 of
+**Superseded (2026-07-09, cycle 3):** this section previously read "the
+first-toggle pane-count invariant (AC-1/AC-2/AC-3 of
 `dock-toggle-restructures-panes`) — already ideated and documented there,
-unaffected by this entity's findings. Do not re-litigate that decision here.
+unaffected by this entity's findings. Do not re-litigate that decision
+here." That is no longer accurate — see "### Scope merge (2026-07-09, CL
+confirmed)" above: CL explicitly merged `j5`'s fix scope into this entity
+after the verification pass, specifically because the pane-count invariant
+*is* affected by this entity's findings (the TOCTOU race this entity
+root-caused is what broke it) and needs one fix, not two parallel
+investigations. `j5`'s pane-count invariant is now in scope here, not out
+of it; see the "Explicit cross-check against `dock-toggle-restructures-panes`
+(`j5`) AC-1" note under Acceptance criteria.
+
+`j5`'s own remaining work — a closing doc pass restating the true N→N+1
+invariant once this entity's fix ships, not a fix design of its own — stays
+with `j5`, per the Scope merge.
 
 ## Stage Report: ideation
 
@@ -562,3 +823,16 @@ Ran the concurrency spike this entity's own Test plan called for (riskiest-first
 ### Summary
 
 CL's live Tab #7 repro was independently re-confirmed, and this pass found a second, previously-unflagged occurrence (Tab #8) with the byte-for-byte identical corruption shape — ruling out one-off randomness. A third independent static trace of the transform code (this entity's own second pass, following its own 2026-07-08 trace and the parent entity's AC-4 trace) again found no logic bug, narrowing the gap to a specific, named check-then-act race in `install_split_preserving_swaps`'s dump-abort dedup. New plugin-id-ordering evidence proves the leak's creation mechanism (a fresh spawn on every first toggle, regardless of existing population) and ties it to why population size, not press rate or duration, is the variable that made this reproducible live but not in the prior synthetic spikes. AC-1/AC-2/AC-3 move from "unverified hypothesis" to "confirmed live twice, mechanism substantially narrowed, still not reproduced on demand" — the recommended next step is a population-seeded disposable-session spike (proposed in Proposed approach, not run this pass per the checklist's read-only/no-new-load constraint), replacing the prior duration-focused soak/tracing recommendation.
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Design a concrete fix for the check-then-act race in install_split_preserving_swaps (dump_contains_sidebar's dump-abort check has no lock/re-check before the later override_layout call) -- the leading candidate from the verification pass is gating the call behind the same 'lowest pane id acts' election this codebase already uses elsewhere (docs/docking-approach.md's Toggle v3.8 'Relaxed retrofit election'); consider alternatives too (e.g. a re-check of dump_contains_sidebar immediately before override_layout fires) and state why the chosen one is preferred
+  Chose the recheck design over the election gate. The election gate is structurally the same mechanism Toggle v3.8 already removed for causing deadlock/starvation under `tab_id → position` staleness (docs/docking-approach.md:573-589) -- reintroducing a hard pre-attempt eligibility gate risks resurrecting that documented failure mode to fix a different-shaped problem (simultaneous correct agreement racing on timing, not disagreement on which tab). Chosen design: a `self.instances.len() > 1`-gated second `dump_session_layout_for_tab` + `dump_contains_sidebar` check immediately before `override_layout` fires, aborting on a positive recheck. See "Fix design and validation (2026-07-09, ideation cycle 3)" under Proposed approach.
+- DONE: Validate the chosen fix design with the smallest end-to-end mechanism check before committing to it for implementation -- build a fixture-level test that drives two concurrent install_split_preserving_swaps calls against the same tab dump and asserts only one lands (or that the loser correctly no-ops/defers under the new guard); this can run without a live zellij session per the verification synthesis. Report the test red before the fix and green after, or explain if a live/disposable-session spike is required instead and why.
+  Researched first: `install_split_preserving_swaps` itself is not unit-testable (host imports bottom out in an unmockable `host_run_plugin_command`, no DI/mock seam exists in the crate). Implemented the chosen design as a temporary, uncommitted patch to `src/main.rs` (57 lines, full diff on record under "Patch for implementation to apply verbatim"), added one new fixture-level test (`recheck_dump_distinguishes_a_race_the_first_check_alone_cannot`), ran `cargo test`: 133/133 passed, 0 regressions. Reverted the patch afterward via `git checkout -- src/main.rs` (ideation validates, implementation ships). Explained explicitly, not glossed over: the new test proves the discrimination primitive the fix depends on, not the integration wiring itself, which the host boundary makes untestable without a live/disposable session -- see "Fix validation... Honest limit" for the full explanation.
+- DONE: Update this entity's AC-1/AC-2/AC-3 Verified-by clauses to reflect the now-designed-and-spike-validated fix (not just a narrowed hypothesis), and confirm explicitly that the design also satisfies dock-toggle-restructures-panes' (j5) AC-1 (pane count is not corrupted by first-toggle retrofit) -- j5 is parked pending this entity and should not need its own design work
+  AC-1/AC-2/AC-3 updated with cycle-3 status (design complete, fixture-validated, not yet shipped or live-confirmed); AC-1 specifically corrected to NOT overclaim -- the fix addresses corruption from a lost race, not the leak's own creation or persistence, which remain open and undesigned. Added an explicit "Explicit cross-check against dock-toggle-restructures-panes (j5) AC-1" note under Acceptance criteria confirming the shared `install_split_preserving_swaps` code path means one fix serves both entities, with no separate j5 design needed. Also found and fixed a stale contradiction: this entity's own "Out of scope" section still said j5's pane-count invariant was unaffected and out of scope, directly contradicting the Scope merge section above it -- corrected with a superseded-note rather than silently rewritten.
+
+### Summary
+
+Shifted from root-causing (settled at high confidence per the adversarial verification pass) to designing and validating the fix. Chose a population-gated recheck over the verification pass's leading "lowest pane id election" candidate, specifically because that candidate is the same shape as a mechanism this codebase's own docs record as already tried and removed for causing deadlock (Toggle v3.8) -- a reasoned rejection, not a default. Implemented, tested (133/133 `cargo test`, 0 regressions), and reverted the fix as a temporary validation patch, with the full diff preserved in the entity body for implementation to apply verbatim rather than re-derive. Was explicit about the fixture test's real limit: it proves the decision primitive, not the untestable integration wiring, given this codebase's unmockable host-call boundary -- and named what would close that gap (the cycle-2 population-seeded spike, reframed as a post-ship check). Confirmed the fix serves `j5`'s AC-1 as well as this entity's own ACs, per CL's scope-merge decision, and corrected a stale "out of scope" contradiction found while updating the ACs.
