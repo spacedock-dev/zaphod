@@ -334,6 +334,35 @@ directly. This pass did not attempt a new synthetic repro (per its
 checklist); AC-1/AC-2/AC-3 below are updated to reflect confirmed live
 evidence and a substantially narrowed hypothesis, not an on-demand repro.
 
+### Scope merge (2026-07-09, CL confirmed): this entity now also carries `dock-toggle-restructures-panes`' (`j5`) fix
+
+An adversarial verification pass (workflow `wf_a0149a90-999`, 2 independent
+refuters per claim against live source) confirmed this pass's TOCTOU race
+finding and the "transform is clean" finding both survive at high
+confidence — the transform-clean claim was verified *empirically*
+(temporary tests built and run against the exact corrupted-shape input, not
+just read). `j5` was rejected a second time at validation because its
+doc-only fix undersold a race that's now confirmed fixable, not just
+describable. CL approved merging `j5`'s scope into this entity rather than
+running two parallel investigations into the same `install_split_preserving_swaps`
+mechanism: **this entity's fix, once designed and shipped, is the fix for
+both entities.** `j5` is parked (no independent dispatch) until this entity
+reaches `done`; `j5`'s own remaining work becomes a small closing doc pass
+(state the restored true invariant, no fix design of its own). AC-1/AC-2/AC-3
+below already scope pane-count and chrome-placement correctness together —
+no AC rewording needed, just this explicit cross-reference.
+
+The concrete fix candidate the verification synthesis converged on:
+gate `install_split_preserving_swaps` behind the same "lowest pane id acts"
+election this codebase already uses elsewhere (`docs/docking-approach.md`'s
+Toggle v3.8 "Relaxed retrofit election"), rather than relying solely on the
+current after-the-fact `is_redundant_tiled_sidebar`/`should_close_self`
+cleanup — and it's testable without a live zellij session: drive two
+concurrent `install_split_preserving_swaps` calls against the same tab dump
+and assert only one lands. This is the next ideation cycle's job: design the
+concrete guard, and prove it with that fixture-level concurrent-call test
+(the smallest end-to-end mechanism check) before implementation.
+
 ## Proposed approach
 
 Run a concurrency-focused spike as the first step, since it's the one

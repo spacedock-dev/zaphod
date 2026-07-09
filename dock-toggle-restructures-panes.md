@@ -601,6 +601,30 @@ cycle 2's was not, and should not have named `implementation` as the next
 stage. Status corrected to `ideation` instead. The kept-alive implementation
 ensign is being released (no `feedback-to` pointer targets it now).
 
+**Merge decision (2026-07-09, CL confirmed).** An adversarial verification
+pass (workflow `wf_a0149a90-999`, 2 independent refuters per claim against
+live source, not `eh`'s own report) confirmed `eh`'s narrowed root cause
+holds up: the TOCTOU race in `install_split_preserving_swaps` survived both
+refuters at high confidence (no lock/mutex anywhere in the file, developers'
+own comments acknowledge concurrent instances race the same tab); the
+transform functions being clean survived both refuters *empirically*
+(temporary tests fed the exact corrupted-shape input, confirmed the code
+structurally cannot emit a flat un-wrapped 2-sibling split from one call).
+This is a real, fixable code bug, not environmental unreliability to
+document around — and `eh`'s own AC-3 already scopes "chrome placement
+(and pane count) cannot be corrupted by a concurrent regenerate/retrofit
+race," i.e. `eh`'s fix, once designed and shipped, directly satisfies this
+entity's AC-1 too.
+
+**This entity is now intentionally parked, not dispatched, pending `eh`.**
+No further ideation/implementation work happens here independently — `eh`
+carries the actual fix (design, spike-validation, implementation) under its
+own AC-1/AC-2/AC-3. Once `eh` ships, this entity's remaining work is a small
+closing doc pass: state the now-true restored invariant (no more caveat
+about an unreliable count) in `docs/docking-approach.md`/`SPEC.md`/`README.md`,
+then gate to `done`. Do not dispatch this entity to any stage until `eh`
+reaches its own `done`.
+
 ## Stage Report: implementation (cycle 2)
 
 - DONE: Resolve the live pane-duplication finding (WORK Tab #7: fresh 1-pane tab + one Alt-/ produced 2 real terminal panes + rail, not 1+rail) -- revise the doc claim to match reality or explicitly hold/defer pending eh's root cause; do not re-ship the disproven "N->N+1" claim unchanged
