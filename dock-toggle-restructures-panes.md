@@ -555,6 +555,40 @@ only ever observed the clean N→N+1 case.
    validation Stage Report above) in the same pass, since implementation is
    being reopened anyway.
 
+**Cycle 2 (2026-07-09) — REJECTED at validation, routed to implementation.**
+
+CL rejected the cycle-2 "approve to done" recommendation (a doc correction
+that stated the pane count is unreliable without explaining why). Between
+cycle 1 and cycle 2's validation, `eh` (`dock-floating-leak-and-chrome-misplacement`)
+completed its own ideation cycle 2 and substantially narrowed a root cause:
+a check-then-act race with no lock in `install_split_preserving_swaps`
+(`dump_contains_sidebar`, `src/main.rs:918-925`, vs. the later
+`override_layout` call), with a named fix candidate (serialize per `tab_id`,
+or re-check immediately before install) — and critically, `eh`'s own AC-3
+already scopes "chrome placement (and pane count) cannot be corrupted by a
+concurrent regenerate/retrofit race," meaning `eh`'s fix, once shipped,
+directly resolves this entity's original complaint too. CL's objection:
+continuing to ship this entity as "document that it's unreliable" undersells
+what's now known to be a fixable bug, not an unexplained one.
+
+1. **Do not re-ship another doc hedge.** `eh`'s race-condition theory is
+   strong (two independent live occurrences with byte-identical corruption,
+   a third independent static trace finding no bug in the transform logic
+   itself, and a plugin-id-ordering proof of the spawn mechanism) but is
+   itself not yet independently verified outside `eh`'s own investigation
+   chain, and `eh`'s ACs remain formally OPEN (not reproduced on demand).
+   An adversarial verification pass on `eh`'s three core claims (the race,
+   the transform being clean, and the spawn-dedup evidence) is running now
+   (workflow `wf_a0149a90-999`) — the FO is holding this entity's cycle-3
+   dispatch until that returns, rather than briefing a fix attempt against
+   an unverified mechanism.
+2. **Open question for cycle 3, not resolved here:** does the actual code
+   fix belong in this entity's own worktree, or does this entity stay
+   parked (doc-only, honestly caveated) until `eh` ships the fix under its
+   own AC-3, at which point this entity's close-out becomes a much simpler
+   "state the restored, true invariant" pass? The cycle-3 dispatch will
+   settle this once the verification pass reports back.
+
 ## Stage Report: implementation (cycle 2)
 
 - DONE: Resolve the live pane-duplication finding (WORK Tab #7: fresh 1-pane tab + one Alt-/ produced 2 real terminal panes + rail, not 1+rail) -- revise the doc claim to match reality or explicitly hold/defer pending eh's root cause; do not re-ship the disproven "N->N+1" claim unchanged
