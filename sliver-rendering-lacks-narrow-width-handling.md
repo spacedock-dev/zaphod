@@ -213,3 +213,16 @@ undecorated (selected or not) since there is no title left to highlight.
 ### Summary
 
 Read `render()` (`main.rs:631-687`), the existing marker/line pure functions (`row_marker`, `state_glyph`, `session_row_line`, `gate_row_line`), and `SPEC.md`'s own test-pyramid guidance ("pure-function unit tests... extend the pattern") to design a narrow-width fix that adds one small pure function (`sliver_lines`) and one early-return branch in `render()`, rather than rewriting the docked-width path. Key decision: markers-only over aggregate-indicator, because it preserves per-row signal and requires no new severity-ordering concept. Also flagged (in Problem and Out of scope) two things the original checklist didn't name: the `"▾ PANES...⇄"` header shares the same defect and is covered by the same fix, and click-target line mapping at sliver width is a real follow-on question this entity does not resolve.
+
+## Stage Report: implementation
+
+- DONE: Add the sliver_lines pure function and the early-return branch in render() exactly as sketched in ideation, reusing row_marker/state_glyph verbatim -- the existing cols >= STATUS_MIN_COLS body must move behind the guard with zero textual changes.
+  `src/main.rs` — `sliver_lines` added at commit 40af368 (beside `row_marker`); early-return guard added at commit f83fd90, a single 6-line diff hunk with no other line touched.
+- DONE: Write AC-1/AC-2/AC-3's tests as designed: exact-equality checks against sliver_lines output (no header/title/summary substrings, marker values match trimmed row_marker/state_glyph exactly), the Idle-vs-Blocked differential test, and confirm the full existing suite passes unmodified.
+  `sliver_lines_carry_no_header_or_free_text` (AC-1) and `sliver_lines_differ_when_one_row_state_changes` (AC-2) both red before the fix — `error[E0425]: cannot find function 'sliver_lines' in this scope` — then green after; full suite 132/132 passing (130 pre-existing + 2 new, 0 failed, 0 edited).
+- DONE: Confirm the "PANES...⇄" header is also suppressed by the same early-return guard (it's covered structurally, not by a separate fix) and record that confirmation in the stage report.
+  `src/main.rs:645-650`'s `if cols < STATUS_MIN_COLS { ...; return; }` sits directly before line 653's `▾ PANES` println and before the `▾ AGENTS`/`▾ GATES` printlns (670/683) — one guard returns ahead of all three headers, no separate fix needed.
+
+### Summary
+
+Added `sliver_lines` reusing `row_marker`/`state_glyph` verbatim (commit 40af368), then gated `render()` on `STATUS_MIN_COLS` with a single early-return branch ahead of the existing body (commit f83fd90), leaving that body textually untouched. Both new tests were confirmed red (compile failure: `sliver_lines` undefined) before implementation and green after; `cargo test` (132/132) and `cargo check --tests` are clean, and the PANES/AGENTS/GATES headers are all suppressed by the one guard rather than three separate fixes.
