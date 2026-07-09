@@ -1,9 +1,9 @@
 ---
 id: 865qt0sj9zrmg75vwv2z598r
 title: 1-col undocked sliver renders unreadable wrapped text instead of a compact indicator
-status: backlog
+status: ideation
 source: finding — live session dogfooding, 2026-07-08/09
-started:
+started: 2026-07-09T07:14:24Z
 completed:
 verdict:
 score: 0.6
