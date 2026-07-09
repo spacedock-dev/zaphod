@@ -456,3 +456,44 @@ Applied both doc diffs from the ideation body verbatim to `docs/docking-approach
 ### Summary
 
 Re-ran the doc-diff verification independently on a throwaway detached checkout at the worktree's exact commit (`baff70e`) rather than trusting the implementer's report: all four drafted hunks across `docs/docking-approach.md` and `SPEC.md` match the shipped text character-for-character, and every code/SPEC citation in the new text checks out against the actual source. The refutation audit surfaced one real gap outside the checklist's named scope: `README.md` carries the identical false "never spawned or hidden" toggle claim, introduced by the same regression window (`08ffe98`, the commit right after the regression landed) and untouched by this doc-only fix — recommend the FO decide whether to fold it into this entity or fast-follow it before treating the invariant as fully corrected. AC-4 remains correctly open and unresolved; this stage did not touch or silently close it.
+
+### Feedback Cycles
+
+**Cycle 1 (2026-07-09) — REJECTED at validation, routed to implementation.**
+
+CL live-tested the first-toggle case directly in the `WORK` session (Tab #7:
+a freshly created tab, single `Alt /`) and found a case this entity's own
+"accepted invariant" doesn't cover: `zellij --session WORK action list-panes
+-a` shows two live `/bin/zsh` terminal panes (`terminal_41`, `terminal_42`,
+both cwd `/Users/clkao`) plus the sidebar (`plugin_88`) in Tab #7 —
+**N=1 → N=3, not the documented N=1 → N=2.** `dump-layout` confirms the
+outer split as three siblings: `sidebar (size=28)`, `pane size="50%"`,
+`pane size="50%"` — a genuine 2-way even split where the retrofit should
+have produced one absorbed slot for the pre-existing pane. This is a live
+occurrence, not synthetic: no prior evidence in this entity (ideation's
+disposable-session repro, validation's refutation audit) surfaced it — both
+only ever observed the clean N→N+1 case.
+
+1. **The doc diff's core claim needs to change or be qualified.**
+   `docs/docking-approach.md`/`SPEC.md` currently state the first-toggle
+   pane-count change as a clean, singular "N→N+1" exception. That's now
+   contradicted by a live repro in the simplest possible case (fresh tab,
+   one `Alt /`). Implementation must not simply re-ship the same diff text —
+   either the doc needs to accurately describe the real (currently
+   unreliable) behavior, or this entity needs to hold for a root cause
+   before any doc claim ships. If resolving this properly requires a design
+   decision beyond doc text (e.g. it turns out to need a real code fix, not
+   documentation), implementation should say so explicitly in its stage
+   report rather than force a doc patch that still misdescribes reality.
+2. **Likely shared root cause, under active investigation elsewhere.**
+   The `WORK` session currently carries 16 leaked zombie floating
+   `zellij-sidebar.wasm` instances (12 in "Noteplan", 4 in "CEO") — the
+   same ingredient `dock-floating-leak-and-chrome-misplacement` (`eh`)
+   already named as its leading, unconfirmed hypothesis for the sibling
+   chrome-misplacement bug (a zombie instance racing a legitimate
+   retrofit/regenerate). `eh`'s ideation is being redispatched now to trace
+   root cause against this exact live state. Coordinate with (or wait on)
+   that finding rather than duplicating the investigation here.
+3. **Fold in the previously-flagged `README.md:34-37` gap** (see the
+   validation Stage Report above) in the same pass, since implementation is
+   being reopened anyway.
