@@ -1,9 +1,9 @@
 ---
 id: n5w8b1s9n8zqczvw2ebd25q8
 title: Click-target line mapping is unverified at sliver width after the compact renderer
-status: backlog
+status: ideation
 source: finding — named as out of scope by sliver-rendering-lacks-narrow-width-handling's ideation, 2026-07-09
-started:
+started: 2026-07-09T13:01:33Z
 completed:
 verdict:
 score: 0.5
