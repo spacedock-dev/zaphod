@@ -229,6 +229,18 @@ created (see Proposed approach). AC is satisfied once
 "If building v2 from scratch" item 3) state this as accepted first-toggle
 behavior instead of claiming the toggle never creates a pane
 unconditionally (doc diff below).
+**Caveat added Cycle 1 (2026-07-09):** the live disposable-session repro
+cited above (1→2 panes, zero tabs) is not the only observed outcome. A
+counter-example in the real `WORK` session (Tab #7: a freshly created tab,
+N=1, a single `Alt /`) went to N=3, not N=2 — see Feedback Cycles below.
+This does not contradict AC-1's *offline* claim (the generated swap KDL
+template always nests exactly one rail pane as a sibling of the absorbed
+region, independent of N) — that fixture test was never actually built and
+remains future work per Test plan, so the offline claim is untested either
+way, not disproven. It does mean the *live* claim of a clean, universal
+N→N+1 count is no longer accepted as reliable. The doc diff below is
+revised accordingly: AC-1 is satisfied for "a new pane is accepted
+architecture," not for "the resulting count is always N+1."
 
 **AC-2 — New-tab creation is root-caused: refuted as a toggle-caused tab,
 and the more plausible source is named.**
@@ -284,6 +296,18 @@ doc statement or code fix can be written for it responsibly yet) — a
 follow-up pass must either extend this diff with AC-4's resolution or file
 it as its own finding once root-caused.
 
+**Revised Cycle 1 (2026-07-09).** The `docs/docking-approach.md` block below
+is no longer the text originally drafted at ideation — that text asserted a
+clean, universal "N panes + 1 rail" invariant, which a live counter-example
+(`WORK` Tab #7, see Feedback Cycles) disproved. The block below is what was
+actually shipped this cycle: it keeps "a new pane is accepted architecture"
+(still true and still evidenced) but drops the "+1" quantification and
+records the counter-example plus a pointer to the open, unconfirmed
+shared-root-cause investigation instead. The `SPEC.md` blocks are unchanged
+from the original draft — neither site quantifies the resulting pane count,
+so neither needed revision. A new `README.md` block is added this cycle
+(see Feedback Cycles / validation's REFUTED-elsewhere finding).
+
 **`docs/docking-approach.md:266-270`** — replace the unconditional
 invariant with a scoped one and a new exception paragraph:
 
@@ -301,23 +325,56 @@ invariant with a scoped one and a new exception paragraph:
 ```
 
 ...and immediately after the docked/undocked bullet list (before the
-`hide_self` / `show_self` paragraph), add:
+`hide_self` / `show_self` paragraph), add (Cycle 1 revision — see note
+above):
 
 ```markdown
-**Pane-count exception (first toggle only, verified live 2026-07-08).** The
-invariant above describes the toggle once a tab's swap set exists.
-Installing that set the first time (`retrofit`, and the identical machinery
-`regenerate_swaps` reuses for a dirty tab) runs a full-tab `override_layout`
-whose base wraps the tab's existing arrangement in `pane
-split_direction="vertical" { rail; region }` — the rail is a brand-new
-sibling pane that did not exist before (`split_preserving_layout_kdl`,
-`src/main.rs:1512-1517`). A tab with N panes before its first dock has N
-panes + 1 rail after. This is accepted, not a bug: no mechanism validated
-in this document reserves a tiled column on a live tab without
-materializing a pane for it. A **dirty-tab regenerate** re-seats the same
-rail pane by identity (`retain_existing_plugin_panes`) — pane count does
-not change on a regenerate; only split-nesting fidelity can degrade (the
+**Pane-count exception (first toggle only; exact resulting count not yet a
+reliable invariant).** The invariant above describes the toggle once a
+tab's swap set exists. Installing that set the first time (`retrofit`, and
+the identical machinery `regenerate_swaps` reuses for a dirty tab) runs a
+full-tab `override_layout` whose base wraps the tab's existing arrangement
+in `pane split_direction="vertical" { rail; region }` — the rail is a
+brand-new sibling pane that did not exist before
+(`split_preserving_layout_kdl`, `src/main.rs:1512-1517`). This is accepted,
+not a bug: no mechanism validated in this document reserves a tiled column
+on a live tab without materializing a pane for it. What is **not** settled
+is the exact resulting count. A clean, single-instance disposable session
+goes from N panes to N+1 (verified live 2026-07-08). A counter-example in a
+real, long-running session instead went from N=1 to N=3 on a single first
+toggle: `WORK` Tab #7, a freshly created tab, one pre-existing pane —
+`list-panes -a` showed two new terminal panes (`terminal_41`, `terminal_42`)
+plus the rail, and `dump-layout` confirmed three top-level siblings
+(`sidebar`, two `size="50%"` panes) instead of one absorbed slot (verified
+live 2026-07-09). This document does not yet know why the two cases
+differ; it is suspected, unconfirmed, to share a root cause with the
+concurrent floating-sidebar-instance leak tracked separately in
+`dock-floating-leak-and-chrome-misplacement` (open as of this writing).
+Treat "the first toggle materializes at least one new pane" as accepted
+architecture; do not treat "exactly one new pane" as reliable until that
+investigation closes. A **dirty-tab regenerate** re-seats the same rail
+pane by identity (`retain_existing_plugin_panes`) — pane count does not
+change on a regenerate; only split-nesting fidelity can degrade (the
 fidelity ceiling below, SPEC landmine #35).
+```
+
+**`README.md:34-37`** — added this cycle (validation's REFUTED-elsewhere
+finding): the same unconditional "never spawned or hidden" claim, in a
+third file the original checklist didn't name:
+
+```diff
+ - `Alt /` (or the `⇄` header) toggles the docked 28-col rail down to a
+-  1-col sliver and back by cycling the tab's swap layouts — panes are
+-  rearranged in place, never spawned or hidden, and a manually re-split tab
+-  keeps its arrangement (the swap set is regenerated from the live layout)
++  1-col sliver and back by cycling the tab's swap layouts once a tab
++  already carries that swap set — panes are rearranged in place, never
++  spawned or hidden, and a manually re-split tab keeps its arrangement (the
++  swap set is regenerated from the live layout). The one-time retrofit that
++  installs the swap set on a tab's first toggle is the sole exception: it
++  does spawn the rail pane, and the exact resulting pane count is not yet a
++  reliable invariant (see `docs/docking-approach.md`'s pane-count
++  exception)
 ```
 
 **`SPEC.md` landmine #16** (`### Focus`, currently ending "...so nothing is
@@ -497,3 +554,16 @@ only ever observed the clean N→N+1 case.
 3. **Fold in the previously-flagged `README.md:34-37` gap** (see the
    validation Stage Report above) in the same pass, since implementation is
    being reopened anyway.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Resolve the live pane-duplication finding (WORK Tab #7: fresh 1-pane tab + one Alt-/ produced 2 real terminal panes + rail, not 1+rail) -- revise the doc claim to match reality or explicitly hold/defer pending eh's root cause; do not re-ship the disproven "N->N+1" claim unchanged
+  Checked `dock-floating-leak-and-chrome-misplacement` first (per feedback, coordinate rather than re-investigate): still `status: ideation`, unmodified since 2026-07-08 16:09, its own AC-1/AC-2/AC-3 all OPEN and its concurrency spike neither confirmed nor refuted the shared-root-cause hypothesis. No new root cause to build a fix on. Revised `docs/docking-approach.md`'s "Pane-count exception" paragraph (commit `a7934cb`) to drop the disproven "N panes + 1 rail" quantification, keep "a new pane is accepted architecture" (still true), state both the clean case (N->N+1, 2026-07-08) and the counter-example (N=1->N=3, `WORK` Tab #7, 2026-07-09) with their evidence, and name the open investigation as the suspected-unconfirmed link. `SPEC.md`'s two sites needed no change — grep confirmed neither quantifies pane count (`grep -n "N panes\|N+1\|N->N\|N → N"` across all three files hit only the one now-revised `docking-approach.md` line).
+- DONE: Fold the README.md:34-37 stale "never spawned or hidden" claim into the same doc-diff pass (same fix shape as the other two files)
+  Applied the same qualifier pattern SPEC.md landmine #16 already used: scoped the bullet to "once a tab already carries that swap set" and added a sentence naming the first-toggle retrofit as the sole exception, pointing to docking-approach.md's pane-count exception. Committed in the same commit (`a7934cb`).
+- DONE: State plainly in the stage report whether this cycle's output is a real fix or a hold-for-eh -- do not paper over an unresolved live bug with confident doc prose
+  This is a doc correction, not a root-cause fix, and not a full hold either -- it's the middle case the feedback explicitly allowed ("correct it to match real (currently unreliable) behavior"). The underlying mechanism that produced 2 extra panes instead of 1 in WORK Tab #7 remains unexplained; `eh`'s investigation (the designated owner of that question) has not closed. What shipped this cycle is honest about that: the doc no longer asserts a false universal invariant, states plainly that the count is unreliable, cites both the clean case and the counter-example with evidence, and names the open tracking entity rather than inventing an explanation. If `eh` later confirms a root cause and a code fix lands, this paragraph will need a further revision to describe the fixed behavior -- this cycle does not close that loop.
+
+### Summary
+
+Re-opened after Cycle 1 rejection (CL's live WORK Tab #7 repro: N=1->N=3, not the shipped N=1->N=2 claim). Checked the concurrent `dock-floating-leak-and-chrome-misplacement` investigation first per feedback instruction -- it's still open/unconfirmed, so no root cause exists to fix against. Revised `docs/docking-approach.md`'s pane-count-exception paragraph to drop the disproven "+1" quantification while keeping the still-true "a new pane is accepted architecture" claim, citing both the clean case and the live counter-example and naming the open investigation as the suspected (unconfirmed) shared cause; folded in the previously-flagged `README.md:34-37` stale claim with the same qualifier shape already used in `SPEC.md`. `SPEC.md` itself needed no change (neither site quantifies pane count). Committed to the worktree branch as `a7934cb`. `cargo check --tests` and `cargo test` both clean (130/130) confirming this remains doc-only. This is a doc correction that stops the entity from shipping a disproven claim, not a fix for the underlying extra-pane mechanism, which stays open pending `eh`'s root cause.
