@@ -589,6 +589,18 @@ what's now known to be a fixable bug, not an unexplained one.
    "state the restored, true invariant" pass? The cycle-3 dispatch will
    settle this once the verification pass reports back.
 
+**Routing correction (2026-07-09, before cycle 3 dispatch).** CL caught a
+process error: this rejection was routed to `implementation` per validation's
+declared `feedback-to`, but item 2 above asks whether to change the
+*approach* (doc-only vs. a real code fix vs. park-and-wait) — an ideation-level
+design decision. Per this workflow's own stage contract, implementation's
+authority is to build "the approved ideation body," not to choose between
+approaches. Cycle 1's ask (correct an overclaimed detail within the
+already-approved doc-only approach) was legitimately implementation-level;
+cycle 2's was not, and should not have named `implementation` as the next
+stage. Status corrected to `ideation` instead. The kept-alive implementation
+ensign is being released (no `feedback-to` pointer targets it now).
+
 ## Stage Report: implementation (cycle 2)
 
 - DONE: Resolve the live pane-duplication finding (WORK Tab #7: fresh 1-pane tab + one Alt-/ produced 2 real terminal panes + rail, not 1+rail) -- revise the doc claim to match reality or explicitly hold/defer pending eh's root cause; do not re-ship the disproven "N->N+1" claim unchanged
