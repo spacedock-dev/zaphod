@@ -1953,6 +1953,21 @@ fn row_marker(row: &Row) -> &'static str {
     state_marker(&row.agent)
 }
 
+// Compact 1-glyph-per-row rendering below STATUS_MIN_COLS: no header text,
+// no titles/status/summary — one state marker per row, session, and gate,
+// in the same top-to-bottom order render() prints them in. Reuses the same
+// glyph functions the normal-width render calls, so the compact mode never
+// shows a color/symbol the normal mode wouldn't have shown for that item.
+fn sliver_lines(rows: &[Row], sessions: &[SessionEvent], gates: &[GateEvent]) -> Vec<String> {
+    rows.iter()
+        .map(|row| row_marker(row).trim_end().to_owned())
+        .chain(sessions.iter().map(|session| {
+            state_glyph(agent::marker_for_state(&session.state)).trim_end().to_owned()
+        }))
+        .chain(gates.iter().map(|_| state_glyph(agent::AgentState::Blocked).trim_end().to_owned()))
+        .collect()
+}
+
 fn title_style(row: &Row) -> &'static str {
     match (row.focused, row.agent.kind == agent::AgentKind::Unknown) {
         (true, false) => "\u{1b}[1;36m",
@@ -2666,6 +2681,96 @@ mod tests {
         };
 
         assert_eq!(row_marker(&row), state_marker(&row.agent));
+    }
+
+    #[test]
+    fn sliver_lines_carry_no_header_or_free_text() {
+        let row = Row {
+            pane_id: 1,
+            title: "distinctive-pane-title".to_owned(),
+            focused: false,
+            agent: agent::AgentFields {
+                kind: agent::AgentKind::Claude,
+                state: agent::AgentState::Working,
+                status: "distinctive-pane-status".to_owned(),
+                running_command: None,
+            },
+        };
+        let session = SessionEvent {
+            agent: "distinctive-session-agent".to_owned(),
+            state: "blocked".to_owned(),
+            summary: "distinctive-session-summary".to_owned(),
+            ..Default::default()
+        };
+        let gate = GateEvent {
+            entity_title: "distinctive-gate-title".to_owned(),
+            stage: "distinctive-gate-stage".to_owned(),
+            recommendation: "distinctive-gate-recommendation".to_owned(),
+            ..Default::default()
+        };
+
+        let lines = sliver_lines(
+            std::slice::from_ref(&row),
+            std::slice::from_ref(&session),
+            std::slice::from_ref(&gate),
+        );
+
+        let joined = lines.join("\n");
+        for banned in [
+            "PANES",
+            "AGENTS",
+            "GATES",
+            "\u{21c4}",
+            "distinctive-pane-title",
+            "distinctive-pane-status",
+            "distinctive-session-agent",
+            "distinctive-session-summary",
+            "distinctive-gate-title",
+            "distinctive-gate-stage",
+            "distinctive-gate-recommendation",
+        ] {
+            assert!(
+                !joined.contains(banned),
+                "sliver output leaked {banned:?}: {joined:?}"
+            );
+        }
+
+        assert_eq!(
+            lines,
+            vec![
+                row_marker(&row).trim_end().to_owned(),
+                state_glyph(agent::marker_for_state(&session.state))
+                    .trim_end()
+                    .to_owned(),
+                state_glyph(agent::AgentState::Blocked).trim_end().to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn sliver_lines_differ_when_one_row_state_changes() {
+        let idle_row = |pane_id: u32| Row {
+            pane_id,
+            agent: agent::AgentFields {
+                state: agent::AgentState::Idle,
+                ..agent::AgentFields::default()
+            },
+            ..Default::default()
+        };
+        let all_idle = vec![idle_row(1), idle_row(2), idle_row(3)];
+        let mut one_blocked = all_idle.clone();
+        one_blocked[1].agent.state = agent::AgentState::Blocked;
+
+        let idle_lines = sliver_lines(&all_idle, &[], &[]);
+        let blocked_lines = sliver_lines(&one_blocked, &[], &[]);
+
+        assert_ne!(idle_lines, blocked_lines);
+        assert_eq!(
+            blocked_lines[1],
+            state_glyph(agent::AgentState::Blocked).trim_end()
+        );
+        assert_eq!(idle_lines[0], blocked_lines[0]);
+        assert_eq!(idle_lines[2], blocked_lines[2]);
     }
 
     #[test]
