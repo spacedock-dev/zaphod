@@ -70,10 +70,11 @@ wait_for_profile_value() {
     local transcript="$1"
     local key="$2"
     local launcher_pid="$3"
-    local attempt max_attempts
-    max_attempts="${PROFILE_READINESS_ATTEMPTS:-1800}"
+    local timeout_seconds deadline
+    timeout_seconds="${PROFILE_READINESS_TIMEOUT_SECONDS:-180}"
+    deadline=$((SECONDS + timeout_seconds))
     WAIT_VALUE=""
-    for attempt in $(seq 1 "$max_attempts"); do
+    while [ "$SECONDS" -lt "$deadline" ]; do
         WAIT_VALUE="$(tr -d '\r' < "$transcript" | awk -F= -v wanted="$key" '$1 == wanted { sub(/^[^=]*=/, ""); print; exit }')"
         if [ -n "$WAIT_VALUE" ]; then
             return 0
@@ -647,8 +648,8 @@ test_profile_timeout_cleanup() {
     set +e
     (
         trap cleanup_test_root EXIT
-        PROFILE_READINESS_ATTEMPTS=100
-        export PROFILE_READINESS_ATTEMPTS
+        PROFILE_READINESS_TIMEOUT_SECONDS=10
+        export PROFILE_READINESS_TIMEOUT_SECONDS
         start_profile_process timeout "$fixture" "$root" "$root/global-zellij"
     ) >"$timeout_output" 2>&1
     status=$?
@@ -689,6 +690,38 @@ test_profile_timeout_cleanup() {
 
     rm -f "$marker" "$timeout_output"
     echo "PASS: timed-out readiness removed launcher, session, and profile"
+    remove_test_root
+}
+
+test_profile_readiness_wall_clock() {
+    local root transcript output launcher_pid status elapsed
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-deadline-test.XXXXXX")"
+    TEST_ROOT="$root"
+    transcript="$root/transcript"
+    output="$root/output"
+    : > "$transcript"
+    sleep 30 &
+    launcher_pid=$!
+
+    SECONDS=0
+    set +e
+    (
+        PROFILE_READINESS_TIMEOUT_SECONDS=10
+        export PROFILE_READINESS_TIMEOUT_SECONDS
+        wait_for_profile_value "$transcript" PROFILE_ROOT "$launcher_pid"
+    ) >"$output" 2>&1
+    status=$?
+    set -e
+    elapsed=$SECONDS
+    kill "$launcher_pid" >/dev/null 2>&1 || true
+    wait "$launcher_pid" 2>/dev/null || true
+
+    [ "$status" -ne 0 ] || fail "readiness deadline fixture unexpectedly returned metadata"
+    grep -F "FAIL: timed out waiting for profile value PROFILE_ROOT" "$output" >/dev/null ||
+        fail "readiness deadline fixture failed for an unexpected reason"
+    [ "$elapsed" -le 10 ] || fail "10-second readiness deadline expired after ${elapsed}s"
+
+    echo "PASS: readiness timeout honored its 10-second wall-clock deadline"
     remove_test_root
 }
 
@@ -742,6 +775,9 @@ case "${1:-all}" in
     profile-timeout-cleanup)
         test_profile_timeout_cleanup
         ;;
+    profile-readiness-wall-clock)
+        test_profile_readiness_wall_clock
+        ;;
     cold-profile-readiness)
         test_cold_profile_readiness
         ;;
@@ -753,6 +789,7 @@ case "${1:-all}" in
         test_install_rename_signal_rollback
         test_worktree_profile_lifecycle
         test_profile_timeout_cleanup
+        test_profile_readiness_wall_clock
         test_cold_profile_readiness
         ;;
     *)
