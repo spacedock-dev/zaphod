@@ -118,6 +118,71 @@ writing `zellij-utils` metadata with `No space left on device`. No behavioral
 claim rests on that compile failure. The implementation stage must run this
 red test after shared disk pressure clears.
 
+### Mergeable proof-kit boundary (cycle 2)
+
+Implementation lands an inert proof kit in Zaphod, not a runtime dependency.
+The alternatives were one large patch (hard to review or upstream), an
+embedded checkout/submodule (silently chooses a fork), and an ordered mail
+series plus disposable verifier. Choose the ordered series because each commit
+has one upstream-reviewable purpose and the containing repository never builds
+or selects it implicitly.
+
+The implementation-owned tree is exact:
+
+```text
+tools/zellij-transactional-override/
+├── README.md
+├── BASE_COMMIT
+├── series
+├── verify.sh
+├── patches/
+│   ├── 0001-retained-override-red-tests.patch
+│   ├── 0002-plan-and-commit-retained-panes.patch
+│   └── 0003-result-bearing-plugin-cli-contract.patch
+└── testdata/
+    ├── n2-initial.kdl
+    ├── n2-success.kdl
+    └── n2-unsatisfiable.kdl
+```
+
+`BASE_COMMIT` contains only
+`55a2121b73dce4be624cda425a960e893000777c`. `series` lists the three patch
+paths in order. Each patch is a `git format-patch` mail patch against that
+commit: 0001 adds the red-first server/API tests, 0002 adds the pure planner
+and exact commit, and 0003 adds the plugin event and CLI result plumbing.
+Patch files carry no Zaphod edits. The KDL files drive the process matrix;
+the harness derives expected IDs, PIDs, geometry, and swap state from the
+pre-call snapshot rather than from self-authored golden output.
+
+`verify.sh` is the sole executable and has no caller. It accepts either
+`--source <official-zellij-checkout>` or `--fetch`; fetch clones the official
+`zellij-org/zellij` repository, never a fork. It then:
+
+1. creates a temporary directory and disposable clone, checks out
+   `BASE_COMMIT`, verifies `HEAD` exactly, and rejects a dirty or mismatched
+   source;
+2. applies only 0001 with `git am`, runs the named transactional test with
+   `cargo test --locked`, and requires nonzero RED for the expected missing
+   API or retained-pane assertion; ENOSPC, network failure, timeout, or any
+   unrelated compiler error fails the harness instead of masquerading as RED;
+3. applies 0002 and 0003 in order with `git am`, reruns the identical test and
+   focused plugin/CLI tests to GREEN, then runs the N=1/N=2/N=3 and identity
+   process matrix from `testdata/`;
+4. writes logs plus `result.json` to an explicit `--artifacts <dir>` (or a
+   reported temporary path), recording base SHA, patch IDs, commands, exit
+   codes, before/after pane snapshots, and cleanup status; and
+5. kills every disposable session and removes the clone through a trap on
+   success, failure, or interruption. It never reads or addresses `WORK`.
+
+The README owns prerequisites and manual invocation: POSIX shell, git, cargo,
+jq, network only for `--fetch` or uncached crates, and enough free space for a
+cold Zellij build. It states that the series is an upstream submission
+artifact, not an installable Zellij distribution. `src/`, `Cargo.toml`,
+`Cargo.lock`, `build.sh`, `install.sh`, `layouts/`, and `grout/` do not import,
+mention, execute, copy, or require this tree. A later upstream release or an
+explicit captain-approved runtime-fork gate must exist before Zaphod may call
+the new host API.
+
 ## Acceptance criteria
 
 ### Offline
@@ -170,41 +235,53 @@ second plan, switch the connected client, then release it and compare both
 tabs. Expected tab IDs come from the pre-call `list-tabs --json`, not focus at
 completion.
 
-**AC-6 — Zaphod consumes the result and never ships a fork.** Zaphod arms swap
-steering only for `Applied`; `Rejected` clears the pending request and leaves
-the tab alone. The repository contains no vendored Zellij source, `[patch]`,
-fork URL, or install step that replaces the user's Zellij binary.
+**AC-6 — The mergeable proof kit is inert.** The Zaphod commit adds only
+`tools/zellij-transactional-override/`. Zaphod's source and wasm, Cargo package
+graph, build, installer output, installed layout, and runtime Zellij selection
+remain identical to the implementation base. Normal build, install, test, and
+runtime commands neither execute nor require `verify.sh` or the patch series.
 
-Verified by: a red-first Zaphod integration test that feeds matching Applied
-and Rejected events through the plugin state machine and observes emitted host
-actions, plus a clean-package/install review against the implementation diff.
-The host test runs against an explicitly supplied disposable upstream patch
-artifact.
+Verified by: compare `cargo metadata --locked --no-deps` JSON at the
+implementation base and candidate after normalizing checkout-root fields; run
+both `install.sh` revisions with fresh temporary `ZELLIJ_CONFIG_DIR`s and
+compare file paths plus SHA-256 values after replacing each absolute checkout
+root with `<REPO>`; and run `git diff --exit-code <base>..<candidate> --` for
+`src/`, `Cargo.toml`, `Cargo.lock`, `build.sh`, `install.sh`, `layouts/`, and
+`grout/`. Then run the ordinary Zaphod tests in a disposable candidate checkout
+with the proof-kit directory removed. All four checks must pass without a
+patched Zellij binary.
+
+**AC-7 — The inert artifacts prove exact-base RED to patched GREEN.** From one
+invocation, the harness verifies base `55a2121`, applies 0001 cleanly, observes
+the named legacy test RED for an allowed invariant/API reason, applies 0002 and
+0003 cleanly, and observes the identical test plus focused API/process tests
+GREEN. It emits the base SHA, stable patch IDs, commands, exit codes, pane
+snapshots, and cleanup result.
+
+Verified by: run `verify.sh` twice with
+`--source <clean-official-v0.44.3-checkout>` and
+`--artifacts <empty-dir>`. Both `result.json` files must report the same base
+SHA, patch IDs, phase verdicts, and pane-state invariants. A control run against
+`v0.44.2` or with one patch hunk's context deliberately corrupted must stop
+before compilation at the base/apply check.
 
 ### Interactive
 
-**AC-I1 — CL sees the N=2 value outcome.** In a disposable two-shell stacked
-tab, one `Alt /` press produces the same two terminal IDs and processes beside
-one rail; a second press changes only dock state.
-
-Verified by: CL's live demo paired with before/after `list-panes --json` and
-PID output. Visual inspection alone does not settle it.
-
-**AC-I2 — A focus switch cannot dock the wrong tab.** CL starts a retrofit on
-tab T, immediately changes tabs, and sees either an applied rail on T or an
-unchanged T with a visible rejection. The newly focused tab remains byte-for-
-byte equal in its pane listing.
-
-Verified by: CL's live two-tab demo with pre/post pane listings and the result
-event's stable tab ID.
+No interactive AC belongs to this inert deliverable. A live Zaphod demo would
+require selecting a patched runtime, which this entity expressly forbids.
+AC-I1/I2 from cycle 1 move to a later activation entity after either an
+upstream Zellij release exposes the contract or the captain explicitly
+approves a runtime fork. This task closes on reproducible offline proof.
 
 ## Test plan
 
-1. **Run the preserved red case first.** After disk pressure clears, run only
-   `transactional_override_rejects_unsatisfiable_n2_without_losing_terminals`
-   against unpatched `v0.44.3`. Record the expected missing terminal or missing
-   API failure, not a compile error. Keep the existing installed-binary planner
-   spike as supporting evidence: `{5,6}` fitted; `{7,8}` rejected unchanged.
+1. **Run the mergeable harness first.** After disk pressure clears, invoke
+   `tools/zellij-transactional-override/verify.sh` against a clean official
+   checkout at `55a2121`. It applies 0001 alone and must classify the named
+   test RED before it applies implementation patches. Missing disk, network,
+   tool, or dependency state is a harness failure, never RED. Keep the existing
+   installed-binary planner spike as supporting evidence: `{5,6}` fitted;
+   `{7,8}` rejected unchanged.
 2. Add pure planner tests for N=1/N=2/N=3, one marked `children` source, stable
    ID binding, strict geometry failure, duplicate/absent IDs, terminal-run
    rejection, and input-layout immutability. Watch rejection tests fail before
@@ -219,28 +296,31 @@ event's stable tab ID.
    exactly-once delivery, exit status, stderr reason, and timeout behavior.
 6. Run the N=1/N=2/N=3 and launch-identity process matrix. Then inject a failed
    immediate swap and compare IDs, PIDs, geometry, and swap state.
-7. Only after the upstream patch passes steps 1-6 may Zaphod add its result
-   handler and run AC-6. Finish with AC-I1 and AC-I2 in a disposable session.
+7. Run the harness twice and the wrong-base/modified-patch controls for AC-7.
+   Then prove AC-6 from independent base/candidate Cargo metadata, installer
+   output, protected-path diffs, and ordinary tests without the proof kit.
+   Stop there: do not add a Zaphod result handler or run a patched runtime.
 
 The design extends Zellij's existing pure
 `TiledPaneLayout::position_panes_in_space` and `insert_children_nodes`
-functions. It replaces no Zaphod pure function until the host contract passes.
+functions. This inert entity replaces no Zaphod pure function.
 
 ## Proposed doc diff
 
-Until AC-1 through AC-6 pass, keep the current warning and add this blocker to
-`SPEC.md` landmine #26: retained override in 0.44.3 neither expands `children`
-to the retained count nor rolls back failed insertion. After the host contract
-passes, revise `docs/docking-approach.md` and SPEC to say:
+The inert implementation changes no production or user-facing Zaphod
+documentation. Its `tools/zellij-transactional-override/README.md` records the
+0.44.3 blocker, exact upstream base, manual proof command, and non-runtime
+boundary. A later activation entity may add this already-reviewed semantic
+diff only after an upstream release or captain-approved runtime fork exists:
 
 > Foreign-tab retrofit uses a stable-tab-ID transactional override. The host
 > plans every retained pane into non-spawning `children` positions before it
 > stages the rail. Rejection leaves the tab unchanged; success is explicit and
 > swap steering begins only after the matching result event.
 
-README should promise exact first-toggle terminal preservation only after the
-offline matrix and CL demo pass. No document should instruct users to install
-a Zellij fork.
+That later entity must also update SPEC landmine #26 and may promise exact
+first-toggle preservation only after its own offline matrix and CL demo pass.
+No current document should instruct users to apply or install this series.
 
 ## Out of scope
 
@@ -252,9 +332,10 @@ a Zellij fork.
 - Post-hoc cleanup, rollback after process loss, or guessing which terminal a
   new pane replaced.
 - eh's floating-instance leak, actor election, and chrome-placement work.
-- Shipping, vendoring, pinning, or requiring a Zellij fork. The disposable
-  patch exists only to prove an upstream contract. Any shipped fork requires a
-  later, explicit captain gate; this entity does not authorize one.
+- Shipping, vendoring, pinning, or requiring Zellij source or binaries at
+  runtime. The inert mail patches prove an upstream contract only. Any runtime
+  fork requires a later, explicit captain gate; this entity does not authorize
+  one.
 
 ## Stage Report: ideation
 
@@ -278,3 +359,18 @@ shipped fork.
 ### Feedback Cycles
 
 - **Cycle 1 — ideation gate held (2026-07-10).** The transactional planner and result contract are technically sound, but the next stage lacks a mergeable Zaphod-repository deliverable: a disposable external checkout alone cannot satisfy this workflow's local merge boundary. Revise the design to ship an inert upstream patch series plus a deterministic disposable apply/red-green harness in this repository. The installer, Cargo dependency graph, and runtime must not consume the patch; applying, pinning, vendoring, or requiring a fork still needs a later explicit captain gate.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Define the exact inert, mergeable repository artifacts for implementation: an upstream-oriented patch series and a deterministic disposable apply/red-green test harness, with paths and ownership clear enough to implement without choosing a runtime fork.
+  The canonical design now owns one `tools/zellij-transactional-override/` tree: exact base SHA, ordered three-patch mail series, three KDL fixtures, README, and sole-entry `verify.sh`; production paths have no caller or dependency on it.
+- DONE: Add acceptance and test-plan evidence that the patch applies to exact Zellij v0.44.3, the legacy host is red, the disposable patched host is green, and Zaphod's installer, Cargo graph, and runtime never consume or require the patch.
+  AC-7 requires exact-base/apply controls plus repeatable RED/GREEN reports; AC-6 independently compares Cargo metadata, black-box installer outputs, protected-path diffs, and ordinary tests with the proof kit absent.
+
+### Summary
+
+Cycle 2 converts the external-only proof into a mergeable, upstream-oriented
+Zaphod artifact without selecting a runtime fork. Implementation owns an inert
+mail-patch series and deterministic disposable verifier; runtime activation,
+Zaphod result handling, user-facing docs, and a live demo remain behind a
+later upstream-release or captain-approved-fork gate.
