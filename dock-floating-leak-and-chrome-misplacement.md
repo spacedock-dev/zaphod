@@ -1,7 +1,7 @@
 ---
 id: ehvya2cwpsk28m8thtncbxe2
 title: Floating sidebar-instance leak and dirty-tab chrome misplacement — suspected shared root cause
-status: implementation
+status: ideation
 source: finding — spun out of dock-toggle-restructures-panes ideation (AC-2, AC-4), 2026-07-08
 started: 2026-07-08T07:50:19Z
 completed:
