@@ -34,12 +34,33 @@ TEMP_LAYOUT="$TEMP_LAYOUT_BASE.kdl"
 mv "$TEMP_LAYOUT_BASE" "$TEMP_LAYOUT"
 BACKUP_LAYOUT=""
 HAD_PREVIOUS=0
+ROLLBACK_NEEDED=0
 
 cleanup_install_temps() {
-    [ -z "$TEMP_LAYOUT" ] || rm -f "$TEMP_LAYOUT"
-    [ -z "$BACKUP_LAYOUT" ] || rm -f "$BACKUP_LAYOUT"
+    local original_status=$?
+    local cleanup_status=0
+    trap - EXIT INT TERM HUP
+    set +e
+    if [ "$ROLLBACK_NEEDED" -eq 1 ]; then
+        if [ "$HAD_PREVIOUS" -eq 1 ] && [ -n "$BACKUP_LAYOUT" ]; then
+            mv "$BACKUP_LAYOUT" "$TARGET_LAYOUT" || cleanup_status=1
+            BACKUP_LAYOUT=""
+        else
+            rm -f "$TARGET_LAYOUT" || cleanup_status=1
+        fi
+    fi
+    [ -z "$TEMP_LAYOUT" ] || rm -f "$TEMP_LAYOUT" || cleanup_status=1
+    [ -z "$BACKUP_LAYOUT" ] || rm -f "$BACKUP_LAYOUT" || cleanup_status=1
+    if [ "$cleanup_status" -ne 0 ]; then
+        echo "failed to restore the previous Zaphod layout" >&2
+        exit 1
+    fi
+    exit "$original_status"
 }
 trap cleanup_install_temps EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 zaphod_render_layout "$SCRIPT_DIR/layouts/zaphod.kdl" "$WASM_URL" "$TEMP_LAYOUT"
 zaphod_validate_layout_identity "$TEMP_LAYOUT" "$WASM_URL"
@@ -52,23 +73,19 @@ if [ -e "$TARGET_LAYOUT" ]; then
 fi
 mv "$TEMP_LAYOUT" "$TARGET_LAYOUT"
 TEMP_LAYOUT=""
+ROLLBACK_NEEDED=1
 
 if ! zaphod_validate_message_plugin_identity "$CONFIG_FILE" "$WASM_URL" ||
     ! zaphod_validate_layout_identity "$TARGET_LAYOUT" "$WASM_URL" ||
     ! zaphod_validate_layout_live "$TARGET_LAYOUT" "$ZELLIJ_ROOT" "$CONFIG_FILE" "$WASM_URL"; then
     echo "postflight identity validation failed; restoring previous layout" >&2
-    if [ "$HAD_PREVIOUS" -eq 1 ]; then
-        mv "$BACKUP_LAYOUT" "$TARGET_LAYOUT"
-        BACKUP_LAYOUT=""
-    else
-        rm -f "$TARGET_LAYOUT"
-    fi
     exit 1
 fi
 
+ROLLBACK_NEEDED=0
 if [ -n "$BACKUP_LAYOUT" ]; then
     rm -f "$BACKUP_LAYOUT"
     BACKUP_LAYOUT=""
 fi
-trap - EXIT
+trap - EXIT INT TERM HUP
 echo "installed $TARGET_LAYOUT"

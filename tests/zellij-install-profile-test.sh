@@ -373,6 +373,57 @@ test_install_postflight_rollback() {
     remove_test_root
 }
 
+test_install_signal_rollback() {
+    local root primary destination layout primary_url before status real_zellij shim_dir
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-install-signal.XXXXXX")"
+    TEST_ROOT="$root"
+    primary="$root/primary"
+    destination="$root/zellij"
+    shim_dir="$root/bin"
+    git clone -q "$REPO_ROOT" "$primary"
+    copy_installer_under_test "$primary"
+    seed_wasm "$primary"
+
+    mkdir -p "$destination/layouts" "$shim_dir"
+    layout="$destination/layouts/zaphod.kdl"
+    printf 'sentinel-layout-signal\n' > "$layout"
+    before="$(sha256 "$layout")"
+    primary_url="file:$(cd "$primary" && pwd -P)/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+    write_coherent_config "$destination/config.kdl" "$primary_url"
+    real_zellij="$(command -v zellij)"
+
+    printf '%s\n' \
+        '#!/bin/bash' \
+        'set -u' \
+        'case " $* " in' \
+        '    *" attach "*)' \
+        '        count=0' \
+        '        [ ! -f "$ATTACH_COUNT" ] || count="$(cat "$ATTACH_COUNT")"' \
+        '        count=$((count + 1))' \
+        '        printf "%s\n" "$count" > "$ATTACH_COUNT"' \
+        '        if [ "$count" -eq 2 ]; then' \
+        '            /bin/kill -TERM "$PPID"' \
+        '        fi' \
+        '        ;;' \
+        'esac' \
+        'exec "$REAL_ZELLIJ" "$@"' > "$shim_dir/zellij"
+    chmod +x "$shim_dir/zellij"
+
+    set +e
+    PATH="$shim_dir:$PATH" \
+        REAL_ZELLIJ="$real_zellij" \
+        ATTACH_COUNT="$root/attach-count" \
+        ZELLIJ_CONFIG_DIR="$destination" \
+        "$primary/install.sh" >"$root/signal.out" 2>"$root/signal.err"
+    status=$?
+    set -e
+
+    [ "$status" -ne 0 ] || fail "signal during postflight expected install failure, got exit 0"
+    [ "$(sha256 "$layout")" = "$before" ] || fail "signal during postflight did not restore prior layout bytes"
+    echo "PASS: signal during postflight restored prior layout bytes"
+    remove_test_root
+}
+
 test_worktree_profile_lifecycle() {
     local root profile_script profile_cwd global_root global_config global_layout
     local config_before layout_before expected_url expected_cwd pane_state control_session control_dump signal_name
@@ -448,6 +499,9 @@ case "${1:-all}" in
     install-postflight)
         test_install_postflight_rollback
         ;;
+    install-signal)
+        test_install_signal_rollback
+        ;;
     worktree-profile)
         test_worktree_profile_lifecycle
         ;;
@@ -455,6 +509,7 @@ case "${1:-all}" in
         test_linked_install
         test_install_identity
         test_install_postflight_rollback
+        test_install_signal_rollback
         test_worktree_profile_lifecycle
         ;;
     *)
