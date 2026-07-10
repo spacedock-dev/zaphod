@@ -1178,3 +1178,45 @@ already-docked tab, `dump-layout` after each) before deciding fold-in vs.
 file-separately — deferring that call to the FO per team-lead's framing,
 since it may turn out to be a third distinct mechanism rather than another
 face of AC-2/AC-3's install-time race.
+
+### Live diagnosis of a naturally-occurring WORK corruption instance (2026-07-10, ad hoc — not a formal cycle)
+
+After the FO force-killed all 20 sidebar panes session-wide in `WORK` (18
+floating zombies plus the 2 tiled residents in "Zaphod"/"Tab #7", via
+`zellij action close-pane -p <id>`, a CLI-driven close distinct from the
+plugin's own `close_self()`), CL pressed `Alt /` fresh on Tab #7 —
+session-wide sidebar population genuinely zero at press time. The result
+was the familiar terminal-duplication shape (`sidebar` + two real,
+distinct `/bin/zsh` panes at X=28/126) — initially read as a fresh,
+population-zero repro that would have contradicted the TOCTOU-race
+mechanism entirely.
+
+A dedicated diagnostic pass (opus, live read-only inspection of `WORK` plus
+a controlled repro in a disposable session using the identical force-kill
+method) refuted that reading. **The population-zero retrofit faithfully
+preserves pane count and never spawns an extra pane** — confirmed live,
+both 1-terminal-in-1-out and 2-terminal-in-2-out, the latter reproducing
+Tab #7's exact geometry byte-for-byte. Code trace (main HEAD `5194c5d`)
+confirms why: the press took the `Retrofit` branch (not `RegenerateSwaps`,
+ruling out the dirty-tab-history hypothesis this write-up floated in the
+moment), and `split_preserving_layout_kdl`'s region-count-preserving
+construction has no empty-slot-spawn path at population zero regardless of
+which branch fires — both funnel through the same
+`install_split_preserving_swaps`. Also ruled out: the FO's CLI force-kill
+method as a confound (reproduced cleanly with the identical method) and a
+single-instance transform bug (count preserved exactly in both controlled
+trials).
+
+**Conclusion: the second terminal pane predated this press** — almost
+certainly a real, earlier occurrence of the TOCTOU race this entity has
+tracked since cycle 1, sitting stacked/off-screen in the tab's `stacked {
+children }` main region (invisible as "a second pane" until a later
+retrofit surfaces it) rather than a fresh corruption this specific press
+caused. **This does not contradict or weaken the TOCTOU-race mechanism —
+it's additional, if indirect, evidence for it**, and for why `WORK`'s real
+population needs reducing regardless of whether the install-time race can
+ever be fully closed: damage from a single lucky race can persist
+invisibly for a long time before something exposes it. Does not change
+AC-1's recommended fix direction. Exact origin (when/how `terminal_54` was
+created) is not recoverable — the server log had already rotated past the
+relevant window.
