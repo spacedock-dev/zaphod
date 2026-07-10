@@ -1,9 +1,9 @@
 ---
 id: njr36mfyhbafy8zx9ydks8ep
 title: Deterministic first-officer rehydration after compaction
-status: backlog
+status: ideation
 source: captain finding — first-officer critical-path wait contract degraded after context compaction, 2026-07-11
-started:
+started: 2026-07-10T23:27:31Z
 completed:
 verdict:
 score: 0.95
