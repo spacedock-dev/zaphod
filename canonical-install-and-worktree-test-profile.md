@@ -369,3 +369,30 @@ Designed a fail-closed, primary-checkout-only canonical installer and a separate
 ### Summary
 
 Implemented a primary-only, fail-closed global installer with canonical identity checks, live disposable layout parsing, atomic rename, and rollback across ordinary failures and signals. Added an isolated linked-worktree profile whose config, layouts, data, permissions, session, and cleanup remain disposable; process regressions prove candidate-only live identity and unchanged outside bytes across normal, TERM, and INT cleanup. Updated operator and delivery documentation, including the approved architecture and pz safety gates; no j5 transform or standing global Zellij state was changed.
+
+## Stage Report: validation
+
+- DONE: AC-1 — A linked worktree cannot change a global Zaphod install.
+  Fresh execution refused the linked installer before writes and passed the paired primary control.
+- DONE: AC-2 — Canonical installation refuses split URL or configuration identity.
+  Foreign, mixed, missing-keybind, and missing-rail sentinels survived; coherent/commented controls installed.
+- DONE: AC-3 — The worktree profile is self-contained and preserves global bytes.
+  Warm live execution proved candidate-only identity and normal/TERM/INT cleanup with unchanged hashes.
+- FAILED: AC-4 — Regression coverage is red first and rejects false confidence.
+  A fresh detached checkout timed out after 10s waiting for metadata while its required clean build took 1m42s; warm-only green is insufficient.
+- DONE: AC-5 — Operator and delivery documentation states executable boundaries.
+  The reviewed diff matches the executed primary/profile boundaries, live oracle, delivery order, and safety gates.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  CL did not drive the attached-session keypress; the exact script is in the gate artifact.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  CL did not drive baseline/candidate sessions; the exact two-run script is in the gate artifact.
+- FAILED: Independently reproduce every offline AC from implementation commit 7cfd3a9b0a9bdf81ecb6c95fa806956799c006f1, including required Rust, Go, shell, and no-silent-skip evidence; report a verdict for each AC.
+  Rust 132/132, Go 35/35+vet, shell 6/6 warm, and fail-loud missing-Zellij passed, but AC-4 failed cold.
+- DONE: Run an adversarial refutation audit from a throwaway checkout, covering identity false positives/negatives, rollback and signal cleanup, leaked sessions, caller impact, and semantic drift; cite each attack and exact surviving or refuting evidence.
+  Six attack classes failed to refute runtime behavior; the cold-checkout 10s readiness attack survived at test lines 28-40.
+- DONE: Prove the live-drill infrastructure cheaply, then prepare the exact CL demo script and subspace review record for interactive AC-6 and AC-7 without claiming those human-driven observations passed.
+  Warm real-Zellij lifecycle proved the oracle; gate brief, decisions log, and exact pending demo script are under `.spacedock-state/gates/`.
+
+### Summary
+
+Validation recommends rejection: runtime boundaries pass when warm, but the committed process suite cannot complete from the required fresh checkout because it times out during the mandatory clean build. Interactive AC-6 and AC-7 remain explicitly unrun; implementation should extend readiness, clean the launcher on timeout, and rerun from a new clone before CL's demo.
