@@ -15,148 +15,139 @@ mod-block:
 
 ## Problem
 
-j5 must restore a two-sided invariant: first-toggle retrofit may add the rail,
-but it must neither create nor remove a user's terminal. Two deterministic
-server mechanisms now violate opposite sides of that invariant.
+j5 cannot restore exact first-toggle terminal preservation through Zellij
+0.44.3's public plugin API. The two candidate families fail at the host
+boundary: retained panes are appended without a transaction, and plugins
+cannot read a terminal's original typed `invoked_with()` value.
 
-The shipped `stacked { children }` base can duplicate an explicit-cwd
-terminal. `WORK`'s serialized template launches a pane with
-`Some(Run::Cwd("/Users/clkao"))`, while the base contributes a bare `None`
-run. Zellij 0.44.3's `find_already_running_panes` compares layout runs with
-`invoked_with()` by exact equality. The mismatch spawns a default terminal,
-and `retain_existing_terminal_panes=true` also keeps the original.
+The exact server path explains the destructive failure. In tag `v0.44.3`
+(commit `55a2121`), `LayoutApplier::override_tiled_panes_layout_for_existing_panes`
+drains the tab, places exact-run matches and new panes, then passes each
+remaining retained pane to `handle_remaining_tiled_pane_ids`. That function
+removes each pane from `ExistingTabState` before calling
+`TiledPanes::insert_pane`. If `add_pane_without_stacked_resize` cannot split a
+pane or add to a stack, it logs `Failed to add pane to stack` and returns
+without reinserting the owned pane. No preflight, rollback, or failure result
+restores the drained pane. `Tab::override_layout` also installs the new base
+and swaps before it runs this mutation, and the plugin shim returns `()`.
 
-The cycle-3 no-terminal-leaf candidate avoids that match, but it is unsafe for
-more than one retained terminal. On `WORK`'s Zaphod tab, a single retained
-override moved status-bar plugin 84 back to the bottom and spawned rail 112,
-but terminal 62 disappeared; only terminal 17 survived. The server logged:
+KDL offers no non-spawning variadic retained-pane slot. `children` is a
+parse-time template placeholder. The parser replaces an unresolved placeholder
+with one `TiledPaneLayout::default()` leaf; the override path calls
+`flatten_layout(..., false)`, so it never expands that leaf to the number of
+existing panes. A disposable two-terminal explicit-cwd session confirmed the
+server behavior: a `stacked { children }` base retained terminal IDs 0 and 1
+but spawned terminal ID 2 for its single bare `None` slot. A chrome plus
+flexible-plugin-anchor base happened to retain IDs 0 and 1 at 80x24, but it
+uses the same one-by-one `insert_pane` path and the same pane-dropping error
+branch. A happy geometry cannot make that mechanism transactional.
 
-```text
-Vertical relayout of tab failed
-UnsatisfiableConstraint
-Failed to add pane to stack: Not enough room for another pane!
-```
+The identity fallback is also unavailable. `PaneUpdate` exposes only
+`PaneInfo::terminal_command`, a flattened display string for `Run::Command`;
+bare `None` and `Run::Cwd` both appear as `None`, and cwd, argument boundaries,
+`hold_on_close`, `hold_on_start`, and other run variants are absent.
+`get_pane_cwd` and `get_pane_running_command` explicitly query current OS
+state. `dump_session_layout_for_tab` starts from `invoked_with()`, but
+`Pty::populate_session_layout_metadata` overwrites terminal commands and cwds
+from current processes before serialization. Three disposable controls
+falsified those substitutes:
 
-A clean disposable 160x60 session reproduced the same failure without Zaphod,
-corrupted chrome, concurrency, or population: a two-terminal explicit-cwd
-stack (`terminal_0 + terminal_1`) became only `terminal_0 + rail` after one
-no-leaf retained override, with the same two server errors. The base can hold
-one appended retained terminal, but the second can be lost before the
-immediate swap relayout succeeds. The four cycle-3 single-terminal sessions
-therefore proved only N=1 behavior.
+| Original identity | Public/current substitute used in a concrete retained base | Result |
+|---|---|---|
+| bare `None`, shell currently in the worktree | `cwd=<worktree>` | terminal IDs `{0}` became `{0,1}` |
+| `Run::Cwd("/tmp")`, shell later `cd` to the repo | `cwd=<repo>` | terminal IDs `{0}` became `{0,1}` |
+| `Run::Command("/bin/sh", ["-c", "sleep 600"], cwd=/tmp)`, current child `sleep 600` | `command="/bin/sleep"`, args `"600"`, cwd `/tmp` | terminal IDs `{0}` became `{0,1}` |
 
-A concrete base with two exact `cwd="/Users/clkao"` slots preserved both
-terminal IDs and produced no errors. That result does not yet yield a safe
-transform: after a terminal launched in `/Users/clkao` changed directory to
-the repo, a concrete base built from the reported current cwd spawned a second
-terminal. `dump-layout` can describe current/inherited cwd, while matching
-requires the original `invoked_with()` value. j5 has no proven source for that
-launch identity across long-running shells and command panes.
+The exact matcher in `screen.rs::find_already_running_panes` requires the
+original typed value. None of these surfaces can round-trip it.
 
 ## Proposed approach
 
-Do not implement either layout rewrite yet. Keep j5 in ideation until a
-server-level mechanism satisfies the terminal-ID invariant for N>=2 and when
-swap relayout fails. The current production behavior can duplicate a terminal,
-but replacing it with a candidate that can destroy one is not an acceptable
-repair.
+Stop repository implementation and present a captain gate. The current host
+supports neither safe mechanism that j5 requires.
 
-### Smallest safe next investigation
+### Choice A — patch or upstream Zellij (recommended)
 
-Investigate one boundary, in this order:
+Add one server-owned transactional retained-pane operation. The operation must
+bind the complete retained pane-ID set to non-spawning base positions, validate
+all base geometry before draining live panes, and either commit every pane plus
+the rail or leave the original tab untouched. It must report success or failure
+to the plugin before any swap steering. A variadic retained-children marker is
+one possible KDL surface; a pane-ID-to-position API is another. The contract,
+not its syntax, is decisive: no pane may leave server ownership until every
+retained pane has a valid target.
 
-1. Find or falsify a Zellij override/KDL construction that provides a
-   non-spawning insertion point for an arbitrary number of retained terminals.
-   It must carry no `Run` instruction to match, provide valid base geometry
-   before any swap applies, and keep every terminal if the immediate swap hits
-   `UnsatisfiableConstraint`. Exercise the real server path; a KDL string test
-   cannot establish this.
-2. If no such insertion point exists, determine whether the plugin can obtain
-   each pane's original `invoked_with()` identity. If it can, spike an
-   identity-complete concrete base that seats every terminal directly and
-   treats the swap as a later layout refinement, not a safety dependency.
-   Current cwd, dump cwd, and command title are insufficient substitutes.
-3. If neither capability exists, record a host-API gap and return to a captain
-   gate with two explicit choices: patch/upstream Zellij so retained panes can
-   be seated transactionally, or reopen the runtime retrofit architecture.
-   Do not smuggle either expansion into j5 implementation.
+This option keeps the runtime retrofit and avoids serializing launch identity.
+It is the smallest architecture that can satisfy both duplication and loss
+invariants, but it expands scope into a Zellij fork or upstream change.
 
-The preferred mechanism is the first: an atomic retained-pane insertion point
-or transactional override keeps pane processes independent of launch-identity
-serialization. Original-identity readback is the fallback because it expands
-the transform across shell cwd, command, args, suspended state, and future run
-variants. Post-override cleanup is rejected: a pre/post ID diff can confuse a
-concurrent user-created pane with a spawned placeholder, and it cannot recover
-a terminal already removed by a failed relayout.
+### Choice B — reopen the retrofit architecture
 
-### Evidence and superseded candidates
+Remove full-tab retained override from first-toggle docking. Tabs born from the
+Zaphod layout may continue to use preinstalled swaps. Foreign tabs must use a
+mechanism that does not rewrite the live tiled layout, such as a floating rail,
+or require the user to open a layout-born tab before tiled docking. This option
+avoids a host fork but changes the first-toggle experience and the shipped
+"dock any tab" promise.
 
-| Case, one retained override each | Result | Design consequence |
-|---|---|---|
-| one explicit-cwd terminal, current `children` base | original + duplicate + rail | bare run does not match `Run::Cwd` |
-| one explicit-cwd terminal, no-leaf base | original + rail | N=1 only; insufficient safety proof |
-| two explicit-cwd terminals, no-leaf base | one original lost; one + rail remain | candidate refuted; swap success was a safety dependency |
-| two explicit-cwd terminals, concrete exact-run base | both original IDs + rail | promising only with trustworthy launch identities |
-| launch cwd A, current cwd B, concrete B base | original + duplicate + rail | dump/current cwd cannot stand in for `invoked_with()` |
-
-The `WORK` status-bar-in-rail starting state remains chrome-placement evidence
-owned by eh. It helped expose the loss, but the clean two-terminal reproduction
-proves that chrome corruption is not required for j5's failure.
+Adding only a typed `get_pane_invoked_with` API is rejected as the primary
+repair. It would still require exact support for every `Run` variant and future
+metadata, and the nontransactional override would still drop a retained pane
+when geometry cannot seat it. Post-override cleanup is also rejected: it cannot
+recover a dropped process and cannot distinguish a concurrent user-created
+terminal from a spawned placeholder.
 
 ## Acceptance criteria
 
 ### Offline
 
-**AC-1 — Retrofit preserves the complete terminal-ID set.** For N=1, N=2
-stacked, and N=3 mixed-split disposable tabs, the terminal IDs after exactly
-one retained override equal the IDs captured immediately before it. Exactly
-one rail is present; no terminal is added, removed, replaced, or exited.
+**AC-1 — First activation preserves the complete terminal-ID set.** For N=1,
+N=2 stacked, and N=3 mixed-split disposable tabs, the terminal IDs after one
+activation equal the IDs captured immediately before it. Exactly one rail is
+present; no terminal is added, removed, replaced, exited, or suppressed.
 
-Verified by: a process-level Zellij 0.44.3 regression that compares ID sets,
-not pane titles or counts alone. Its independent red baselines are the
-explicit-cwd duplicate and the clean N=2 no-leaf loss reproduced in ideation.
+Verified by: a process-level comparison of `list-panes -a --json` ID sets. The
+independent red baselines are the explicit-cwd/bare/current-command duplicate
+controls and the clean N=2 no-leaf loss.
 
-**AC-2 — A failed relayout is non-destructive.** Force the installed swap to
-hit an unsatisfiable geometry while the base is applied to a two-terminal
-stack. The override either rejects atomically or leaves both original terminal
-IDs usable in a valid base arrangement; it never logs a failed pane insertion
-followed by a missing terminal.
+**AC-2 — Failure is atomic.** Force the base or immediate swap to hit
+unsatisfiable geometry with two retained terminals. The operation reports
+failure and leaves the original pane IDs, processes, geometry, and swap set
+usable; it performs no partial install.
 
-Verified by: server logs plus before/after `list-panes -a` and `dump-layout`
-from a disposable session. A successful happy-path relayout does not satisfy
-this AC.
+Verified by: a Zellij server integration test that snapshots pane IDs and
+geometries before the call, injects the constraint failure, and compares the
+complete state afterward, plus disposable server logs and pane listings.
 
-**AC-3 — Launch-identity drift does not duplicate terminals.** Cover a shell
-launched at cwd A then changed to cwd B, two panes with different cwd origins,
-a bare `None` pane, and a command pane with args/start-suspended metadata. The
-same one-call retrofit preserves every original ID with no new terminal.
+**AC-3 — Base safety does not depend on a later swap.** Before any swap is
+applied, every retained terminal and the rail occupy valid base positions. A
+failed or skipped swap cannot alter terminal survival.
 
-Verified by: the process-level matrix. Any concrete-base approach must also
-show where each original `invoked_with()` value comes from and that it survives
-round-trip without substituting current cwd.
+Verified by: a server test that pauses after base commit, inspects all pane IDs
+and non-overlapping geometries, then independently fails swap application.
 
-**AC-4 — The mechanism owns N>=2 base geometry before swap application.** The
-chosen design names how retained terminals are seated while the base is active
-and why an immediate swap failure cannot remove them. No terminal's survival
-may depend on a later swap relayout.
+**AC-4 — Launch-identity variants remain stable.** Bare `None`, explicit cwd,
+launch-cwd-A/current-cwd-B, mixed launch cwd, and command panes with distinct
+args and hold metadata all preserve their original IDs.
 
-Verified by: the server-level AC-2 failure case and focused structural tests of
-the chosen transform. A pure KDL/string assertion is supplementary only.
+Verified by: the same process matrix. Choice A must pass without reading launch
+identity. Any future identity-based alternative must expose and round-trip the
+typed original `Run` value rather than current process state or display text.
 
-**AC-5 — Existing bare-pane behavior remains stable.** The bare `None` control
-and explicit `Run::Cwd` control both preserve their original IDs and add only
-the rail for N=1 and N=2.
+**AC-5 — The selected architecture closes the host gap.** Choice A exposes a
+transactional result-bearing host operation; Choice B performs no retained
+full-tab override on foreign tabs and documents the replacement experience.
 
-Verified by: paired disposable controls using the same override mechanism and
-geometry.
+Verified by: API-level tests for Choice A or an action trace for Choice B that
+proves no `OverrideLayout` command is emitted during foreign-tab activation.
 
 **AC-6 — Documentation follows proved behavior.** README, SPEC, and
 `docs/docking-approach.md` claim exact terminal preservation only after AC-1
-through AC-5 pass. Until then, the current unreliable-count caveat remains;
-the refuted no-leaf mechanism must not be documented as the fix.
+through AC-5 pass. Until then, the unreliable-count caveat and this host-API
+blocker remain explicit.
 
-Verified by: review of the conditional diff below against the process-level
-matrix and failure-path evidence.
+Verified by: review of the conditional diff below against the process matrix
+and atomic failure test.
 
 ### Interactive
 
@@ -171,9 +162,9 @@ alone.
 
 ## Proposed doc diff
 
-The cycle-3 “chrome + rail, no terminal leaf” diff is withdrawn. No production
-doc change should present a replacement mechanism until AC-1 through AC-5
-pass. Once a mechanism passes, apply this semantic diff:
+No production doc should present a replacement mechanism until the captain
+chooses an architecture and AC-1 through AC-5 pass. Keep the current caveat.
+After Choice A passes, apply this semantic diff:
 
 **`docs/docking-approach.md` — replace the current unreliable-count exception:**
 
@@ -182,9 +173,10 @@ pass. Once a mechanism passes, apply this semantic diff:
 -reliable invariant).** ...
 +**First-toggle terminal preservation.** Installing the swap set materializes
 +exactly one rail and preserves the complete set of existing terminal pane IDs.
-+[Describe the proved retained-pane seating mechanism here.] Terminal survival
-+does not depend on the immediate swap relayout: rejection or an unsatisfiable
-+swap leaves the valid base and every original terminal intact.
++Zellij seats retained panes through a transactional, non-spawning host
++operation before it installs or applies swaps. Terminal survival does not
++depend on the immediate swap relayout: rejection leaves the original tab and
++every terminal unchanged.
 ```
 
 Update the Toggle v3 mechanism section with the proved base construction and
@@ -204,33 +196,36 @@ the full matrix.
 +ID set in the base itself and remain non-destructive when relayout fails.
 ```
 
-After the mechanism is proved, align README, SPEC landmine #16, and “If
-building v2 from scratch” item 3 to say that the first toggle adds only the rail
-and preserves terminal IDs. Until then, retain their current caveat rather than
-replacing one false invariant with another.
+Add a SPEC landmine recording that Zellij 0.44.3's retained override drains and
+reinserts unmatched panes without rollback, and that its plugin surfaces do not
+expose original typed `invoked_with`. After Choice A passes, align README, SPEC
+landmine #16, and “If building v2 from scratch” item 3 to say that first toggle
+adds only the rail and preserves terminal IDs. Choice B instead requires a
+captain-reviewed doc diff for its changed foreign-tab experience.
 
 ## Test plan
 
-1. **Refutation first — completed 2026-07-10.** In a clean attached 160x60
-   Zellij 0.44.3 session, start two explicit-cwd terminals in a stack. Apply a
-   chrome+rail no-leaf base exactly once with both retain flags and
-   `stacked { children }` swaps. Require the observed red result in the design
-   record: one original terminal disappears, and the server logs
-   `UnsatisfiableConstraint` plus “Not enough room for another pane.”
-2. Exercise the smallest server mechanism from Proposed approach: first a
-   non-spawning multi-pane insertion point/transactional override, then
-   original-`invoked_with()` readback only if the first does not exist. Stop
-   after each falsification; do not layer fixes.
-3. For any surviving candidate, run the full process matrix before approving
-   implementation: N=1/N=2/N=3; bare, explicit cwd, changed cwd, mixed cwd,
-   command+args; stacked and split geometries; canonical and misplaced chrome.
-   Each case uses exactly one override and compares terminal ID sets.
-4. Inject the known failure path with constrained geometry. Confirm atomic
-   rejection or a valid base containing every original terminal, then cycle
-   both swaps and confirm the ID set remains unchanged.
-5. Only after the server-level matrix passes, add focused pure-function tests,
-   implement the smallest transform, run the full native suite, apply the
-   conditional doc diff, and perform AC-7's disposable interactive demo.
+1. **Smallest invalidation first.** Against unpatched Zellij 0.44.3, create a
+   two-terminal tab, force the retained base to run out of insertion geometry,
+   and assert that a result-bearing call rejects without changing pane IDs or
+   swaps. The current server fails this test because it drains panes, reinserts
+   them one by one, and has no rollback or result channel.
+2. For Choice A, add server unit tests for preflight and rollback before the
+   plugin integration. Prove that all retained pane-ID targets are valid before
+   any drain, spawn, close, or swap-set mutation.
+3. Run the full process matrix: N=1/N=2/N=3; bare, explicit cwd, changed cwd,
+   mixed cwd, command plus distinct args/hold metadata; stacked and split
+   geometries; canonical and misplaced chrome. Each case activates once and
+   compares terminal ID sets.
+4. Inject unsatisfiable base and swap layouts. Confirm an atomic rejection and
+   unchanged original state, then run successful docked/undocked cycles and
+   confirm the ID set remains unchanged.
+5. For Choice B, replace steps 2 through 4 with an action trace proving foreign
+   tabs never call retained `override_layout`, then test and document the
+   captain-approved replacement interaction.
+6. Only after the selected architecture passes its process tests, update the
+   repository transform and docs, run the full native suite, and perform AC-7's
+   disposable interactive demo.
 
 ## Out of scope
 
@@ -241,8 +236,7 @@ replacing one false invariant with another.
 - eh's floating-instance leak, multi-actor serialization, and chrome placement.
   The clean N=2 reproduction keeps those independent of j5.
 - Shipping a Zellij fork or reopening docking architecture without a new
-  captain gate. Read-only source inspection and disposable server-level spikes
-  are in scope to determine whether the host API can satisfy j5.
+  captain gate. This ideation supplies that gate; it does not choose for CL.
 - Any mutation of `WORK`; it supplies read-only evidence only.
 
 ## Refuted cycle-3 no-terminal-leaf design
@@ -1166,3 +1160,16 @@ The first-toggle extra terminal is now a deterministic launch-identity bug, not 
 ### Summary
 
 Cycle 4 replaces a premature N=1 fix with a safety gate grounded in the N=2 loss path. j5 remains in ideation until the server can seat arbitrary retained terminals safely before swap relayout, or can expose their original launch identities; otherwise the task returns to the captain as a host-API or architecture decision. eh continues to own floating-instance concurrency and chrome placement.
+
+## Stage Report: ideation (cycle 5)
+
+- DONE: Exercise Zellij's server/API path for a non-spawning, transactional retained-pane insertion point that seats N>=2 terminals before swap application; provide the smallest end-to-end proof or exact source/API evidence that the mechanism is unavailable.
+  Exact v0.44.3 source traces retained panes through drain -> remove -> `insert_pane`, whose no-room branch logs and drops the owned pane without rollback; `children` produced one bare spawnable slot in a disposable N=2 session, and a flexible plugin anchor's N=2 success still used the same destructive branch.
+- DONE: If no insertion point exists, trace whether each terminal's original invoked_with identity can be read and round-tripped for launch-cwd drift, bare panes, and command panes without substituting current cwd; falsify unsafe candidates with disposable evidence.
+  `PaneInfo` lacks typed identity, cwd/running-command calls return current OS state, and session dump overwrites original command/cwd before serialization; bare, cwd-drift, and current-command concrete bases each duplicated terminal `{0}` to `{0,1}`.
+- DONE: Update the canonical design, ACs, and test plan with one proved safe mechanism or an explicit host-API/architecture blocker; do not edit production code or mutate WORK.
+  Canonical design now records the blocker and a two-choice captain gate: transactional Zellij host support (recommended) or a reopened foreign-tab docking architecture. No production code, docs, or WORK state changed.
+
+### Summary
+
+Zellij 0.44.3 exposes neither an atomic retained-pane override nor original typed launch identity, so j5 has no safe repository-only implementation. The next step requires a captain decision between patching/upstreaming a transactional host operation and changing the first-toggle architecture for foreign tabs.
