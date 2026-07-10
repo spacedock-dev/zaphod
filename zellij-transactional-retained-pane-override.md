@@ -1,11 +1,11 @@
 ---
 title: Zellij transactional retained-pane override for safe foreign-tab docking
-status: ideation
+status: implementation
 score: 0.95
 source: j5 cycle-5 host-API blocker — captain selected Choice A, 2026-07-10
 started: 2026-07-10T15:03:06Z
 completed:
-worktree:
+worktree: .worktrees/spacedock-ensign-zellij-transactional-retained-pane-override
 issue:
 pr:
 verdict:
