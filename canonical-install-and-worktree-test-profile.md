@@ -1,6 +1,6 @@
 ---
 title: Canonical install and isolated worktree test profile
-status: validation
+status: implementation
 source: finding — runtime audit found layout/keybind plugin identity split, 2026-07-10
 started: 2026-07-10T12:38:46Z
 completed:
@@ -401,6 +401,7 @@ Validation recommends rejection: runtime boundaries pass when warm, but the comm
 
 - **Cycle 1 — validation → implementation (2026-07-10): REJECTED.** AC-4 failed from a fresh detached checkout: `tests/zellij-install-profile-test.sh all` passed five groups, then its fixed 10-second metadata wait expired while the mandatory clean `./build.sh` took about 1m42s. Warm-cache green is insufficient. Implementation must add a red cold-checkout regression, make readiness cover a clean build without hiding a dead launcher, clean the launcher/session/profile on timeout, and rerun the complete cold suite. AC-6 and AC-7 remain pending human-driven demos. Re-review stays with the cycle-1 validation worker after the fix.
 - **Cycle 2 — validation → implementation (2026-07-10): REJECTED.** The cold clone passed all eight shell groups and language checks, but the full default expiry left a TERM-ignoring child alive after its launcher exited. `cleanup_profile_process` gates KILL escalation on `PROFILE_LAUNCHER_PID`, so a surviving process group is no longer checked once the parent dies. The nominal 180-second poll-count window also measured about 210 seconds. Implementation must add a red descendant-survival regression, check and terminate the process group itself through bounded TERM→KILL cleanup, use a wall-clock deadline, and rerun the full cold and timeout matrix. AC-6 remains pending CL; AC-7 remains explicitly deferred to j5's later gate.
+- **Cycle 3 — validation → captain escalation → implementation (2026-07-11): REJECTED; CAPTAIN AUTHORIZED ONE TARGETED REPAIR.** The full cold 10/10 shell suite, Rust 132/check, Go 35/vet, dependency failure, descendant cleanup, unrelated-process safety, and dead/slow launcher cases passed. An adversarial one-second timeout with a two-second blocking transcript read returned after three seconds, disproving the hard wall-clock guarantee. The captain directed that this be sent back without reframing. Implementation must add a red delayed-poll regression, bound every blocking transcript read by the remaining deadline (or replace it with an equivalently nonblocking read), preserve current liveness and cleanup behavior, and rerun the focused deadline matrix plus the complete cold suite. AC-6 remains pending CL; AC-7 remains deferred to j5's later gate.
 
 ## Stage Report: implementation (cycle 2)
 
