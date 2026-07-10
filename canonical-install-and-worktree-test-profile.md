@@ -1,6 +1,6 @@
 ---
 title: Canonical install and isolated worktree test profile
-status: validation
+status: implementation
 source: finding — runtime audit found layout/keybind plugin identity split, 2026-07-10
 started: 2026-07-10T12:38:46Z
 completed:
@@ -396,3 +396,7 @@ Implemented a primary-only, fail-closed global installer with canonical identity
 ### Summary
 
 Validation recommends rejection: runtime boundaries pass when warm, but the committed process suite cannot complete from the required fresh checkout because it times out during the mandatory clean build. Interactive AC-6 and AC-7 remain explicitly unrun; implementation should extend readiness, clean the launcher on timeout, and rerun from a new clone before CL's demo.
+
+### Feedback Cycles
+
+- **Cycle 1 — validation → implementation (2026-07-10): REJECTED.** AC-4 failed from a fresh detached checkout: `tests/zellij-install-profile-test.sh all` passed five groups, then its fixed 10-second metadata wait expired while the mandatory clean `./build.sh` took about 1m42s. Warm-cache green is insufficient. Implementation must add a red cold-checkout regression, make readiness cover a clean build without hiding a dead launcher, clean the launcher/session/profile on timeout, and rerun the complete cold suite. AC-6 and AC-7 remain pending human-driven demos. Re-review stays with the cycle-1 validation worker after the fix.
