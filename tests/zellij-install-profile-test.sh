@@ -196,6 +196,58 @@ test_install_identity() {
     remove_test_root
 }
 
+test_install_postflight_rollback() {
+    local root primary destination layout primary_url before status real_zellij shim_dir
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-install-postflight.XXXXXX")"
+    TEST_ROOT="$root"
+    primary="$root/primary"
+    destination="$root/zellij"
+    shim_dir="$root/bin"
+    git clone -q "$REPO_ROOT" "$primary"
+    copy_installer_under_test "$primary"
+    seed_wasm "$primary"
+
+    mkdir -p "$destination/layouts" "$shim_dir"
+    layout="$destination/layouts/zaphod.kdl"
+    printf 'sentinel-layout-postflight\n' > "$layout"
+    before="$(sha256 "$layout")"
+    primary_url="file:$(cd "$primary" && pwd -P)/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+    write_coherent_config "$destination/config.kdl" "$primary_url"
+    write_identity_case foreign "$root/foreign-config.kdl" "$primary_url"
+    real_zellij="$(command -v zellij)"
+
+    printf '%s\n' \
+        '#!/bin/bash' \
+        'set -u' \
+        'if [ "${*: -2}" = "setup --check" ] && [ ! -e "$MUTATE_MARKER" ]; then' \
+        '    "$REAL_ZELLIJ" "$@"' \
+        '    status=$?' \
+        '    if [ "$status" -eq 0 ]; then' \
+        '        cp "$MUTATE_SOURCE" "$MUTATE_CONFIG"' \
+        '        : > "$MUTATE_MARKER"' \
+        '    fi' \
+        '    exit "$status"' \
+        'fi' \
+        'exec "$REAL_ZELLIJ" "$@"' > "$shim_dir/zellij"
+    chmod +x "$shim_dir/zellij"
+
+    set +e
+    PATH="$shim_dir:$PATH" \
+        REAL_ZELLIJ="$real_zellij" \
+        MUTATE_SOURCE="$root/foreign-config.kdl" \
+        MUTATE_CONFIG="$destination/config.kdl" \
+        MUTATE_MARKER="$root/mutated" \
+        ZELLIJ_CONFIG_DIR="$destination" \
+        "$primary/install.sh" >"$root/postflight.out" 2>"$root/postflight.err"
+    status=$?
+    set -e
+
+    [ "$status" -ne 0 ] || fail "postflight mismatch expected install failure, got exit 0"
+    [ "$(sha256 "$layout")" = "$before" ] || fail "postflight mismatch did not restore prior layout bytes"
+    echo "PASS: postflight mismatch restored prior layout bytes"
+    remove_test_root
+}
+
 case "${1:-all}" in
     linked-install)
         test_linked_install
@@ -203,9 +255,13 @@ case "${1:-all}" in
     install-identity)
         test_install_identity
         ;;
+    install-postflight)
+        test_install_postflight_rollback
+        ;;
     all)
         test_linked_install
         test_install_identity
+        test_install_postflight_rollback
         ;;
     *)
         fail "unknown test: $1"
