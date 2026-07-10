@@ -1107,6 +1107,8 @@ about an unreliable count) in `docs/docking-approach.md`/`SPEC.md`/`README.md`,
 then gate to `done`. Do not dispatch this entity to any stage until `eh`
 reaches its own `done`.
 
+**Cycle 5 gate decision (2026-07-10) — REJECTED; Choice A selected under the captain's conn.** Cycle 5 supersedes the older park-for-`eh` theory: the clean N=2 loss and exact Zellij 0.44.3 server trace prove a separate host-owned failure with neither leaked instances nor chrome corruption present. AC-1 through AC-5 remain unmet in this repository because retained override is nontransactional and original typed launch identity is unavailable. The first officer selected the report's recommended architecture, a transactional result-bearing retained-pane host operation, and filed `zellij-transactional-retained-pane-override` as the blocking task. `j5` remains in ideation until that task supplies the host contract; no repository-only implementation is authorized meanwhile.
+
 ## Stage Report: implementation (cycle 2)
 
 - DONE: Resolve the live pane-duplication finding (WORK Tab #7: fresh 1-pane tab + one Alt-/ produced 2 real terminal panes + rail, not 1+rail) -- revise the doc claim to match reality or explicitly hold/defer pending eh's root cause; do not re-ship the disproven "N->N+1" claim unchanged
