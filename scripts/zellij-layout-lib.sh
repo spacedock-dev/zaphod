@@ -68,6 +68,10 @@ zaphod_message_plugin_entries() {
         }
         {
             line = $0
+            sub(/[[:space:]]+\/\/.*/, "", line)
+            if (line ~ /^[[:space:]]*\/\//) {
+                next
+            }
             opens = gsub(/\{/, "{", line)
             closes = gsub(/\}/, "}", line)
             if (!in_plugin && match(line, /MessagePlugin[[:space:]]+"[^"]+"/)) {
@@ -143,6 +147,10 @@ zaphod_layout_plugin_entries() {
         }
         {
             line = $0
+            sub(/[[:space:]]+\/\/.*/, "", line)
+            if (line ~ /^[[:space:]]*\/\//) {
+                next
+            }
             opens = gsub(/\{/, "{", line)
             closes = gsub(/\}/, "}", line)
             if (!in_plugin && match(line, /plugin[[:space:]]+location="[^"]+"/)) {

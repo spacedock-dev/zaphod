@@ -234,6 +234,12 @@ write_identity_case() {
         coherent)
             write_coherent_config "$config_file" "$primary_url"
             ;;
+        commented-foreign)
+            write_coherent_config "$config_file" "$primary_url"
+            printf '%s\n' \
+                '// Disabled old checkout example:' \
+                "// MessagePlugin \"$foreign_url\" { rail \"0\" }" >> "$config_file"
+            ;;
         *)
             fail "unknown identity fixture: $case_name"
             ;;
@@ -307,6 +313,15 @@ test_install_identity() {
         after="$(sha256 "$layout")"
         [ "$after" = "$before" ] || fail "identity case $case_name changed sentinel layout"
     done
+
+    printf 'sentinel-layout-commented\n' > "$layout"
+    before="$(sha256 "$layout")"
+    write_identity_case commented-foreign "$destination/config.kdl" "$primary_url"
+    ZELLIJ_CONFIG_DIR="$destination" "$primary/install.sh" >"$root/commented.out" 2>"$root/commented.err" || {
+        sed -n '1,120p' "$root/commented.err" >&2
+        fail "commented Zaphod example should not affect identity"
+    }
+    [ "$(sha256 "$layout")" != "$before" ] || fail "commented example control left sentinel layout unchanged"
 
     printf 'sentinel-layout-coherent\n' > "$layout"
     before="$(sha256 "$layout")"
