@@ -725,6 +725,47 @@ test_profile_readiness_wall_clock() {
     remove_test_root
 }
 
+test_profile_readiness_liveness() {
+    local root transcript output launcher_pid status elapsed
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-liveness-test.XXXXXX")"
+    TEST_ROOT="$root"
+    transcript="$root/transcript"
+    output="$root/output"
+    : > "$transcript"
+
+    ( sleep 0.2; exit 23 ) &
+    launcher_pid=$!
+    SECONDS=0
+    set +e
+    (
+        PROFILE_READINESS_TIMEOUT_SECONDS=5
+        export PROFILE_READINESS_TIMEOUT_SECONDS
+        wait_for_profile_value "$transcript" PROFILE_ROOT "$launcher_pid"
+    ) >"$output" 2>&1
+    status=$?
+    set -e
+    elapsed=$SECONDS
+    wait "$launcher_pid" 2>/dev/null || true
+    [ "$status" -ne 0 ] || fail "dead launcher fixture unexpectedly returned metadata"
+    grep -F "FAIL: profile exited before printing PROFILE_ROOT" "$output" >/dev/null ||
+        fail "dead launcher fixture failed for an unexpected reason"
+    [ "$elapsed" -le 1 ] || fail "dead launcher was hidden until readiness expiry"
+
+    : > "$transcript"
+    (
+        sleep 2
+        printf 'PROFILE_ROOT=%s\n' "$root/slow-profile" > "$transcript"
+    ) &
+    launcher_pid=$!
+    PROFILE_READINESS_TIMEOUT_SECONDS=3 wait_for_profile_value \
+        "$transcript" PROFILE_ROOT "$launcher_pid"
+    wait "$launcher_pid"
+    [ "$WAIT_VALUE" = "$root/slow-profile" ] || fail "slow live launcher returned wrong metadata"
+
+    echo "PASS: dead launcher failed promptly and slow live launcher reached readiness"
+    remove_test_root
+}
+
 test_cold_profile_readiness() {
     local root cold_checkout output status commit
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-cold-profile-test.XXXXXX")"
@@ -778,6 +819,9 @@ case "${1:-all}" in
     profile-readiness-wall-clock)
         test_profile_readiness_wall_clock
         ;;
+    profile-readiness-liveness)
+        test_profile_readiness_liveness
+        ;;
     cold-profile-readiness)
         test_cold_profile_readiness
         ;;
@@ -790,6 +834,7 @@ case "${1:-all}" in
         test_worktree_profile_lifecycle
         test_profile_timeout_cleanup
         test_profile_readiness_wall_clock
+        test_profile_readiness_liveness
         test_cold_profile_readiness
         ;;
     *)
