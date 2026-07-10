@@ -499,3 +499,26 @@ Cycle-3 fixes descendant cleanup and passes the complete cold and language matri
 ### Summary
 
 Closed the final hard-deadline defect by removing externally blocking transcript readers from readiness polling and diagnostics. The exact delayed-poll attack is now red/green covered, while every previously validated liveness, cleanup, isolation, dependency, cold-build, and language boundary remains green; AC-6 and AC-7 retain their directed dispositions.
+
+## Stage Report: validation (cycle 4)
+
+- DONE: Reproduce the prior one-second timeout with a two-second delayed transcript reader and verify cleanup.
+  Built-in polling returned within 1s; full cleanup returned in 6s after TERM grace with parent/child/session/root absent and canary live.
+- DONE: Audit built-in parsing for partial lines, changed files, liveness races, and unrelated-process safety.
+  Partial-after-newline and replacement passed; dead/slow controls passed; an unrelated canary survived group cleanup.
+- FAILED: Audit large transcript and diagnostic-path blocking behavior.
+  A 1 MiB line met 1s, but 32 MiB exceeded 40s; blocked stderr made the timeout diagnostic return status 141 after 5s under a 1s budget.
+- DONE: Run the focused matrix and complete fresh target-free shell suite.
+  Shell passed 11/11, including its own detached target-free lifecycle; interruption, hashes, descendant cleanup, and leak checks passed.
+- DONE: Run language and dependency verification.
+  Rust passed 132/check, Go passed 35/vet, and missing Zellij failed loudly with exit 1.
+- FAILED: AC-4 — Regression coverage is red first and rejects false confidence.
+  The delayed-poll test uses an empty transcript and regular stderr, so it misses the blocking diagnostic path.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  The captain has not driven real Alt-/; no interactive result is claimed.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  It remains deferred until v9 lands and j5 rebases.
+
+### Summary
+
+Recommendation: REJECTED. Cycle 4 fixes blocking transcript polling and passes the full 11-group/language matrix, but synchronous timeout diagnostics can still exceed the hard wall-clock budget; AC-6 remains captain-driven and AC-7 remains deferred to j5.

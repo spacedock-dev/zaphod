@@ -5,10 +5,10 @@ gate:
   entity: canonical-install-and-worktree-test-profile
   entity-title: Canonical install and isolated worktree test profile
   stage: validation
-  round: 3
+  round: 4
 recommendation:
   verdict: REJECTED
-  rationale: "Cycle-3 escalation required: descendant cleanup and cold 10/10 pass, but a delayed transcript poll overruns the claimed wall-clock deadline; AC-6 remains pending CL and AC-7 belongs to the post-v9 j5 gate."
+  rationale: "Cycle-4 targeted poll repair passes and cold 11/11 passes, but timeout diagnostics still block on an unread stderr pipe for 5s under a 1s budget; AC-6 remains pending CL and AC-7 belongs to the post-v9 j5 gate."
 artifact:
   kind: draft
   path: ./canonical-install-and-worktree-test-profile-validation.md
@@ -29,7 +29,7 @@ criteria:
       evidence: "PASS when warm: live dump reported only the candidate URL; normal, TERM, and INT cleanup preserved sentinel hashes and removed profile sessions."
     - id: AC-4
       text: "Regression coverage is red first and rejects false confidence."
-      evidence: "REJECTED at 4957f6c: cold 10/10 and descendant cleanup pass, but timeout=1s with one 2s transcript-read delay returns after 3s; time is checked only before the blocking poll."
+      evidence: "REJECTED at 16b4faa: cold 11/11 and built-in polling pass, but a blocked stderr consumer makes the 160-line timeout diagnostic return after 5s under a 1s budget."
     - id: AC-5
       text: "Operator and delivery documentation states executable boundaries."
       evidence: "PASS: README, docking, workflow, and PRD diffs match the executable install/profile boundaries and required delivery order."
@@ -76,3 +76,22 @@ boundary is rejected at 1 second, consistent with an exclusive deadline.
 This is rejection cycle 3, so escalate rather than auto-route another ordinary
 implementation cycle. AC-6 remains pending CL's real keypress. AC-7 remains at
 j5's later gate after v9 lands and j5 rebases. No interactive result is claimed.
+
+## Cycle 4 current recommendation
+
+Cycle-4 validation recommends rejection at
+16b4faa4cd1a26ad21ee9c39493ba228dfcebd47. The exact delayed-tr regression
+passes within one second, descendant/process-group cleanup removes all state,
+an unrelated canary survives, and the complete shell suite passes 11/11 with
+its fresh target-free detached lifecycle. Rust 132/check, Go 35/vet, missing
+Zellij, signal cleanup, hash preservation, and leak checks pass.
+
+Built-in transcript parsing handles a partial line after its newline arrives,
+file replacement, and a 1 MiB line within budget. The remaining diagnostic path
+is unbounded: with a 1-second timeout and stderr connected to a consumer that
+holds the pipe open without reading, print_transcript_excerpt blocks until the
+consumer exits. Exact result was status 141 after 5 seconds. The timeout cannot
+meet its hard return budget while reporting 160 lines to a blocked sink.
+
+AC-6 remains pending the captain's real Alt-/ observation. AC-7 remains
+deferred to j5 after v9 lands and j5 rebases. No human observation is claimed.

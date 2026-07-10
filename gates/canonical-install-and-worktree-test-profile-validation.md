@@ -257,3 +257,59 @@ deadline excludes the duration of its own transcript poll. Because this is
 feedback cycle 3, return the architectural choice to the captain: either bound
 each transcript read by the remaining deadline or state and test a bounded-poll
 contract instead of a hard wall-clock deadline.
+
+## Cycle 4 revalidation at 16b4faa
+
+### Targeted repair and parser audit
+
+- The prior one-second/two-second-tr attack now returns within one second
+  because readiness uses Bash built-in reads over the regular transcript.
+- The exact integration wrapper returned in 6 seconds: one second of readiness
+  plus the bounded five-second TERM grace. Parent, TERM-ignoring descendant,
+  session, and profile root were absent; an unrelated canary remained live.
+- A metadata line without a newline stayed invisible until the newline arrived,
+  then returned the exact value. Replacing/truncating the file between polls
+  returned the new complete value. A 1 MiB single line timed out in one second.
+- A 32 MiB single-line stress probe remained inside one built-in read for more
+  than 40 seconds and was interrupted by the validator. This is an extreme
+  transcript shape, but it shows the time check remains between lines, not
+  inside a line.
+
+### Diagnostic-path refutation
+
+The timeout diagnostic still performs up to 160 synchronous printf writes to
+stderr. A FIFO reader held stderr open without consuming it; 160 lines of 2048
+bytes exceeded the pipe buffer. Under a one-second readiness timeout:
+
+    LARGE_1M status=1 elapsed=1
+    DIAGNOSTIC status=141 elapsed=5
+
+The diagnostic returned only when the reader exited after five seconds and the
+writer received SIGPIPE. print_transcript_excerpt therefore violates the hard
+return budget even though read_profile_value_until no longer invokes tr/awk.
+The committed delayed-poll regression uses an empty transcript and regular-file
+stderr, so it cannot expose this path.
+
+### Required matrix
+
+The complete shell suite passed 11/11, including its own fresh detached
+target-free lifecycle. Rust passed 132/132 and cargo check --tests; Go passed
+35/35 and vet. Missing Zellij exited 1 with the required message. Normal, TERM,
+and INT lifecycle groups preserved outside hashes and removed sessions/roots;
+no disposable session remained and the code worktree stayed clean.
+
+### Interactive evidence
+
+AC-6 remains an explicit captain-driven resident-control keypress: one sidebar
+ID before and after real Alt-/, every live URL equal to CANDIDATE_URL. AC-7
+remains deferred to j5 after v9 lands and j5 rebases; its evidence remains the
+current-main red/j5-green terminal IDs, rail URL/count, chrome, hashes, and
+absent roots/sessions. Neither human observation ran in cycle 4.
+
+### Cycle 4 verdict
+
+**REJECTED.** The targeted poll repair works, but timeout diagnostics can still
+block beyond the same hard wall-clock budget. Bound or suppress diagnostic
+writes after deadline (while preserving useful failure evidence), and add a
+blocked-stderr regression. The 32 MiB line result is a secondary extreme-input
+risk; the blocked diagnostic is the concrete acceptance blocker.
