@@ -363,6 +363,160 @@ and assert only one lands. This is the next ideation cycle's job: design the
 concrete guard, and prove it with that fixture-level concurrent-call test
 (the smallest end-to-end mechanism check) before implementation.
 
+### AC-1 root-cause investigation (2026-07-10, ideation cycle 4) — CL's pivot: fix the leak itself, not the race
+
+Implementation cycles 1-2 both targeted the race (AC-2/AC-3) and both hit
+the same wall: `override_layout` has no acknowledgment, so no host-level
+lock is possible, and cycle 2's live re-validation still reproduced
+corruption at 18 instances even with the staleness-prone gate removed (see
+Feedback Cycles above). CL's direction: fix AC-1 (why zombies are created
+and never cleaned up) instead — if zombies stop accumulating, the race
+that needs dozens of live instances to bite becomes rare-to-never in
+practice. This cycle's job is root-causing AC-1 specifically, answered
+directly and empirically in the cleanest possible test case first, before
+proposing any fix.
+
+**Reading pass first (by inspection, before running anything live).**
+`~/.config/zellij/config.kdl:60-67`/`:221-228`'s `Alt /` bind fires
+`MessagePlugin` with `name "toggle"`, `floating true`, `skip_cache true`,
+`rail "1"` — zellij's own launch-if-missing semantics (undocumented in this
+repo, not source-available locally: only `zellij-tile`/`zellij-utils`
+client-API crates are vendored, not the server binary) are not directly
+inspectable and had to be resolved empirically below, not from source.
+`rail_pane_kdl` (`main.rs:1461-1476`)'s comment claims "layout application
+re-seats the existing pane instead of spawning a second instance" — this
+is the code's own stated *intent*; whether it holds for the floating→tiled
+promotion this function's caller actually uses (not just the
+floating→floating case `docs/docking-approach.md`'s 2026-07-02 "positive
+datum" proved) was unverified and turned out to be the load-bearing
+question. `is_stray_floating_bootstrap` (`:1404-1413`) does not exclude
+`own_pane_id` from its "any tiled sidebar in this tab" scan, but
+`self.own_floating` and `self.instances` are both set from the *same*
+`PaneUpdate` manifest in the same handler pass (`:511-523`), so no
+self-referential staleness race exists between them for a single instance
+checking itself. `override_layout`'s vendored shim signature
+(`zellij-tile-0.44.3/src/shim.rs:2753-2769`) confirmed by direct read: it
+takes `retain_existing_terminal_panes`, `retain_existing_plugin_panes`,
+`apply_only_to_active_tab: bool`, and `context` — **no tab-id parameter at
+all**. "Apply to active tab" means whatever the server's active tab is
+*at the moment the host processes the call*, not necessarily the tab that
+was dumped and targeted moments earlier — a previously-undocumented gap,
+distinct from cycle 1/2's Attack A (staleness of `self.instances`) and
+Attack B (no ack on `override_layout`), since this one is about *which
+tab* the override lands on, not *whether* a sidebar already exists there.
+
+**Empirical test 1 — the absolute simplest case (CL's specific question).**
+Disposable session (`zpop-ideation`, tmux-hosted, scratch config
+repointing `Alt /`/`Alt .` at this worktree's freshly-built wasm, never
+`WORK`), verified via `list-panes -a` immediately after session start: zero
+sidebar instances anywhere (only the standard `zellij:link`/tab-bar/
+status-bar chrome plus one terminal). One `Alt /` press on this single tab.
+**Result, checked at +2s and reconfirmed at +4s: exactly one sidebar
+instance, tiled, no floating leftover — the clean case self-heals
+correctly.** But the plugin-id sequence proves *how*: ids 0/1/2 are the
+session's startup chrome, and the tiled resident that lands is id **4**,
+not the next unused id after 2 — id **3** was allocated and is already
+gone by the first snapshot. This is direct evidence a floating bootstrap
+(id 3) spawned first, then a *separately spawned* tiled pane (id 4) landed
+as the resident, and the bootstrap correctly detected `is_stray_floating_
+bootstrap` and self-closed — **not** the same instance re-seated in place.
+`rail_pane_kdl`'s comment is not what actually happens for this call site:
+retain-matching a plugin's exact config identity does not bridge a
+floating→tiled promotion within the same tab (only the previously-proven
+floating→floating case actually re-seats). This is a stale/inaccurate
+comment, not a bug — self-close correctly cleans up the resulting spare
+floating instance every time it was tested here.
+
+**Empirical test 2 — second tab, existing resident already live (resolves
+a named contradiction between two prior findings).** Same session, tab 1
+now carrying the tiled resident from test 1. Created tab 2 (fresh,
+verified clean), pressed `Alt /` once. **Result: tab 2's tiled sidebar
+landed as id 7, with NO gap in the id sequence (5=tab-bar, 6=status-bar,
+7=sidebar)** — no separate floating bootstrap was spawned this time.
+Repeated with tab 3 (population now 2 existing instances): same result,
+id 10, no gap. **This means launch-if-missing's dedup is session-wide, not
+per-tab: a new floating bootstrap spawns only when zero config-matched
+instances are reachable anywhere in the session; once any instance exists,
+a fresh tab's first toggle is served by a *remote* retrofit (an existing
+instance, seeing no sidebar in the currently-active tab, dumps+overrides
+that tab directly) that spawns exactly one new tiled pane with no floating
+stage at all.** This resolves `docs/docking-approach.md`'s 2026-07-02
+"Retrofit arm — VERIFIED" (existing instance retrofits remotely) versus
+cycle 2's WORK-based "plugin-id-ordering proves a fresh spawn on every
+first toggle regardless of population" as **not actually a contradiction
+between two mechanisms** but a mistaken inference from the second: a fresh,
+higher plugin id is equally consistent with a remote actor's override
+spawning a brand-new *tiled* pane directly (what my test shows happens)
+as with launch-if-missing spawning a brand-new *floating* bootstrap (what
+cycle 2 assumed) — plugin-id-ordering alone cannot distinguish the two,
+and controlled testing now shows the remote-retrofit path is what actually
+fires once any instance is alive. One direct attempt to force `override_
+layout`'s active-tab-drift gap (fire `Alt /` on a fresh tab 3, then
+immediately switch focus to tab 1 before the round trip could complete)
+did **not** reproduce a zombie or any corruption — tab 1 stayed unchanged,
+tab 3 got no sidebar at all (the press was likely evaluated as `Ignore`
+once `active_tab` had already moved to tab 1, which already had a tiled
+resident). This is inconclusive, not a refutation — my crude keypress-level
+race may not reliably land inside the real window, which is bounded by the
+dump+recheck round trip's actual latency, not by how fast I can issue two
+CLI commands.
+
+**Root cause, stated plainly.** Neither the self-close logic nor the
+remote-retrofit path has a demonstrable bug in the mechanism itself — both
+worked correctly in every controlled test run here (population 0, 1, 2,
+plus one race attempt), consistent with every prior cycle's own finding
+that synthetic testing (this cycle's included) has never forced a
+persistent zombie. The one *concrete, source-confirmed* gap found this
+cycle is `override_layout`'s missing tab-id parameter (`shim.rs:2753`) —
+answering the checklist's option (b) directly: this piece is a mechanism
+zellij's own host API owns, not a bug this plugin's code could fix by
+patching its own logic, since there is no host call that lets a plugin
+specify which tab an override targets. A self-retrofitting bootstrap that
+loses this race (the active tab drifts away from its own tab between the
+dump and the override landing) would never see its own tab gain a
+resident, and `is_stray_floating_bootstrap` — purely reactive, with no
+timeout or retry — would never fire for it: a permanent zombie, by design
+gap, not by a coding error. This is plausible and well-grounded but **not
+yet empirically confirmed live** — the one forced attempt this cycle did
+not reproduce it. A second, more specific, not-yet-tried candidate
+reconnects to this entity's own original (2026-07-08) unconfirmed
+hypothesis: none of the four cycle-1 spike rounds, nor this cycle's tests,
+ever combined a *pre-existing floating instance built from an older wasm*
+with a *live rebuild replacing that wasm on disk* before that same
+instance is re-asked to retrofit — cycle 1's rounds 1-2 rebuilt against a
+population of 0-1 fresh-each-time, and round 4 raced fresh presses across
+already-*tiled* residents, not stale floating zombies. Cycle 1's own round
+3/4 log evidence (`Plugin with id: N not found` bursts, an existing plugin
+exiting with `ReadApplicationState` denied) is consistent with zellij's
+own plugin registry desyncing from the pane manifest under exactly this
+kind of churn — a zellij-side bookkeeping gap, not a plugin logic bug,
+matching WORK's own zombie concentration in Noteplan/CEO, plausibly the
+tabs where `./build.sh` reruns most during live development of this exact
+plugin.
+
+**Fix direction sketched, not implemented (ideation).** Since `override_
+layout` cannot be given an explicit target tab (a zellij API limit, not a
+choice this repo controls), the mitigation has to be proactive on the
+plugin side rather than a structural fix to the override call itself: give
+a self-retrofitting bootstrap a bounded fallback instead of relying purely
+on reactively observing a resident appear in its own tab. Track the
+retrofit attempt's own start; if after a bounded number of `PaneUpdate`
+cycles (or a wall-clock timeout, matching the `WEDGE_THRESHOLD`/backoff
+pattern this codebase already uses for stalled status polls) the instance
+is still floating and its own tab still has no tiled resident, either
+re-attempt the retrofit once (covers the active-tab-drift miss) or, after
+that retry also fails to resolve, self-close as a fail-safe on the theory
+that an instance idle this long past its own toggle is more likely an
+orphan than a legitimately in-flight retrofit. This is purely
+self-referential (own state, own timeout) — it does not reintroduce a
+cross-instance election/gate (the class of mechanism `docs/docking-
+approach.md`'s Toggle v3.8 already proved unsafe and cycle 3 already
+rejected for a different reason). Not designed in full this cycle — the
+riskiest unproven mechanism (whether the active-tab-drift gap or the
+wasm-rebuild-churn desync is the actual live trigger) needs to be pinned
+down first, since a timeout/retry fallback aimed at the wrong mechanism
+would ship complexity without closing the real leak.
+
 ## Proposed approach
 
 Run a concurrency-focused spike as the first step, since it's the one
@@ -649,7 +803,38 @@ overclaiming that would be exactly the kind of confident-but-unearned prose
 this entity's own cycle-2 pass warned against. AC-1 remains open pending a
 fix or bound aimed specifically at the leak's creation/persistence, which
 was out of this cycle's design scope (corruption prevention, not leak
-prevention).
+prevention). **Cycle 4 (2026-07-10) — correction and root-cause narrowing,
+CL's pivot to AC-1 directly:** cycle 2's "spawns a fresh floating instance
+on *every* sidebar-less tab's first toggle regardless of existing
+population" claim above is **corrected, not superseded silently** — this
+cycle's controlled empirical tests (population 0, 1, 2, all in a disposable
+session, never `WORK`) show launch-if-missing's dedup is session-wide: a
+new floating bootstrap spawns only when *zero* config-matched instances are
+reachable anywhere in the session; once any instance is alive, a fresh
+tab's first toggle is served by a remote retrofit that spawns a new *tiled*
+pane directly, no floating stage at all. A fresh, higher plugin id (cycle
+2's evidence) is consistent with either mechanism and cannot distinguish
+them — cycle 2's inference was reasonable from the data available then but
+not correct. The self-close persistence question is answered for the clean
+case: self-close correctly fires and cleans up the transient bootstrap
+every time this cycle tested it (population 0/1/2, one forced race
+attempt) — no bug found in the reactive self-close logic itself. The
+remaining open leak mechanism is narrowed to two candidates, neither yet
+live-confirmed: (1) `override_layout` has no tab-id targeting parameter
+(confirmed from the vendored host shim source) — a self-retrofit whose
+active tab drifts away mid-round-trip could leave its own tab
+un-retrofitted forever, and `is_stray_floating_bootstrap` has no
+timeout/retry fallback for that case; one forced attempt at this race did
+not reproduce a zombie (inconclusive, not a refutation). (2) a live
+`./build.sh` wasm rebuild happening while a pre-existing floating instance
+(built from the older wasm) is re-asked to retrofit — untested by any
+cycle so far including this one, and consistent with cycle 1's own
+unexplained `Plugin with id: N not found` bursts and an instance exiting
+with denied permissions during rebuild-adjacent rounds. See "AC-1
+root-cause investigation (2026-07-10, ideation cycle 4)" under Proposed
+approach for the full empirical detail and a sketched (not implemented)
+fix direction: a bounded timeout/retry fallback on the self-retrofit path,
+not a cross-instance election/gate.
 
 **AC-2 — The dirty-tab chrome-misplacement defect is reproduced on demand.
 OPEN — design complete and fixture-validated for the shared underlying
@@ -779,6 +964,31 @@ than a repro of the raw bug — see Fix validation's "Honest limit" for why a
 live/disposable check is still needed to close the integration-level gap a
 fixture test cannot reach.
 
+**Cycle 4 (2026-07-10): riskiest-first re-targeted to AC-1 directly, per
+CL's pivot away from the race.** This cycle's riskiest untested assumption
+was CL's own framing: "why is there ever a zombie when we do Alt-/ on a
+clean fresh single-pane tab?" Run first, smallest case first: a disposable
+session, zero pre-existing sidebar instances, one tab, one press — result:
+clean, self-close correctly fires (see AC-1 root-cause investigation under
+Proposed approach). This invalidated the implicit assumption (carried since
+cycle 2) that the leak's creation mechanism was simple and already
+understood; it is not, and the self-close/remote-retrofit machinery both
+behaved correctly under every condition this cycle controlled for. **Two
+next tests, neither run yet, ranked by which would most likely finally
+force a live repro:** (1, most promising, not yet tried by any cycle) seed
+one floating instance from the *current* wasm, then `./build.sh` a fresh
+rebuild that changes the wasm's content while that instance stays alive,
+then re-press `Alt /` on that same tab — tests whether a live rebuild
+desyncs zellij's own plugin registry from the pane manifest for an
+already-running instance, reconnecting to cycle 1's original, never-refuted
+rebuild-window hypothesis via a variable it never actually tested (a
+pre-existing instance surviving a live rebuild, not a fresh spawn during
+one). (2) a tightly-timed forced race against `override_layout`'s missing
+tab-id parameter — this cycle's one attempt used keypress-level timing and
+did not reproduce a miss; a tighter attempt would need to fire the
+tab-switch mid-round-trip (timed against the dump+recheck's actual
+blocking duration) rather than immediately after the toggle press.
+
 ## Out of scope
 
 **Superseded (2026-07-09, cycle 3):** this section previously read "the
@@ -896,3 +1106,18 @@ The concrete diff (remove the `if self.instances.len() > 1` wrapper around the e
 ### Summary
 
 Removed the `self.instances.len() > 1` gate exactly as specified (Attack A's fix), confirmed `cargo test`/`cargo check --tests` stay green at the same 133/133 count, then ran the mandatory live re-validation the checklist required before this could be considered resolved. The result is a genuine FAILED, not a formality: at the same 18-instance population cycle 1's validation used, against a freshly built worktree wasm in a disposable session, the exact terminal-duplication corruption still reproduced on 1 of 3 trials (the other 2 were silent no-op deferrals, not clean successes). This is exactly the outcome this entity's own cycle-1 Feedback Cycles note flagged as a live possibility: since most of validation's 18 seeded racers likely already had `self.instances.len() > 1` under the old gated code, removing the gate mainly closed a narrow blind spot (Attack A) while the already-documented, structurally orthogonal residual gap (Attack B: `override_layout`'s fire-and-forget dispatch, no ack) remains fully open and is the more plausible dominant cause of what's still reproducing. Per the entity's own cycle-1 guidance, this finding means the fix is insufficient and the entity needs ideation-level rework on how to close Attack B, not another same-design implementation tweak or a forward routing to validation.
+
+## Stage Report: ideation (cycle 4)
+
+- DONE: Read the intended lifecycle first, by inspection, before running anything live.
+  Read `~/.config/zellij/config.kdl:60-67`/`:221-228`'s `Alt /` bind (`MessagePlugin`, `name=toggle`, `floating=true`, `skip_cache=true`, `rail="1"`). Read `decide_toggle` (`main.rs:1080-1162`), `perform_toggle` (`:784`), `install_split_preserving_swaps` (`:895-993`, current lines post-cycle-2), `is_stray_floating_bootstrap`/`should_close_self` (`:1404-1452`), `rail_pane_kdl` (`:1461-1476`), `split_preserving_layout_kdl` (`:1490-1553`), and `override_layout`'s vendored shim signature (`zellij-tile-0.44.3/src/shim.rs:2753-2769`). Stated plainly from reading alone (later confirmed live): `rail_pane_kdl`'s comment claims the floating bootstrap gets re-seated in place; `override_layout`'s shim signature has no tab-id parameter at all, only `apply_only_to_active_tab: bool`, meaning the override targets whatever tab the server currently calls active, not necessarily the dumped tab. No local zellij server source is vendored (only `zellij-tile`/`zellij-utils` client-API crates), so launch-if-missing's own dedup semantics could not be resolved from source and needed empirical tests.
+- DONE: Isolate the absolute simplest case empirically — CL's specific question.
+  Disposable session `zpop-ideation` (tmux-hosted, scratch config repointing `Alt /`/`Alt .` at this worktree's wasm, never `WORK`), confirmed zero sidebar instances via `list-panes -a` immediately after start. One `Alt /` press on the single tab. Checked at +2s and +4s: exactly one sidebar instance, tiled (id 4), no floating leftover — clean self-heal. Pane-id evidence (chrome ids 0-2, then a gap at id 3, tiled resident lands as id 4) proves a separate floating bootstrap (id 3) was spawned and self-closed, not the same instance re-seated in place — contradicts `rail_pane_kdl`'s comment for this call site.
+- DONE: If the single-tab case is clean, repeat with a second freshly-created tab in the same session.
+  Tab 2 (population 1 existing instance): one press, tiled sidebar landed as id 7 with **no gap** in the id sequence — no separate floating bootstrap spawned this time, a remote retrofit by the existing instance served it directly. Repeated on tab 3 (population 2): same result, id 10, no gap. One race attempt (press tab 3, immediately switch focus to tab 1 via `Alt 1`) did not reproduce a zombie or corruption — inconclusive. This resolves the named contradiction between `docs/docking-approach.md`'s 2026-07-02 "Retrofit arm — VERIFIED" and cycle 2's WORK-based plugin-id-ordering claim: both described real mechanisms, but plugin-id-ordering alone can't distinguish "new floating bootstrap" from "remote actor's override spawning a new tiled pane directly" — controlled testing shows the latter is what fires once any instance is alive session-wide, correcting cycle 2's "fresh spawn on every first toggle regardless of population" claim (added as an explicit correction under AC-1, not a silent rewrite).
+- DONE: Name the precise root cause of AC-1's leak in plain terms, empirically grounded.
+  No bug found in the self-close or remote-retrofit logic itself — both worked correctly in every controlled test (population 0/1/2, one race attempt), consistent with every prior cycle's inability to force a live repro. One concrete, source-confirmed gap named: `override_layout` has no tab-id parameter (`shim.rs:2753`), a zellij host-API limitation outside this plugin's control to fix directly (checklist option (b)) — a self-retrofit whose active tab drifts mid-round-trip could permanently strand a bootstrap, since `is_stray_floating_bootstrap` has no timeout/retry fallback. Not yet live-confirmed (one forced attempt didn't reproduce it). A second, higher-confidence candidate reconnects to cycle 1's original unconfirmed hypothesis via an untested variable (a pre-existing floating instance surviving a live wasm rebuild, not a fresh spawn during one) — named as the top recommendation for the next spike. Fix direction sketched, not implemented: a bounded timeout/retry fallback on the self-retrofit path (matching this codebase's existing `WEDGE_THRESHOLD`/backoff pattern), explicitly not a cross-instance election/gate (the class Toggle v3.8 already proved unsafe).
+
+### Summary
+
+Answered CL's specific question directly and empirically: in the cleanest possible case (zero pre-existing instances, one tab, one press), the leak's self-close mechanism works correctly — no bug found there. Extending to population 1 and 2 resolved a standing contradiction between two prior cycles' findings (remote retrofit, not a fresh floating spawn, serves a fresh tab once any instance is alive session-wide) and corrected cycle 2's overclaim about universal fresh-spawn behavior. The remaining leak mechanism is narrowed to two untested candidates — `override_layout`'s missing tab-id parameter (source-confirmed, live-unconfirmed) and a live-rebuild-desyncs-registry hypothesis reconnecting to cycle 1's original, never-refuted lead via a variable no cycle has tested yet (a pre-existing instance surviving a rebuild) — with the latter recommended as the next spike. A fix direction (bounded timeout/retry fallback, not a cross-instance gate) is sketched but not designed in full or implemented, since committing to it before knowing which mechanism actually fires live would risk shipping complexity that doesn't close the real leak. `WORK` confirmed untouched throughout (read-only `list-panes`, unchanged sidebar count before/after); disposable session fully torn down after testing.
