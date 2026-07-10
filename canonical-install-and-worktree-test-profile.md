@@ -290,8 +290,10 @@ Add this paragraph after the demoable-slice milestones in
 +repeat its live validation before merge. Land hj only after yb because row
 +expiry consumes yb's fresh-`ts`/stop-refresh seam. Finally rebase pz onto yb
 +and confirm the gate walking skeleton again. Before pz becomes a standing
-+action, absence of the pinned `spacedock-subspace` dependency must fail the
-+required drill loudly; a skipped test with a green suite is not a gate.
++action, land a confirmation affordance in front of its irreversible one-click
++approve POST, and make absence of the pinned `spacedock-subspace` dependency
++fail the required drill loudly; a skipped test with a green suite is not a
++gate.
 ```
 
 The order is load-bearing, not clerical. This task prevents every later live
@@ -302,7 +304,10 @@ yb must rebase because its branch spans `src/main.rs`, grout, and docs. hj
 depends directly on yb's timestamp seam. pz's grout watch branch predates yb,
 overlaps grout/rail code, and its decisive cross-repo drill currently skips
 when `spacedock-subspace` is absent; rebase, live confirmation, and fail-loud
-dependency enforcement are therefore required before standing use.
+dependency enforcement are therefore required before standing use. Its current
+detail-line click also auto-runs an irreversible approve POST with no confirm or
+undo. This task does not implement that pz behavior, but the delivery gate must
+require a confirmation affordance to land before the action becomes standing.
 
 ## Out of scope
 
@@ -323,7 +328,7 @@ dependency enforcement are therefore required before standing use.
 - DONE: Design the smallest isolated worktree-test profile that gives its layout and Alt-/ keybind one candidate WASM URL, preserves global config byte-for-byte, and supports a disposable explicit-cwd j5 drill.
   One temporary config/layout/data root, one attached session, one candidate URL, and trap cleanup cover the resident control and explicit-cwd drill.
 - DONE: Write external-proof acceptance criteria, red-first regression coverage, operator documentation changes, and the PRD delivery-sequence diff required by the captain.
-  Seven ACs split offline/interactive; the test plan starts with the isolation spike and records the exact task→j5→eh→7v→yb→hj→pz gates.
+  Seven ACs split offline/interactive; the test plan starts with the isolation spike, and the exact task→j5→eh→7v→yb→hj→pz sequence gates pz standing use on both confirmation-before-approve and a fail-loud pinned dependency.
 - DONE: Compare the chosen isolated profile with versioned-global-layout and temporary-overwrite/restore alternatives.
   Both alternatives retain global state or mutation windows and fail the stated byte-preservation boundary.
 
