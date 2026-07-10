@@ -480,3 +480,22 @@ Closed the surviving-descendant race by making escalation depend on process-grou
 ### Summary
 
 Cycle-3 fixes descendant cleanup and passes the complete cold and language matrix. Validation still rejects the hard deadline because one blocking transcript poll can overrun it; feedback cycle 3 requires captain escalation, while AC-6 remains pending CL and AC-7 remains deferred to j5's later gate.
+
+## Stage Report: implementation (cycle 4)
+
+- DONE: Add a red delayed-poll regression reproducing the one-second hard-deadline overrun before changing transcript polling.
+  A `tr` shim blocks one poll for two seconds under a one-second budget; RED exact at `4957f6c` was `FAIL: 1-second readiness deadline returned after 2s when one transcript poll blocked`.
+- DONE: Bound every blocking transcript read by the remaining wall-clock deadline or replace it with an equivalently nonblocking mechanism, without broadening scope.
+  Commit `16b4faa` replaces poll and diagnostic `tr`/`awk`/`sed` subprocesses with Bash built-in reads over the regular transcript file and checks `SECONDS` between lines; GREEN returned within the one-second budget despite the delayed `tr` shim.
+- DONE: Preserve dead-launcher, slow-live, process-group TERM→KILL cleanup, unrelated-process safety, missing-Zellij fail-loud, and unchanged-global-byte behavior.
+  Focused deadline/liveness/cleanup tests passed; dead launch failed within 1s, slow live succeeded, the TERM-ignoring descendant was absent, a separate 60s canary remained live, and missing Zellij exited 1 with `zellij 0.44.3 is required`.
+- DONE: Run the complete fresh target-free cold shell suite and language verification when resource headroom permits.
+  A new target-free clone passed shell 11/11, including its independently cold lifecycle; the clean build took 2m22s. Rust passed 132/check and Go passed 35/vet; global config stayed `ba22912f…`, layout stayed `5639a50a…`, and the code worktree was clean at `16b4faa`.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  Still pending CL's human-driven real Alt-/ observation; no interactive result is claimed.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  Remains deferred to j5's later gate after this task lands and j5 rebases, as previously validated.
+
+### Summary
+
+Closed the final hard-deadline defect by removing externally blocking transcript readers from readiness polling and diagnostics. The exact delayed-poll attack is now red/green covered, while every previously validated liveness, cleanup, isolation, dependency, cold-build, and language boundary remains green; AC-6 and AC-7 retain their directed dispositions.
