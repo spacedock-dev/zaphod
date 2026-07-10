@@ -1,6 +1,6 @@
 ---
 title: Canonical install and isolated worktree test profile
-status: implementation
+status: validation
 source: finding — runtime audit found layout/keybind plugin identity split, 2026-07-10
 started: 2026-07-10T12:38:46Z
 completed:
