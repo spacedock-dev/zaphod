@@ -417,3 +417,24 @@ Validation recommends rejection: runtime boundaries pass when warm, but the comm
 ### Summary
 
 Fixed the cold-cache false timeout with a bounded, liveness-aware readiness window and made timeout teardown remove the launcher process group, disposable session, and profile root. Red/green process evidence and a new-clone 8/8 shell run now cover AC-4's rejected path, while interactive AC-6 and AC-7 remain explicitly pending for the preserved validator and captain.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: AC-1 through AC-3 and AC-5 offline behavior.
+  A fresh detached clone passed linked refusal, identity, rollback, live profile isolation, cleanup, and documentation review.
+- FAILED: AC-4 — Regression coverage is red first and rejects false confidence.
+  Cold 8/8 passed, but the timeout regression omits descendants and missed a live child after full expiry.
+- DONE: Independently reproduce AC-1 through AC-5 from raw commit 8c2fe5e, including a new cold clone with all 8 shell behavior groups, Rust 132/check, Go 35/vet, and fail-loud missing-Zellij evidence.
+  Fresh clone shell 8/8, Rust 132/check, Go 35/vet, and missing-Zellij exit 1 all reproduced independently.
+- FAILED: Attack the cycle-1 fix at its boundaries: slow-but-live clean build, dead launcher, 180-second expiry, process-group teardown, leaked sessions/profile roots, interrupted cleanup, and unchanged global bytes; cite exact surviving or refuting evidence.
+  Slow-live 2m05s and dead-launcher 1s survived, but full expiry left a TERM-ignoring child alive; parent/root/session vanished and hashes matched.
+- DONE: Reconcile interactive AC-6 and AC-7 with the workflow's delivery order: prove every agent-reproducible prerequisite and provide the exact human demo/gate evidence still required, without claiming an unrun observation or hiding a dependency on j5.
+  AC-6 remains pending CL; AC-7 explicitly moves to j5's gate after v9 lands and j5 rebases, using the existing exact script.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  CL did not drive the real Alt-/ observation; no human result is claimed.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  Delivery order requires v9 to land before j5 rebases and CL runs the two-checkout drill.
+
+### Summary
+
+Cycle-2 cold readiness is fixed: a new clone passed all eight shell groups and the full language verification. Validation still rejects process-group teardown because a TERM-ignoring descendant survives once its parent exits; interactive AC-6 remains pending CL, and AC-7 remains dependency-bound to the later j5 gate.

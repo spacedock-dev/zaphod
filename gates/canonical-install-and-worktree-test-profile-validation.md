@@ -145,3 +145,58 @@ green). For each checkout:
 AC-6 and AC-7 were not run. CL supplied no attached-session observation in this
 validation round, and validation claims none. The offline cold-checkout failure
 blocks the gate before CL's time should be spent.
+
+## Cycle 2 revalidation at 8c2fe5e
+
+The new detached audit clone began without `target/`. Its fixture build took
+2m05s, after which `./tests/zellij-install-profile-test.sh all` passed all
+eight groups, including its own second target-free detached lifecycle. Rust
+passed 132/132 and `cargo check --tests`; Go passed 35/35 and vet; removing
+Zellij from `PATH` exited 1 with `zellij 0.44.3 is required`.
+
+### Boundary attacks
+
+- **Slow but live:** the 2m05s target-free build completed before readiness
+  expired. The attack did not survive.
+- **Dead launcher:** a fixture that exited 23 failed in 1s with
+  `profile exited before printing PROFILE_ROOT`. The attack did not survive.
+- **Interrupted cleanup and outside bytes:** normal, TERM, and INT lifecycle
+  groups removed profile/session state and preserved both sentinel hashes.
+  The attack did not survive.
+- **Full default expiry and process-group teardown — REFUTED:** a live fixture
+  withheld metadata, started a Zellij session, and spawned a child that ignored
+  TERM. Expiry returned the exact timeout after 210s wall clock. Parent, profile,
+  and session were absent; config SHA stayed `1f7fa0d4…` and layout SHA stayed
+  `c487cae2…`. The child remained live (`CHILD_LIVE=1`, PID 10165) until the
+  validator killed it manually.
+- **Root cause:** `cleanup_profile_process` sends TERM to the recorded group at
+  `tests/zellij-install-profile-test.sh:18-23`, waits only for
+  `PROFILE_LAUNCHER_PID` at :24-27, and enters group KILL at :28-33 only if
+  that parent still lives. The committed timeout fixture (:607-624) has no child,
+  and its assertions (:654-659) check only parent/profile/session.
+- **Nominal duration:** 1,800 polls with per-poll transcript parsing measured
+  210s, not 180s. The wait remains bounded, but the implementation report's
+  “180 seconds” is an attempt-count approximation rather than observed wall
+  time.
+
+### Interactive reconciliation
+
+Every agent-reproducible prerequisite is green: candidate URL generation,
+profile-local config/layout/data, explicit-cwd one-terminal baseline, live
+`list-panes`/`dump-layout`, signal cleanup, and unchanged outside hashes.
+CL has not pressed real `Alt /`; AC-6 remains unrun.
+
+AC-7 cannot honestly run before this task lands. The documented order is
+v9-before-j5: land the canonical/profile change, rebase j5 so both current main
+and candidate contain the identical profile, then run the existing two-checkout
+script at j5's gate. Required evidence remains before/after terminal IDs and
+counts, rail count/URL, chrome dumps, global hashes, and absent roots/sessions.
+No baseline or candidate observation is claimed here.
+
+### Cycle 2 verdict
+
+**REJECTED.** The cold-readiness fix closes cycle 1, but process-group cleanup
+does not remove a surviving descendant. Add a TERM-ignoring descendant to the
+timeout regression, verify the group is empty after escalation, and report the
+readiness bound as attempts or enforce a wall-clock deadline. AC-6 remains for
+CL; AC-7 remains at the post-v9 j5 gate.
