@@ -71,9 +71,9 @@ if [ -e "$TARGET_LAYOUT" ]; then
     cp -p "$TARGET_LAYOUT" "$BACKUP_LAYOUT"
     HAD_PREVIOUS=1
 fi
+ROLLBACK_NEEDED=1
 mv "$TEMP_LAYOUT" "$TARGET_LAYOUT"
 TEMP_LAYOUT=""
-ROLLBACK_NEEDED=1
 
 if ! zaphod_validate_message_plugin_identity "$CONFIG_FILE" "$WASM_URL" ||
     ! zaphod_validate_layout_identity "$TARGET_LAYOUT" "$WASM_URL" ||

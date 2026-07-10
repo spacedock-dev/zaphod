@@ -424,6 +424,54 @@ test_install_signal_rollback() {
     remove_test_root
 }
 
+test_install_rename_signal_rollback() {
+    local root primary destination layout primary_url before status real_mv shim_dir
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-install-rename-signal.XXXXXX")"
+    TEST_ROOT="$root"
+    primary="$root/primary"
+    destination="$root/zellij"
+    shim_dir="$root/bin"
+    git clone -q "$REPO_ROOT" "$primary"
+    copy_installer_under_test "$primary"
+    seed_wasm "$primary"
+
+    mkdir -p "$destination/layouts" "$shim_dir"
+    layout="$destination/layouts/zaphod.kdl"
+    printf 'sentinel-layout-rename-signal\n' > "$layout"
+    before="$(sha256 "$layout")"
+    primary_url="file:$(cd "$primary" && pwd -P)/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+    write_coherent_config "$destination/config.kdl" "$primary_url"
+    real_mv="$(command -v mv)"
+
+    printf '%s\n' \
+        '#!/bin/bash' \
+        'set -u' \
+        '"$REAL_MV" "$@"' \
+        'status=$?' \
+        'destination="${*: -1}"' \
+        'if [ "$status" -eq 0 ] && [ "$destination" = "$SIGNAL_TARGET" ] && [ ! -e "$SIGNAL_MARKER" ]; then' \
+        '    : > "$SIGNAL_MARKER"' \
+        '    /bin/kill -TERM "$PPID"' \
+        'fi' \
+        'exit "$status"' > "$shim_dir/mv"
+    chmod +x "$shim_dir/mv"
+
+    set +e
+    PATH="$shim_dir:$PATH" \
+        REAL_MV="$real_mv" \
+        SIGNAL_TARGET="$layout" \
+        SIGNAL_MARKER="$root/signalled" \
+        ZELLIJ_CONFIG_DIR="$destination" \
+        "$primary/install.sh" >"$root/rename-signal.out" 2>"$root/rename-signal.err"
+    status=$?
+    set -e
+
+    [ "$status" -ne 0 ] || fail "signal at layout rename expected install failure, got exit 0"
+    [ "$(sha256 "$layout")" = "$before" ] || fail "signal at layout rename did not restore prior layout bytes"
+    echo "PASS: signal at layout rename restored prior layout bytes"
+    remove_test_root
+}
+
 test_worktree_profile_lifecycle() {
     local root profile_script profile_cwd global_root global_config global_layout
     local config_before layout_before expected_url expected_cwd pane_state control_session control_dump signal_name
@@ -502,6 +550,9 @@ case "${1:-all}" in
     install-signal)
         test_install_signal_rollback
         ;;
+    install-rename-signal)
+        test_install_rename_signal_rollback
+        ;;
     worktree-profile)
         test_worktree_profile_lifecycle
         ;;
@@ -510,6 +561,7 @@ case "${1:-all}" in
         test_install_identity
         test_install_postflight_rollback
         test_install_signal_rollback
+        test_install_rename_signal_rollback
         test_worktree_profile_lifecycle
         ;;
     *)
