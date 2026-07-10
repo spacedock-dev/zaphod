@@ -2,6 +2,9 @@
 # ABOUTME: Shared physical-path, plugin-URL, identity, and layout-rendering helpers.
 # ABOUTME: Sourced by the canonical installer and disposable worktree profile.
 
+ZAPHOD_LIVE_SESSION_NAME=""
+ZAPHOD_LIVE_DATA_ROOT=""
+
 zaphod_physical_dir() {
     (cd "$1" && pwd -P)
 }
@@ -198,6 +201,17 @@ EOF
     [ "$errors" -eq 0 ]
 }
 
+zaphod_cleanup_live_validation() {
+    if [ -n "$ZAPHOD_LIVE_SESSION_NAME" ]; then
+        zellij delete-session --force "$ZAPHOD_LIVE_SESSION_NAME" >/dev/null 2>&1 || true
+        ZAPHOD_LIVE_SESSION_NAME=""
+    fi
+    if [ -n "$ZAPHOD_LIVE_DATA_ROOT" ] && [ -d "$ZAPHOD_LIVE_DATA_ROOT" ]; then
+        rm -rf "$ZAPHOD_LIVE_DATA_ROOT"
+        ZAPHOD_LIVE_DATA_ROOT=""
+    fi
+}
+
 zaphod_validate_layout_live() {
     local layout_file="$1"
     local config_root="$2"
@@ -207,6 +221,8 @@ zaphod_validate_layout_live() {
     data_root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-check.XXXXXX")" || return 1
     session_name="zlc-$$-${RANDOM:-0}"
     dump_file="$data_root/live-layout.kdl"
+    ZAPHOD_LIVE_DATA_ROOT="$data_root"
+    ZAPHOD_LIVE_SESSION_NAME="$session_name"
     status=0
 
     zellij --config-dir "$config_root" --config "$config_file" --data-dir "$data_root" \
@@ -220,8 +236,7 @@ zaphod_validate_layout_live() {
         zaphod_validate_layout_identity "$dump_file" "$expected_url" || status=$?
     fi
 
-    zellij kill-session "$session_name" >/dev/null 2>&1 || true
-    rm -rf "$data_root"
+    zaphod_cleanup_live_validation
     if [ "$status" -ne 0 ]; then
         echo "live Zellij layout validation failed for $layout_file" >&2
         return "$status"

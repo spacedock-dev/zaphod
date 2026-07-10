@@ -41,6 +41,7 @@ cleanup_install_temps() {
     local cleanup_status=0
     trap - EXIT INT TERM HUP
     set +e
+    zaphod_cleanup_live_validation
     if [ "$ROLLBACK_NEEDED" -eq 1 ]; then
         if [ "$HAD_PREVIOUS" -eq 1 ] && [ -n "$BACKUP_LAYOUT" ]; then
             mv "$BACKUP_LAYOUT" "$TARGET_LAYOUT" || cleanup_status=1

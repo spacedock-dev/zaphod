@@ -395,6 +395,14 @@ test_install_signal_rollback() {
     printf '%s\n' \
         '#!/bin/bash' \
         'set -u' \
+        'previous=""' \
+        'for argument in "$@"; do' \
+        '    if [ "$previous" = "attach" ]; then' \
+        '        printf "%s\n" "$argument" >> "$ATTACH_SESSIONS"' \
+        '        break' \
+        '    fi' \
+        '    previous="$argument"' \
+        'done' \
         'case " $* " in' \
         '    *" attach "*)' \
         '        count=0' \
@@ -413,6 +421,7 @@ test_install_signal_rollback() {
     PATH="$shim_dir:$PATH" \
         REAL_ZELLIJ="$real_zellij" \
         ATTACH_COUNT="$root/attach-count" \
+        ATTACH_SESSIONS="$root/attach-sessions" \
         ZELLIJ_CONFIG_DIR="$destination" \
         "$primary/install.sh" >"$root/signal.out" 2>"$root/signal.err"
     status=$?
@@ -420,6 +429,9 @@ test_install_signal_rollback() {
 
     [ "$status" -ne 0 ] || fail "signal during postflight expected install failure, got exit 0"
     [ "$(sha256 "$layout")" = "$before" ] || fail "signal during postflight did not restore prior layout bytes"
+    while IFS= read -r session_name; do
+        assert_session_absent "$session_name"
+    done < "$root/attach-sessions"
     echo "PASS: signal during postflight restored prior layout bytes"
     remove_test_root
 }
