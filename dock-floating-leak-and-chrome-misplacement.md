@@ -1121,3 +1121,60 @@ Removed the `self.instances.len() > 1` gate exactly as specified (Attack A's fix
 ### Summary
 
 Answered CL's specific question directly and empirically: in the cleanest possible case (zero pre-existing instances, one tab, one press), the leak's self-close mechanism works correctly — no bug found there. Extending to population 1 and 2 resolved a standing contradiction between two prior cycles' findings (remote retrofit, not a fresh floating spawn, serves a fresh tab once any instance is alive session-wide) and corrected cycle 2's overclaim about universal fresh-spawn behavior. The remaining leak mechanism is narrowed to two untested candidates — `override_layout`'s missing tab-id parameter (source-confirmed, live-unconfirmed) and a live-rebuild-desyncs-registry hypothesis reconnecting to cycle 1's original, never-refuted lead via a variable no cycle has tested yet (a pre-existing instance surviving a rebuild) — with the latter recommended as the next spike. A fix direction (bounded timeout/retry fallback, not a cross-instance gate) is sketched but not designed in full or implemented, since committing to it before knowing which mechanism actually fires live would risk shipping complexity that doesn't close the real leak. `WORK` confirmed untouched throughout (read-only `list-panes`, unchanged sidebar count before/after); disposable session fully torn down after testing.
+
+### Addendum (2026-07-10, ideation cycle 4): CL's fullscreen/tab-bar-hidden observation — lightweight check per team-lead's request
+
+CL reports an unconfirmed live symptom: `Alt /` on a "simplistic layout"
+sometimes turns the tab fullscreen and hides the top tab-bar,
+non-deterministically. Checked lightly, not chased deeply, per team-lead's
+explicit scope note.
+
+**Re-checked all three clean-room trials' `list-panes`/`dump-layout`
+captures above for this specifically.** In every trial (tab 1's single
+press, tab 2's and tab 3's remote retrofits, and the one active-tab-drift
+race attempt), `zellij:tab-bar` and `zellij:status-bar` remained present at
+their canonical `size=1` rows both before and after the press — no
+fullscreen/hidden-chrome symptom appeared in any of them. This is a
+genuine negative result, but scoped narrowly: every trial here was a
+*first* press on a bare tab (the `Retrofit` path, which builds the KDL via
+`split_preserving_layout_kdl`/`extract_chrome_panes`). None re-pressed
+`Alt /` a second time on an already-docked tab — the `SteerSwap`/cycle path
+(`decide_toggle`'s first branch, `main.rs:1093-1126`), which calls zellij's
+own `next_swap_layout`/`previous_swap_layout` directly and does no
+plugin-side KDL construction at all. CL's phrasing ("simplistic layout",
+non-deterministic, no mention of a fresh tab) reads more consistent with
+repeated presses on an already-docked tab than a first toggle — exactly
+the path this cycle's trials never exercised.
+
+**Static read of `fill_container_slot` (`main.rs:1759-1769`) and its use in
+`extract_chrome_panes` (`:1642-1696`).** `fill_container_slot` only fires
+in the `kept.len() == 1 && child_count > 1` hoist branch (`:1687-1690`) —
+a container that held chrome+content collapses to its sole surviving
+content child once chrome/rail siblings are correctly extracted, and this
+correctly transplants the container's own `size` onto the child. Found one
+theoretical (not reproduced) gap one level up: `extract_chrome_panes`
+classifies a *whole* block as Chrome and drops it entirely if
+`children.iter().find_map(|child| plugin_location(child))` finds *any*
+direct child that is itself a bare `plugin location=...` node matching
+Chrome (`:1666-1675`) — if a dump ever presented the tab-bar plugin as a
+direct sibling of *other real content panes* in the same parent container
+(not each independently wrapped in its own `pane size=1 { ... }`, the
+canonical shape), this would drop the whole container, siblings included.
+That shape drops content *alongside* chrome, though, not chrome alone with
+content surviving fullscreen — it doesn't precisely match the reported
+symptom, so this is an adjacent finding, not a confirmed mechanism.
+
+**Recommendation: (b) plausible-but-unconfirmed, worth a small dedicated
+check, not (a) confirmed-same-mechanism or (c) insufficient evidence to
+say anything.** The strongest lead is the untested scope gap, not the
+static code read: if this lives in the steer/cycle path (repeated presses
+on an already-docked tab), the mechanism is entirely zellij's own
+swap-layout engine (`next_swap_layout`/`previous_swap_layout`), not this
+plugin's KDL construction — outside this plugin's control to fix directly,
+matching this whole investigation's recurring pattern of zellij-host-owned
+gaps (the `override_layout` missing-tab-id gap above is the same shape).
+Recommend a short, separate spike (repeated `Alt /` presses cycling an
+already-docked tab, `dump-layout` after each) before deciding fold-in vs.
+file-separately — deferring that call to the FO per team-lead's framing,
+since it may turn out to be a third distinct mechanism rather than another
+face of AC-2/AC-3's install-time race.
