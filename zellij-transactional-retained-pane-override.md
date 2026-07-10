@@ -274,3 +274,7 @@ rejection behavior passed in a disposable 0.44.3 session; the new override
 server test remains red-pending because the shared volume could not compile
 Zellij. This design authorizes an upstream/disposable proof only, never a
 shipped fork.
+
+### Feedback Cycles
+
+- **Cycle 1 — ideation gate held (2026-07-10).** The transactional planner and result contract are technically sound, but the next stage lacks a mergeable Zaphod-repository deliverable: a disposable external checkout alone cannot satisfy this workflow's local merge boundary. Revise the design to ship an inert upstream patch series plus a deterministic disposable apply/red-green harness in this repository. The installer, Cargo dependency graph, and runtime must not consume the patch; applying, pinning, vendoring, or requiring a fork still needs a later explicit captain gate.
