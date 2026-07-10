@@ -374,3 +374,25 @@ Zaphod artifact without selecting a runtime fork. Implementation owns an inert
 mail-patch series and deterministic disposable verifier; runtime activation,
 Zaphod result handling, user-facing docs, and a live demo remain behind a
 later upstream-release or captain-approved-fork gate.
+
+## Stage Report: implementation
+
+- DONE: Create the exact inert tools/zellij-transactional-override proof-kit tree, committing the test-only RED patch before the planner/commit and plugin/CLI result patches; include base SHA, fixtures, README, and a single disposable verifier.
+  Zaphod commit `7f2efbe` adds exactly the ten specified files; mail commits are ordered test `54714a3`, planner/commit `a188d6e`, and result contract `8b53edc` against `55a2121b73dce4be624cda425a960e893000777c`.
+- DONE: Make the verifier fail closed on wrong base/apply drift, classify the identical test RED before implementation and GREEN after all patches, clean its temporary clone, and prove no installer, Cargo graph, runtime, or protected production path consumes the kit.
+  `sh -n` and `--help` pass; exact-base three-patch `git am` preflight passes; a wrong-HEAD control exits 1 before Cargo with `source HEAD is not BASE_COMMIT`; only `verify.sh` is executable and protected-path diff `c66400d..7f2efbe` is empty.
+- SKIPPED: After the first officer releases the disk hold, run the complete disposable RED→GREEN host proof plus relevant Zaphod Rust/Go/shell verification, record exact evidence, and leave the implementation worktree clean; do not ship or select a fork.
+  The first officer kept the compile hold active through handoff; no Cargo, Rust, Go, installer, or Zellij process proof was run or claimed. The implementation worktree is clean at `7f2efbe`, all disposable clones were removed, and no fork was selected.
+- SKIPPED: Record the exact red output and before/after test counts required by the implementation stage definition.
+  Compilation was prohibited by the active disk hold; the verifier accepts RED only for unresolved `plan_retained_override`/`RetainedPane` API symbols and rejects timeout, ENOSPC, network, or unrelated compiler failures, but exact runtime output remains for validation.
+- DONE: Preserve the inert runtime boundary.
+  `git diff --exit-code c66400d..7f2efbe -- src Cargo.toml Cargo.lock build.sh install.sh layouts grout` passes, and the candidate diff contains only `tools/zellij-transactional-override/`.
+
+### Summary
+
+Implementation produced the exact inert upstream mail series, fixtures, README,
+and fail-closed disposable verifier in commit `7f2efbe`; the series applies
+cleanly and no production or installer path consumes it. Behavioral RED/GREEN,
+Cargo metadata, installer, and ordinary-suite evidence is deliberately
+unclaimed because the first officer's compile hold was never released; those
+commands remain the validation-stage entry point, without selecting a fork.
