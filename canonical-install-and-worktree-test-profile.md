@@ -456,3 +456,26 @@ Cycle-2 cold readiness is fixed: a new clone passed all eight shell groups and t
 ### Summary
 
 Closed the surviving-descendant race by making escalation depend on process-group liveness rather than only the departed launcher, and replaced the drifting attempt count with an elapsed-time deadline. Fresh target-free verification now covers all ten shell groups, native Rust and Go suites, fail-loud dependency behavior, unchanged outside bytes, and PID-specific cleanup; AC-6 and AC-7 remain honestly deferred as directed.
+
+## Stage Report: validation (cycle 3)
+
+- DONE: Independently reproduce the descendant-survival RED/fix at raw 4957f6c, proving TERM-ignoring process-group children receive bounded KILL after the launcher exits and no unrelated process is targeted.
+  Preserved RED at 8c2fe5e named descendant state; focused GREEN removed the child, and a separate 60s canary survived.
+- FAILED: Attack the monotonic wall-clock deadline with dead, slow-live, exact-expiry, interruption, and per-poll-delay cases; verify focused and fresh target-free cold 10/10, Rust 132/check, Go 35/vet, missing-Zellij fail-loud, unchanged global hashes, and zero leaked PID/session/profile state.
+  All named suites and cleanup checks passed, but timeout=1s plus one 2s transcript read returned after 3s.
+- DONE: Focused descendant, dead-launcher, slow-live, exact-expiry, interruption, language, and dependency evidence.
+  Descendant/canary/dead/slow passed; exact expiry timed out at 1s; Rust 132/check, Go 35/vet, and missing-Zellij exit 1 passed.
+- DONE: Fresh target-free cold shell verification.
+  The complete suite passed 10/10, including its own detached checkout with target removed before the mandatory build.
+- FAILED: AC-4 — Regression coverage is red first and rejects false confidence.
+  The normal deadline test passes but omits delayed-poll behavior, leaving the hard wall-clock claim false.
+- DONE: Issue a final offline verdict and identify the exact remaining gate evidence for AC-6 and deferred AC-7 without re-running already-proved unrelated behavior or claiming a human observation.
+  Final verdict is REJECTED—ESCALATE; AC-6 needs CL's real keypress, and AC-7 remains at j5's post-v9 gate.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  CL has not driven the resident-control keypress; no interactive result is claimed.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  v9 must land before j5 rebases and CL captures the two-checkout red/green evidence.
+
+### Summary
+
+Cycle-3 fixes descendant cleanup and passes the complete cold and language matrix. Validation still rejects the hard deadline because one blocking transcript poll can overrun it; feedback cycle 3 requires captain escalation, while AC-6 remains pending CL and AC-7 remains deferred to j5's later gate.

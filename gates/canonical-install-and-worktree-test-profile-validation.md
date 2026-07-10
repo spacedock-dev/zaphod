@@ -200,3 +200,60 @@ does not remove a surviving descendant. Add a TERM-ignoring descendant to the
 timeout regression, verify the group is empty after escalation, and report the
 readiness bound as attempts or enforce a wall-clock deadline. AC-6 remains for
 CL; AC-7 remains at the post-v9 j5 gate.
+
+## Cycle 3 revalidation at 4957f6c
+
+### Reproduced fixes and required verification
+
+- The preserved cycle-2 RED was “timed-out readiness left disposable state:
+  descendant” at 8c2fe5e. At 4957f6c, the focused timeout test passes: the
+  TERM-ignoring child fails kill -0, and launcher/session/profile state is absent.
+- A separate 60-second canary outside the profile group remained live through
+  cleanup, proving escalation did not target an unrelated process.
+- The dead/slow control passes: dead launcher failure is prompt, and a live
+  launcher that emits metadata after 2 seconds succeeds inside 3.
+- The complete shell run passes 10/10, including its own fresh detached checkout
+  with target removed before the profile's mandatory build.
+- Rust passes 132/132 and cargo check --tests; Go passes 35/35 and vet.
+  Missing Zellij exits 1 with “zellij 0.44.3 is required”. Normal, TERM, and INT
+  cleanup preserves global sentinels; no disposable session remains.
+
+### Deadline refutation
+
+The required per-poll-delay attack survives. A throwaway PATH shim delayed one
+tr invocation by 2 seconds, while readiness used a 1-second timeout and a live
+10-second launcher. Exact output:
+
+    POLL_DELAY_STATUS=1 POLL_DELAY_ELAPSED=3
+    REFUTED: one delayed poll overran the 1-second deadline by 2s
+
+wait_for_profile_value computes the deadline at
+tests/zellij-install-profile-test.sh:73-75, checks it at line 77, then performs
+an unbounded external tr/awk read at line 78. The next time check cannot run
+until that poll returns. The normal wall-clock regression at lines 696-725
+exercises only fast local polls and therefore passes.
+
+The exact-expiry control wrote PROFILE_ROOT at 1 second with timeout=1. It
+returned timeout at elapsed=1, which matches an exclusive deadline and is not
+the defect. The defect is blocking work admitted after the deadline check.
+
+### Interactive gate evidence
+
+All agent-reproducible prerequisites remain green: candidate identity,
+profile-local config/layout/data, explicit-cwd single-terminal baseline, live
+list-panes/dump-layout, signal cleanup, and unchanged outside bytes. AC-6 still
+requires CL to press real Alt-/ in the resident control and capture one
+unchanged sidebar ID with only CANDIDATE_URL.
+
+AC-7 remains deferred by delivery order. After v9 lands, j5 must rebase, then CL
+runs the existing two-checkout script: current-main red and j5 green, with
+terminal IDs/counts, one rail at the candidate URL, canonical chrome, unchanged
+hashes, and absent roots/sessions. No human result is claimed.
+
+### Cycle 3 verdict
+
+**REJECTED — ESCALATE.** Descendant cleanup is fixed, but the wall-clock
+deadline excludes the duration of its own transcript poll. Because this is
+feedback cycle 3, return the architectural choice to the captain: either bound
+each transcript read by the remaining deadline or state and test a bounded-poll
+contract instead of a hard wall-clock deadline.
