@@ -11,24 +11,41 @@ PROFILE_LAUNCHER_PID=""
 PROFILE_PID_FILE=""
 
 cleanup_profile_process() {
-    local profile_pid="" attempt
+    local profile_pid="" attempt group_alive launcher_alive
     if [ -n "${PROFILE_PID_FILE:-}" ] && [ -s "$PROFILE_PID_FILE" ]; then
         profile_pid="$(cat "$PROFILE_PID_FILE")"
     fi
+    group_alive=0
+    launcher_alive=0
+    if [ -n "$profile_pid" ] && [ "$profile_pid" != "$$" ] && kill -0 "-$profile_pid" 2>/dev/null; then
+        group_alive=1
+        kill -TERM "-$profile_pid" >/dev/null 2>&1 || true
+    fi
     if [ -n "${PROFILE_LAUNCHER_PID:-}" ] && kill -0 "$PROFILE_LAUNCHER_PID" 2>/dev/null; then
-        if [ -n "$profile_pid" ] && [ "$profile_pid" != "$$" ]; then
-            kill -TERM "-$profile_pid" >/dev/null 2>&1 || kill -TERM "$profile_pid" >/dev/null 2>&1 || true
-        else
+        launcher_alive=1
+        if [ "$group_alive" -eq 0 ]; then
             kill -TERM "$PROFILE_LAUNCHER_PID" >/dev/null 2>&1 || true
         fi
+    fi
+    if [ "$group_alive" -eq 1 ] || [ "$launcher_alive" -eq 1 ]; then
         for attempt in $(seq 1 50); do
-            kill -0 "$PROFILE_LAUNCHER_PID" 2>/dev/null || break
+            group_alive=0
+            launcher_alive=0
+            if [ -n "$profile_pid" ] && [ "$profile_pid" != "$$" ] && kill -0 "-$profile_pid" 2>/dev/null; then
+                group_alive=1
+            fi
+            if [ -n "${PROFILE_LAUNCHER_PID:-}" ] && kill -0 "$PROFILE_LAUNCHER_PID" 2>/dev/null; then
+                launcher_alive=1
+            fi
+            if [ "$group_alive" -eq 0 ] && [ "$launcher_alive" -eq 0 ]; then
+                break
+            fi
             sleep 0.1
         done
-        if kill -0 "$PROFILE_LAUNCHER_PID" 2>/dev/null; then
-            if [ -n "$profile_pid" ] && [ "$profile_pid" != "$$" ]; then
-                kill -KILL "-$profile_pid" >/dev/null 2>&1 || kill -KILL "$profile_pid" >/dev/null 2>&1 || true
-            fi
+        if [ "$group_alive" -eq 1 ]; then
+            kill -KILL "-$profile_pid" >/dev/null 2>&1 || true
+        fi
+        if [ "$launcher_alive" -eq 1 ]; then
             kill -KILL "$PROFILE_LAUNCHER_PID" >/dev/null 2>&1 || true
         fi
         wait "$PROFILE_LAUNCHER_PID" 2>/dev/null || true
@@ -596,7 +613,7 @@ test_worktree_profile_lifecycle() {
 }
 
 test_profile_timeout_cleanup() {
-    local root marker timeout_output fixture profile_pid profile_root session_name status leaked attempt
+    local root marker timeout_output fixture profile_pid profile_root session_name descendant_pid status leaked attempt
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-timeout-test.XXXXXX")"
     TEST_ROOT="$root"
     marker="$(mktemp "${TMPDIR:-/tmp}/zaphod-profile-timeout-marker.XXXXXX")"
@@ -620,7 +637,9 @@ test_profile_timeout_cleanup() {
         'trap "exit 143" TERM' \
         'trap "exit 129" HUP' \
         'zellij --config-dir "$profile_root/config" --data-dir "$profile_root/data" attach "$session_name" --create-background' \
-        'printf "%s\\n%s\\n%s\\n" "$$" "$profile_root" "$session_name" > "$PROFILE_TIMEOUT_MARKER"' \
+        '/bin/bash -c "trap \\"\\" TERM HUP; while :; do sleep 1; done" &' \
+        'descendant_pid=$!' \
+        'printf "%s\\n%s\\n%s\\n%s\\n" "$$" "$profile_root" "$session_name" "$descendant_pid" > "$PROFILE_TIMEOUT_MARKER"' \
         'while :; do sleep 0.1; done' > "$fixture"
     chmod +x "$fixture"
 
@@ -642,10 +661,12 @@ test_profile_timeout_cleanup() {
     profile_pid="$(sed -n '1p' "$marker")"
     profile_root="$(sed -n '2p' "$marker")"
     session_name="$(sed -n '3p' "$marker")"
+    descendant_pid="$(sed -n '4p' "$marker")"
 
     for attempt in $(seq 1 20); do
         if ! kill -0 "$profile_pid" 2>/dev/null && [ ! -e "$profile_root" ] &&
-            ! zellij list-sessions 2>/dev/null | grep -F "$session_name" >/dev/null; then
+            ! zellij list-sessions 2>/dev/null | grep -F "$session_name" >/dev/null &&
+            ! kill -0 "$descendant_pid" 2>/dev/null; then
             break
         fi
         sleep 0.1
@@ -657,8 +678,10 @@ test_profile_timeout_cleanup() {
     if zellij list-sessions 2>/dev/null | grep -F "$session_name" >/dev/null; then
         leaked="${leaked:+$leaked,}session"
     fi
+    kill -0 "$descendant_pid" 2>/dev/null && leaked="${leaked:+$leaked,}descendant"
     if [ -n "$leaked" ]; then
         kill -TERM "-$profile_pid" >/dev/null 2>&1 || true
+        kill -KILL "$descendant_pid" >/dev/null 2>&1 || true
         zellij delete-session --force "$session_name" >/dev/null 2>&1 || true
         rm -rf "$profile_root" "$marker" "$timeout_output"
         fail "timed-out readiness left disposable state: $leaked"
