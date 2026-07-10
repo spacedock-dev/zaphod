@@ -72,7 +72,7 @@ read_profile_value_until() {
     local deadline="$3"
     local line
     WAIT_VALUE=""
-    while [ "$SECONDS" -lt "$deadline" ] && IFS= read -r line; do
+    while [ "$SECONDS" -lt "$deadline" ] && IFS= read -r -n 4096 line; do
         line="${line//$'\r'/}"
         case "$line" in
             "$key="*)
@@ -85,11 +85,12 @@ read_profile_value_until() {
 
 print_transcript_excerpt() {
     local transcript="$1"
-    local line count=0
-    while [ "$count" -lt 160 ] && IFS= read -r line; do
-        printf '%s\n' "$line" >&2
-        count=$((count + 1))
-    done < "$transcript"
+    local excerpt=""
+    IFS= read -r -n 256 excerpt < "$transcript" || true
+    excerpt="${excerpt//$'\r'/}"
+    if [ -n "$excerpt" ]; then
+        printf 'profile transcript (first 256 bytes): %s\n' "$excerpt" >&2
+    fi
 }
 
 wait_for_profile_value() {
@@ -793,6 +794,96 @@ test_profile_readiness_delayed_poll() {
     remove_test_root
 }
 
+test_profile_readiness_large_line() {
+    local root transcript watchdog_marker launcher_pid wait_pid watchdog_pid status elapsed
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-large-line-test.XXXXXX")"
+    TEST_ROOT="$root"
+    transcript="$root/transcript"
+    watchdog_marker="$root/watchdog-fired"
+    dd if=/dev/zero bs=1048576 count=32 2>/dev/null | LC_ALL=C tr '\000' x > "$transcript"
+    printf '\n' >> "$transcript"
+    sleep 60 &
+    launcher_pid=$!
+    PROFILE_LAUNCHER_PID="$launcher_pid"
+
+    SECONDS=0
+    set +e
+    (
+        PROFILE_READINESS_TIMEOUT_SECONDS=1
+        export PROFILE_READINESS_TIMEOUT_SECONDS
+        wait_for_profile_value "$transcript" PROFILE_ROOT "$launcher_pid"
+    ) >/dev/null 2>&1 &
+    wait_pid=$!
+    (
+        sleep 4
+        if kill -0 "$wait_pid" 2>/dev/null; then
+            : > "$watchdog_marker"
+            kill -TERM "$wait_pid" >/dev/null 2>&1 || true
+        fi
+    ) &
+    watchdog_pid=$!
+    wait "$wait_pid"
+    status=$?
+    set -e
+    elapsed=$SECONDS
+    kill "$watchdog_pid" >/dev/null 2>&1 || true
+    wait "$watchdog_pid" 2>/dev/null || true
+    kill "$launcher_pid" >/dev/null 2>&1 || true
+    wait "$launcher_pid" 2>/dev/null || true
+    PROFILE_LAUNCHER_PID=""
+
+    [ "$status" -ne 0 ] || fail "large-line transcript unexpectedly returned metadata"
+    [ ! -e "$watchdog_marker" ] || fail "1-second readiness deadline was still parsing a 32 MiB transcript line after 4s"
+    [ "$elapsed" -le 1 ] || fail "1-second readiness deadline spent ${elapsed}s parsing a 32 MiB transcript line"
+
+    echo "PASS: 32 MiB transcript line could not overrun the one-second readiness deadline"
+    remove_test_root
+}
+
+test_profile_readiness_blocked_diagnostic() {
+    local root transcript fifo line launcher_pid reader_pid status elapsed
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-blocked-diagnostic-test.XXXXXX")"
+    TEST_ROOT="$root"
+    transcript="$root/transcript"
+    fifo="$root/stderr.fifo"
+    printf -v line '%2048s' x
+    : > "$transcript"
+    for _attempt in $(seq 1 160); do
+        printf '%s\n' "$line" >> "$transcript"
+    done
+    mkfifo "$fifo"
+    sleep 60 &
+    launcher_pid=$!
+    PROFILE_LAUNCHER_PID="$launcher_pid"
+    (
+        exec 3<"$fifo"
+        sleep 5
+    ) &
+    reader_pid=$!
+
+    SECONDS=0
+    set +e
+    (
+        PROFILE_READINESS_TIMEOUT_SECONDS=1
+        export PROFILE_READINESS_TIMEOUT_SECONDS
+        wait_for_profile_value "$transcript" PROFILE_ROOT "$launcher_pid"
+    ) >/dev/null 2>"$fifo"
+    status=$?
+    set -e
+    elapsed=$SECONDS
+    kill "$launcher_pid" >/dev/null 2>&1 || true
+    wait "$launcher_pid" 2>/dev/null || true
+    wait "$reader_pid" 2>/dev/null || true
+    PROFILE_LAUNCHER_PID=""
+
+    if [ "$status" -ne 1 ] || [ "$elapsed" -gt 1 ]; then
+        fail "blocked readiness diagnostic returned status $status after ${elapsed}s under a 1-second deadline"
+    fi
+
+    echo "PASS: blocked stderr could not extend the one-second readiness deadline"
+    remove_test_root
+}
+
 test_profile_readiness_liveness() {
     local root transcript output launcher_pid status elapsed
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-liveness-test.XXXXXX")"
@@ -890,6 +981,12 @@ case "${1:-all}" in
     profile-readiness-delayed-poll)
         test_profile_readiness_delayed_poll
         ;;
+    profile-readiness-large-line)
+        test_profile_readiness_large_line
+        ;;
+    profile-readiness-blocked-diagnostic)
+        test_profile_readiness_blocked_diagnostic
+        ;;
     profile-readiness-liveness)
         test_profile_readiness_liveness
         ;;
@@ -906,6 +1003,8 @@ case "${1:-all}" in
         test_profile_timeout_cleanup
         test_profile_readiness_wall_clock
         test_profile_readiness_delayed_poll
+        test_profile_readiness_large_line
+        test_profile_readiness_blocked_diagnostic
         test_profile_readiness_liveness
         test_cold_profile_readiness
         ;;
