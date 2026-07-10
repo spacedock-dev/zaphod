@@ -439,3 +439,20 @@ Fixed the cold-cache false timeout with a bounded, liveness-aware readiness wind
 ### Summary
 
 Cycle-2 cold readiness is fixed: a new clone passed all eight shell groups and the full language verification. Validation still rejects process-group teardown because a TERM-ignoring descendant survives once its parent exits; interactive AC-6 remains pending CL, and AC-7 remains dependency-bound to the later j5 gate.
+
+## Stage Report: implementation (cycle 3)
+
+- DONE: Add a red regression whose launcher exits after TERM while a child in the recorded process group ignores TERM; prove the current cleanup leaves that descendant live and record the exact failure.
+  The real timeout fixture now records a TERM/HUP-ignoring child PID; RED exact at `8c2fe5e` was `FAIL: timed-out readiness left disposable state: descendant`.
+- DONE: Implement bounded cleanup against process-group liveness itself, escalating TERM to KILL even after the launcher exits, and replace poll-count expiry with a monotonic wall-clock deadline while preserving slow-live and dead-launcher behavior.
+  Commit `0e06bda` polls the recorded group and launcher through the TERM grace period and KILLs either survivor; commit `0b29fec` uses Bash's elapsed `SECONDS` deadline. Deadline RED exact was `FAIL: 10-second readiness deadline expired after 12s`; GREEN honored 10s, while `4957f6c` proved dead failure within 1s and slow-live success within 3s.
+- DONE: Run focused descendant/dead/slow/expiry cleanup tests plus the complete target-free cold 8/8 shell suite, Rust 132/check, Go 35/vet, missing-Zellij fail-loud, global-byte hashes, and zero leaked session/profile/process evidence; leave the worktree clean.
+  The expanded fresh-clone shell suite passed 10/10 (the original 8/8 plus wall-clock and liveness groups), Rust passed 132 and check, Go passed 35 and vet, and missing Zellij exited 1 with `zellij 0.44.3 is required`. Global config stayed `ba22912f…`, layout stayed `5639a50a…`, the descendant PID failed `kill -0`, no disposable session/root remained, and the code worktree was clean at `4957f6c`.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  Still pending CL's human-driven real Alt-/ observation; this cycle claims no interactive result.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  Explicitly deferred to j5's later gate after this task lands and j5 rebases, per the validated delivery order.
+
+### Summary
+
+Closed the surviving-descendant race by making escalation depend on process-group liveness rather than only the departed launcher, and replaced the drifting attempt count with an elapsed-time deadline. Fresh target-free verification now covers all ten shell groups, native Rust and Go suites, fail-loud dependency behavior, unchanged outside bytes, and PID-specific cleanup; AC-6 and AC-7 remain honestly deferred as directed.
