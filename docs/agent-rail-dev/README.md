@@ -165,8 +165,10 @@ sprint plan instead.
   implementation and validation stage definitions above.
 - **Dogfood posture.** The rail fails visible-not-blocking; the plugin
   pipe-unblock task leads sprint 0 because it is the one change protecting
-  CL's real sessions. `install.sh` points the layout at the repo wasm in
-  place — `./build.sh` hot-swaps what the next fresh session loads.
+  CL's real sessions. `install.sh` points the global layout only at the primary
+  checkout artifact. Unmerged hot-swap and live validation use
+  `scripts/zellij-worktree-test-profile.sh`; they never repoint standing global
+  config or layout files.
 - **Park-for-demo is correct posture.** When a task's next step is CL's live
   demo, parking it demo-ready and waiting for CL's window is right — not a
   stall. The FO keeps other tasks moving meanwhile.

@@ -766,3 +766,35 @@ rework, and an upstream zellij report is planned.
   hide / show / spawn machinery removed, the split-preserving retrofit and
   relaxed election, the poll-visibility gate, and the chrome extraction;
   `src/agent.rs` (agent awareness) is unaffected.
+
+## Install provenance and candidate testing
+
+Zellij identifies a plugin instance by URL plus configuration. Zaphod's
+identity boundary is therefore the canonical WASM `file:` URL together with
+`rail "1"`; independently valid layout and keybind files can still name two
+different instances.
+
+`install.sh` is the only global installer. It resolves Git's physical primary
+checkout, refuses linked worktrees before its first write, and validates every
+Zaphod `MessagePlugin` in the effective `config.kdl`. It renders the production
+layout to a destination-local temporary file, validates the config, parses the
+layout in a disposable Zellij 0.44.3 session, renames it atomically, and repeats
+the identity check. A failed postflight restores the previous bytes or removes
+a new layout. The installer diagnoses keybind mismatches; it never edits them.
+
+Candidate testing uses
+`./scripts/zellij-worktree-test-profile.sh --cwd PATH`. The command builds its
+own checkout and creates one temporary root for config, the rendered Zaphod
+layout, the explicit-cwd fixture, plugin data, permissions, and a unique
+session. The profile's config and layout use one candidate URL and `rail "1"`.
+Normal exit, TERM, INT, or HUP deletes the session record and temporary root.
+Cleanup compares the existence and SHA-256 of the standing global config and
+layout; it reports mutation and never overwrites concurrent changes by trying
+to restore them.
+
+Use live Zellij state as the oracle. `action list-panes --json -a -g -t` proves
+pane IDs, counts, kinds, geometry, and cwd. `action dump-layout` proves the URL,
+configuration, and chrome that the server loaded. Generated KDL or a source
+grep cannot prove resident identity. Bracket every live drill with global
+config/layout hashes, and run unmerged j5 or later candidates only through the
+disposable profile. Never run a linked worktree's `install.sh`.

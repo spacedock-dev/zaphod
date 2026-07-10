@@ -88,10 +88,11 @@ waiting agent.
 
 The rail fails visible-not-blocking: dead grout means stale rows, never a
 wedged session — the reason the pipe fix leads sprint 0. `install.sh` points
-the layout at the repo wasm in place, so `./build.sh` hot-swaps what the next
-fresh session loads. Artifact review moves into the fresh zellij session
-starting now: pre-sprint-2 gates reviewed there manually via `subspace-tui`;
-sprint 2 automates the discovery.
+the global layout only at the primary checkout artifact. Unmerged builds use
+`scripts/zellij-worktree-test-profile.sh` and never repoint standing config or
+layout files. Artifact review moves into the fresh zellij session starting
+now: pre-sprint-2 gates reviewed there manually via `subspace-tui`; sprint 2
+automates the discovery.
 
 ## References & constraints
 
