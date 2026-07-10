@@ -7,8 +7,38 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 # shellcheck source=scripts/zellij-layout-lib.sh
 source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
 TEST_ROOT=""
+PROFILE_LAUNCHER_PID=""
+PROFILE_PID_FILE=""
+
+cleanup_profile_process() {
+    local profile_pid="" attempt
+    if [ -n "${PROFILE_PID_FILE:-}" ] && [ -s "$PROFILE_PID_FILE" ]; then
+        profile_pid="$(cat "$PROFILE_PID_FILE")"
+    fi
+    if [ -n "${PROFILE_LAUNCHER_PID:-}" ] && kill -0 "$PROFILE_LAUNCHER_PID" 2>/dev/null; then
+        if [ -n "$profile_pid" ] && [ "$profile_pid" != "$$" ]; then
+            kill -TERM "-$profile_pid" >/dev/null 2>&1 || kill -TERM "$profile_pid" >/dev/null 2>&1 || true
+        else
+            kill -TERM "$PROFILE_LAUNCHER_PID" >/dev/null 2>&1 || true
+        fi
+        for attempt in $(seq 1 50); do
+            kill -0 "$PROFILE_LAUNCHER_PID" 2>/dev/null || break
+            sleep 0.1
+        done
+        if kill -0 "$PROFILE_LAUNCHER_PID" 2>/dev/null; then
+            if [ -n "$profile_pid" ] && [ "$profile_pid" != "$$" ]; then
+                kill -KILL "-$profile_pid" >/dev/null 2>&1 || kill -KILL "$profile_pid" >/dev/null 2>&1 || true
+            fi
+            kill -KILL "$PROFILE_LAUNCHER_PID" >/dev/null 2>&1 || true
+        fi
+        wait "$PROFILE_LAUNCHER_PID" 2>/dev/null || true
+    fi
+    PROFILE_LAUNCHER_PID=""
+    PROFILE_PID_FILE=""
+}
 
 cleanup_test_root() {
+    cleanup_profile_process
     if [ -n "$TEST_ROOT" ] && [ -d "$TEST_ROOT" ]; then
         rm -rf "$TEST_ROOT"
     fi
@@ -564,6 +594,78 @@ test_worktree_profile_lifecycle() {
     remove_test_root
 }
 
+test_profile_timeout_cleanup() {
+    local root marker timeout_output fixture profile_pid profile_root session_name status leaked attempt
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-timeout-test.XXXXXX")"
+    TEST_ROOT="$root"
+    marker="$(mktemp "${TMPDIR:-/tmp}/zaphod-profile-timeout-marker.XXXXXX")"
+    timeout_output="$marker.output"
+    fixture="$root/timeout-profile.sh"
+    zaphod_require_zellij_0443
+
+    printf '%s\n' \
+        '#!/bin/bash' \
+        'set -euo pipefail' \
+        'profile_root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-timeout-profile.XXXXXX")"' \
+        'session_name="zwt-$$-${RANDOM:-0}"' \
+        'mkdir -p "$profile_root/config" "$profile_root/data"' \
+        'cleanup() {' \
+        '    trap - EXIT INT TERM HUP' \
+        '    zellij delete-session --force "$session_name" >/dev/null 2>&1 || true' \
+        '    rm -rf "$profile_root"' \
+        '}' \
+        'trap cleanup EXIT' \
+        'trap "exit 130" INT' \
+        'trap "exit 143" TERM' \
+        'trap "exit 129" HUP' \
+        'zellij --config-dir "$profile_root/config" --data-dir "$profile_root/data" attach "$session_name" --create-background' \
+        'printf "%s\\n%s\\n%s\\n" "$$" "$profile_root" "$session_name" > "$PROFILE_TIMEOUT_MARKER"' \
+        'while :; do sleep 0.1; done' > "$fixture"
+    chmod +x "$fixture"
+
+    export PROFILE_TIMEOUT_MARKER="$marker"
+    set +e
+    (
+        trap cleanup_test_root EXIT
+        start_profile_process timeout "$fixture" "$root" "$root/global-zellij"
+    ) >"$timeout_output" 2>&1
+    status=$?
+    set -e
+    unset PROFILE_TIMEOUT_MARKER
+    [ "$status" -ne 0 ] || fail "timeout fixture unexpectedly reached profile metadata"
+    grep -F "FAIL: timed out waiting for profile value PROFILE_ROOT" "$timeout_output" >/dev/null ||
+        fail "timeout fixture failed for an unexpected reason"
+    [ "$(sed -n '1p' "$marker")" ] || fail "timeout fixture did not record its launcher"
+    profile_pid="$(sed -n '1p' "$marker")"
+    profile_root="$(sed -n '2p' "$marker")"
+    session_name="$(sed -n '3p' "$marker")"
+
+    for attempt in $(seq 1 20); do
+        if ! kill -0 "$profile_pid" 2>/dev/null && [ ! -e "$profile_root" ] &&
+            ! zellij list-sessions 2>/dev/null | grep -F "$session_name" >/dev/null; then
+            break
+        fi
+        sleep 0.1
+    done
+
+    leaked=""
+    kill -0 "$profile_pid" 2>/dev/null && leaked="launcher"
+    [ ! -e "$profile_root" ] || leaked="${leaked:+$leaked,}profile"
+    if zellij list-sessions 2>/dev/null | grep -F "$session_name" >/dev/null; then
+        leaked="${leaked:+$leaked,}session"
+    fi
+    if [ -n "$leaked" ]; then
+        kill -TERM "-$profile_pid" >/dev/null 2>&1 || true
+        zellij delete-session --force "$session_name" >/dev/null 2>&1 || true
+        rm -rf "$profile_root" "$marker" "$timeout_output"
+        fail "timed-out readiness left disposable state: $leaked"
+    fi
+
+    rm -f "$marker" "$timeout_output"
+    echo "PASS: timed-out readiness removed launcher, session, and profile"
+    remove_test_root
+}
+
 case "${1:-all}" in
     linked-install)
         test_linked_install
@@ -583,6 +685,9 @@ case "${1:-all}" in
     worktree-profile)
         test_worktree_profile_lifecycle
         ;;
+    profile-timeout-cleanup)
+        test_profile_timeout_cleanup
+        ;;
     all)
         test_linked_install
         test_install_identity
@@ -590,6 +695,7 @@ case "${1:-all}" in
         test_install_signal_rollback
         test_install_rename_signal_rollback
         test_worktree_profile_lifecycle
+        test_profile_timeout_cleanup
         ;;
     *)
         fail "unknown test: $1"
