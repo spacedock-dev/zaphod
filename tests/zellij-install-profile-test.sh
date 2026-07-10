@@ -53,9 +53,10 @@ wait_for_profile_value() {
     local transcript="$1"
     local key="$2"
     local launcher_pid="$3"
-    local attempt
+    local attempt max_attempts
+    max_attempts="${PROFILE_READINESS_ATTEMPTS:-1800}"
     WAIT_VALUE=""
-    for attempt in $(seq 1 100); do
+    for attempt in $(seq 1 "$max_attempts"); do
         WAIT_VALUE="$(tr -d '\r' < "$transcript" | awk -F= -v wanted="$key" '$1 == wanted { sub(/^[^=]*=/, ""); print; exit }')"
         if [ -n "$WAIT_VALUE" ]; then
             return 0
@@ -627,6 +628,8 @@ test_profile_timeout_cleanup() {
     set +e
     (
         trap cleanup_test_root EXIT
+        PROFILE_READINESS_ATTEMPTS=100
+        export PROFILE_READINESS_ATTEMPTS
         start_profile_process timeout "$fixture" "$root" "$root/global-zellij"
     ) >"$timeout_output" 2>&1
     status=$?
@@ -666,6 +669,34 @@ test_profile_timeout_cleanup() {
     remove_test_root
 }
 
+test_cold_profile_readiness() {
+    local root cold_checkout output status commit
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-cold-profile-test.XXXXXX")"
+    TEST_ROOT="$root"
+    cold_checkout="$root/cold-checkout"
+    output="$root/cold-profile.out"
+    commit="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+
+    git clone -q --no-local "$REPO_ROOT" "$cold_checkout"
+    git -C "$cold_checkout" checkout -q --detach "$commit"
+    cp "$REPO_ROOT/tests/zellij-install-profile-test.sh" \
+        "$cold_checkout/tests/zellij-install-profile-test.sh"
+    rm -rf "$cold_checkout/target"
+    [ ! -e "$cold_checkout/target" ] || fail "cold profile fixture unexpectedly retained build output"
+
+    set +e
+    "$cold_checkout/tests/zellij-install-profile-test.sh" worktree-profile >"$output" 2>&1
+    status=$?
+    set -e
+    if [ "$status" -ne 0 ]; then
+        sed -n '1,160p' "$output" >&2
+        fail "fresh detached checkout profile lifecycle failed during mandatory clean build"
+    fi
+
+    echo "PASS: fresh detached checkout completed profile lifecycle after a mandatory clean build"
+    remove_test_root
+}
+
 case "${1:-all}" in
     linked-install)
         test_linked_install
@@ -688,6 +719,9 @@ case "${1:-all}" in
     profile-timeout-cleanup)
         test_profile_timeout_cleanup
         ;;
+    cold-profile-readiness)
+        test_cold_profile_readiness
+        ;;
     all)
         test_linked_install
         test_install_identity
@@ -696,6 +730,7 @@ case "${1:-all}" in
         test_install_rename_signal_rollback
         test_worktree_profile_lifecycle
         test_profile_timeout_cleanup
+        test_cold_profile_readiness
         ;;
     *)
         fail "unknown test: $1"
