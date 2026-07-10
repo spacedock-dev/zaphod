@@ -294,6 +294,24 @@ Add this paragraph after the demoable-slice milestones in
 +approve POST, and make absence of the pinned `spacedock-subspace` dependency
 +fail the required drill loudly; a skipped test with a green suite is not a
 +gate.
++
++**Architecture and data flow.**
++
++    Agent transcripts -> AgentsView ---------------------\
++                                                          -> grout (external adapter)
++    Spacedock gates + durable decision logs -------------/          |
++                                                               agent-event pipe
++                                                                      v
++    Zellij pane/tab events ---------------------> per-tab ephemeral Zaphod WASM
++                                                  -> render | focus | review | verdict
++                                                                                 |
++    waiting agent resumes <- decision log <- subspace verdict endpoint <---------+
++
++Durable workflow truth remains in Spacedock/subspace decision logs; grout is
++the external adapter, and each tab's WASM is an ephemeral view/action surface.
++Current main is the plugin plus one-shot grout ingestion. The yb validation
++branch adds the AgentsView SSE/session-watch path; the pz validation branch
++adds gate discovery, server addressing, and the review/verdict return path.
 ```
 
 The order is load-bearing, not clerical. This task prevents every later live
@@ -328,7 +346,7 @@ require a confirmation affordance to land before the action becomes standing.
 - DONE: Design the smallest isolated worktree-test profile that gives its layout and Alt-/ keybind one candidate WASM URL, preserves global config byte-for-byte, and supports a disposable explicit-cwd j5 drill.
   One temporary config/layout/data root, one attached session, one candidate URL, and trap cleanup cover the resident control and explicit-cwd drill.
 - DONE: Write external-proof acceptance criteria, red-first regression coverage, operator documentation changes, and the PRD delivery-sequence diff required by the captain.
-  Seven ACs split offline/interactive; the test plan starts with the isolation spike, and the exact task→j5→eh→7v→yb→hj→pz sequence gates pz standing use on both confirmation-before-approve and a fail-loud pinned dependency.
+  Seven ACs split offline/interactive; the proposed PRD diff adds the compact transcript/gate→grout→per-tab-WASM→decision-log loop, distinguishes current main from yb/pz target paths, and the exact task→j5→eh→7v→yb→hj→pz sequence gates pz standing use on both confirmation-before-approve and a fail-loud pinned dependency.
 - DONE: Compare the chosen isolated profile with versioned-global-layout and temporary-overwrite/restore alternatives.
   Both alternatives retain global state or mutation windows and fail the stated byte-preservation boundary.
 
