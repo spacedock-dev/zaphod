@@ -4,6 +4,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+# shellcheck source=scripts/zellij-layout-lib.sh
+source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
 TEST_ROOT=""
 
 cleanup_test_root() {
@@ -15,6 +17,129 @@ cleanup_test_root() {
 remove_test_root() {
     cleanup_test_root
     TEST_ROOT=""
+}
+
+wait_for_profile_value() {
+    local transcript="$1"
+    local key="$2"
+    local launcher_pid="$3"
+    local attempt
+    WAIT_VALUE=""
+    for attempt in $(seq 1 100); do
+        WAIT_VALUE="$(tr -d '\r' < "$transcript" | awk -F= -v wanted="$key" '$1 == wanted { sub(/^[^=]*=/, ""); print; exit }')"
+        if [ -n "$WAIT_VALUE" ]; then
+            return 0
+        fi
+        if ! kill -0 "$launcher_pid" 2>/dev/null; then
+            sed -n '1,160p' "$transcript" >&2
+            fail "profile exited before printing $key"
+        fi
+        sleep 0.1
+    done
+    sed -n '1,160p' "$transcript" >&2
+    fail "timed out waiting for profile value $key"
+}
+
+start_profile_process() {
+    local run_name="$1"
+    local profile_script="$2"
+    local profile_cwd="$3"
+    local global_root="$4"
+    PROFILE_TRANSCRIPT="$TEST_ROOT/$run_name.transcript"
+    PROFILE_PID_FILE="$TEST_ROOT/$run_name.pid"
+    : > "$PROFILE_TRANSCRIPT"
+    PROFILE_SCRIPT="$profile_script" \
+        PROFILE_CWD="$profile_cwd" \
+        PROFILE_PID_FILE="$PROFILE_PID_FILE" \
+        ZELLIJ_CONFIG_DIR="$global_root" \
+        script -q /dev/null /bin/bash -c \
+            'echo $$ > "$PROFILE_PID_FILE"; exec "$PROFILE_SCRIPT" --cwd "$PROFILE_CWD"' \
+            > "$PROFILE_TRANSCRIPT" 2>&1 &
+    PROFILE_LAUNCHER_PID=$!
+    wait_for_profile_value "$PROFILE_TRANSCRIPT" PROFILE_ROOT "$PROFILE_LAUNCHER_PID"
+    PROFILE_ROOT="$WAIT_VALUE"
+    wait_for_profile_value "$PROFILE_TRANSCRIPT" SESSION_NAME "$PROFILE_LAUNCHER_PID"
+    PROFILE_SESSION="$WAIT_VALUE"
+}
+
+run_profile_signal_foreground() {
+    local run_name="$1"
+    local signal_name="$2"
+    local profile_script="$3"
+    local profile_cwd="$4"
+    local global_root="$5"
+    local metadata driver_pid launcher_status
+    PROFILE_TRANSCRIPT="$TEST_ROOT/$run_name.transcript"
+    PROFILE_PID_FILE="$TEST_ROOT/$run_name.pid"
+    metadata="$TEST_ROOT/$run_name.metadata"
+    : > "$PROFILE_TRANSCRIPT"
+
+    (
+        local attempt profile_pid profile_root session_name
+        profile_pid=""
+        profile_root=""
+        session_name=""
+        for attempt in $(seq 1 100); do
+            [ ! -s "$PROFILE_PID_FILE" ] || profile_pid="$(cat "$PROFILE_PID_FILE")"
+            profile_root="$(tr -d '\r' < "$PROFILE_TRANSCRIPT" | awk -F= '$1 == "PROFILE_ROOT" { sub(/^[^=]*=/, ""); print; exit }')"
+            session_name="$(tr -d '\r' < "$PROFILE_TRANSCRIPT" | awk -F= '$1 == "SESSION_NAME" { sub(/^[^=]*=/, ""); print; exit }')"
+            if [ -n "$profile_pid" ] && [ -n "$profile_root" ] && [ -n "$session_name" ] &&
+                zellij list-sessions 2>/dev/null | grep -F "$session_name" >/dev/null; then
+                printf '%s\n%s\n' "$profile_root" "$session_name" > "$metadata"
+                /bin/kill -"$signal_name" "-$profile_pid"
+                exit 0
+            fi
+            sleep 0.1
+        done
+        exit 1
+    ) &
+    driver_pid=$!
+
+    set +e
+    PROFILE_SCRIPT="$profile_script" \
+        PROFILE_CWD="$profile_cwd" \
+        PROFILE_PID_FILE="$PROFILE_PID_FILE" \
+        ZELLIJ_CONFIG_DIR="$global_root" \
+        script -q /dev/null /bin/bash -c \
+            'echo $$ > "$PROFILE_PID_FILE"; exec "$PROFILE_SCRIPT" --cwd "$PROFILE_CWD"' \
+            > "$PROFILE_TRANSCRIPT" 2>&1
+    launcher_status=$?
+    set -e
+    wait "$driver_pid" || {
+        sed -n '1,160p' "$PROFILE_TRANSCRIPT" >&2
+        fail "$signal_name driver could not reach the disposable session"
+    }
+    [ "$launcher_status" -ne 0 ] || fail "$signal_name profile unexpectedly exited zero"
+    PROFILE_ROOT="$(sed -n '1p' "$metadata")"
+    PROFILE_SESSION="$(sed -n '2p' "$metadata")"
+}
+
+assert_session_absent() {
+    local session_name="$1"
+    if zellij list-sessions 2>/dev/null | grep -F "$session_name" >/dev/null; then
+        fail "disposable session still exists: $session_name"
+    fi
+}
+
+wait_for_session_panes() {
+    local profile_root="$1"
+    local session_name="$2"
+    local launcher_pid="$3"
+    local output_file="$4"
+    local attempt
+    for attempt in $(seq 1 100); do
+        ZELLIJ_SESSION_NAME="$session_name" \
+            zellij --config-dir "$profile_root/config" --data-dir "$profile_root/data" \
+                action list-panes --json -a -g -t > "$output_file" 2>/dev/null || true
+        if grep -F '"pane_cwd"' "$output_file" >/dev/null; then
+            return 0
+        fi
+        if ! kill -0 "$launcher_pid" 2>/dev/null; then
+            fail "profile exited before its session became inspectable"
+        fi
+        sleep 0.1
+    done
+    fail "profile session did not become inspectable"
 }
 
 trap cleanup_test_root EXIT
@@ -248,6 +373,71 @@ test_install_postflight_rollback() {
     remove_test_root
 }
 
+test_worktree_profile_lifecycle() {
+    local root profile_script profile_cwd global_root global_config global_layout
+    local config_before layout_before expected_url expected_cwd pane_state control_session control_dump signal_name
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-worktree-profile-test.XXXXXX")"
+    TEST_ROOT="$root"
+    profile_script="$REPO_ROOT/scripts/zellij-worktree-test-profile.sh"
+    [ -x "$profile_script" ] || fail "profile script missing: $profile_script"
+    zaphod_require_zellij_0443
+    command -v script >/dev/null 2>&1 || fail "script(1) is required for attached profile tests"
+
+    profile_cwd="$root/explicit cwd"
+    global_root="$root/global-zellij"
+    global_config="$global_root/config.kdl"
+    global_layout="$global_root/layouts/zaphod.kdl"
+    mkdir -p "$profile_cwd" "$global_root/layouts"
+    printf 'global-config-sentinel\n' > "$global_config"
+    printf 'global-layout-sentinel\n' > "$global_layout"
+    config_before="$(sha256 "$global_config")"
+    layout_before="$(sha256 "$global_layout")"
+    expected_url="file:$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+    expected_cwd="$(cd "$profile_cwd" && pwd -P)"
+
+    start_profile_process normal "$profile_script" "$profile_cwd" "$global_root"
+    [ -f "$PROFILE_ROOT/config/config.kdl" ] || fail "profile config missing"
+    [ -f "$PROFILE_ROOT/config/layouts/zaphod.kdl" ] || fail "profile Zaphod layout missing"
+    [ -f "$PROFILE_ROOT/config/layouts/explicit-cwd.kdl" ] || fail "explicit-cwd fixture missing"
+    [ -d "$PROFILE_ROOT/data" ] || fail "profile data root missing"
+    zaphod_validate_message_plugin_identity "$PROFILE_ROOT/config/config.kdl" "$expected_url"
+    zaphod_validate_layout_identity "$PROFILE_ROOT/config/layouts/zaphod.kdl" "$expected_url"
+
+    pane_state="$root/normal-panes.json"
+    wait_for_session_panes "$PROFILE_ROOT" "$PROFILE_SESSION" "$PROFILE_LAUNCHER_PID" "$pane_state"
+    [ "$(grep -c '"is_plugin": false' "$pane_state")" -eq 1 ] || fail "explicit-cwd session did not have exactly one terminal"
+    grep -F '"plugin_url": "file:' "$pane_state" >/dev/null && fail "explicit-cwd session unexpectedly contained a file plugin"
+    grep -F "\"pane_cwd\": \"$expected_cwd\"" "$pane_state" >/dev/null || fail "explicit terminal cwd did not match caller path"
+
+    control_session="zpc-$$-${RANDOM:-0}"
+    zellij --config-dir "$PROFILE_ROOT/config" --data-dir "$PROFILE_ROOT/data" \
+        --layout "$PROFILE_ROOT/config/layouts/zaphod.kdl" attach "$control_session" --create-background
+    control_dump="$root/resident-control.kdl"
+    ZELLIJ_SESSION_NAME="$control_session" \
+        zellij --config-dir "$PROFILE_ROOT/config" --data-dir "$PROFILE_ROOT/data" \
+            action dump-layout > "$control_dump"
+    zaphod_validate_layout_identity "$control_dump" "$expected_url"
+    zellij kill-session "$control_session"
+
+    zellij kill-session "$PROFILE_SESSION"
+    wait "$PROFILE_LAUNCHER_PID" || fail "normal profile launcher exited nonzero"
+    [ ! -e "$PROFILE_ROOT" ] || fail "normal cleanup left profile root"
+    assert_session_absent "$PROFILE_SESSION"
+    [ "$(sha256 "$global_config")" = "$config_before" ] || fail "normal cleanup changed global config"
+    [ "$(sha256 "$global_layout")" = "$layout_before" ] || fail "normal cleanup changed global layout"
+
+    for signal_name in TERM INT; do
+        run_profile_signal_foreground "signal-$signal_name" "$signal_name" "$profile_script" "$profile_cwd" "$global_root"
+        [ ! -e "$PROFILE_ROOT" ] || fail "$signal_name cleanup left profile root"
+        assert_session_absent "$PROFILE_SESSION"
+        [ "$(sha256 "$global_config")" = "$config_before" ] || fail "$signal_name cleanup changed global config"
+        [ "$(sha256 "$global_layout")" = "$layout_before" ] || fail "$signal_name cleanup changed global layout"
+    done
+
+    echo "PASS: disposable profile preserved global bytes across normal, TERM, and INT cleanup"
+    remove_test_root
+}
+
 case "${1:-all}" in
     linked-install)
         test_linked_install
@@ -258,10 +448,14 @@ case "${1:-all}" in
     install-postflight)
         test_install_postflight_rollback
         ;;
+    worktree-profile)
+        test_worktree_profile_lifecycle
+        ;;
     all)
         test_linked_install
         test_install_identity
         test_install_postflight_rollback
+        test_worktree_profile_lifecycle
         ;;
     *)
         fail "unknown test: $1"

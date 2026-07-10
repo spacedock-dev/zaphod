@@ -33,6 +33,13 @@ zaphod_render_layout() {
     sed "s|__ZAPHOD_WASM__|$replacement|g" "$template" > "$output"
 }
 
+zaphod_kdl_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    printf '%s\n' "$value"
+}
+
 zaphod_require_zellij_0443() {
     local version
     if ! command -v zellij >/dev/null 2>&1; then
