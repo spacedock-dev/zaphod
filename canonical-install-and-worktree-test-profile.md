@@ -353,3 +353,19 @@ require a confirmation affordance to land before the action becomes standing.
 ### Summary
 
 Designed a fail-closed, primary-checkout-only canonical installer and a separate disposable profile for unmerged worktrees. The design makes live Zellij state and before/after bytes authoritative, gives j5 one repeatable red/green drill, and records the captain's dependency-aware delivery sequence. The captain's affection for the ensign was received and is warmly carried in this work.
+
+## Stage Report: implementation
+
+- DONE: Run the approved riskiest isolation spike before production edits, record live Zellij URL/hash evidence, and stop rather than code around a failed boundary.
+  Zellij 0.44.3 loaded one `plugin_2` at the candidate worktree URL; real `Alt /` changed it from 28 to 1 columns with the same ID, while global hashes stayed config `ba22912f…` and layout `5639a50a…` after teardown.
+- DONE: Use red-first shell regressions to implement the primary-checkout install guard, identity pre/postflight, and disposable worktree profile with normal and signal cleanup; no Zellij-dependent proof may silently skip.
+  Commits `7f3a765`, `8cf82e6`, `0df98a0`, `1f6c626`, `71a3415`, `bc23bac`, `5ab9a20`, and `7cfd3a9`; final shell run passed 6/6 behavior groups, and missing Zellij failed with exact output `zellij 0.44.3 is required`.
+  RED exact: `FAIL: expected linked install to fail before writing, got exit 0; layout changed from sentinel`; `FAIL: identity case foreign expected refusal, got exit 0`; `FAIL: postflight mismatch expected install failure, got exit 0`; `FAIL: profile script missing: /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-canonical-install-and-worktree-test-profile/scripts/zellij-worktree-test-profile.sh`.
+  RED exact: `FAIL: signal during postflight did not restore prior layout bytes`; `FAIL: signal at layout rename did not restore prior layout bytes`; `FAIL: disposable session still exists: zlc-68689-13874`; `FAIL: commented Zaphod example should not affect identity`.
+- DONE: Apply the approved README/docking/workflow/PRD changes including the architecture diagram and delivery gates, then record exact red/green evidence plus Rust and Go suite results.
+  Commit `1b38466` documents canonical install, candidate profile setup/inspect/cleanup, the live oracle, current-main versus yb/pz, task→j5→eh→7v→yb→hj→pz order, and pz confirmation/fail-loud gates; the referenced absent PRD path was created from only the approved boundary text.
+  Final verification: `cargo test` 132 passed; `cargo check --tests` exit 0; grout `go test ./...` 35 passed; `go vet ./...` clean; script syntax clean; worktree clean; no `zlc`/`zwp`/`zpc` sessions remained.
+
+### Summary
+
+Implemented a primary-only, fail-closed global installer with canonical identity checks, live disposable layout parsing, atomic rename, and rollback across ordinary failures and signals. Added an isolated linked-worktree profile whose config, layouts, data, permissions, session, and cleanup remain disposable; process regressions prove candidate-only live identity and unchanged outside bytes across normal, TERM, and INT cleanup. Updated operator and delivery documentation, including the approved architecture and pz safety gates; no j5 transform or standing global Zellij state was changed.
