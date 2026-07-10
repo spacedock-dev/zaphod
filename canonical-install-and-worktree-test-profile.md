@@ -523,3 +523,22 @@ Closed the final hard-deadline defect by removing externally blocking transcript
 ### Summary
 
 Recommendation: REJECTED. Cycle 4 fixes blocking transcript polling and passes the full 11-group/language matrix, but synchronous timeout diagnostics can still exceed the hard wall-clock budget; AC-6 remains captain-driven and AC-7 remains deferred to j5.
+
+## Stage Report: implementation (cycle 5)
+
+- DONE: Add red regressions for a 32 MiB single-line transcript and blocked diagnostic stderr under a one-second readiness deadline.
+  RED exact at `16b4faa`: `FAIL: 1-second readiness deadline was still parsing a 32 MiB transcript line after 4s`; blocked output RED exact: `FAIL: blocked readiness diagnostic returned status 141 after 5s under a 1-second deadline`.
+- DONE: Cap failure-path transcript parsing and ensure diagnostic emission cannot extend the hard readiness deadline while retaining useful bounded evidence.
+  Commit `4f18469` reads polling input in 4 KiB chunks with deadline checks between chunks and caps the diagnostic excerpt at the first 256 bytes plus the concise failure summary; both adversarial tests returned within their one-second budget.
+- DONE: Preserve polling, dead/slow liveness, process-group TERM→KILL cleanup, unrelated-process safety, missing-Zellij fail-loud, global hashes, and zero leaks.
+  Delayed-poll, 10s deadline, dead/slow, and descendant cleanup tests passed; a separate 60s canary survived, missing Zellij exited 1 with `zellij 0.44.3 is required`, and no disposable session/root remained after the final audit.
+- DONE: Run the complete fresh target-free cold shell suite and native language verification when resource headroom permits.
+  A new target-free clone passed shell 13/13, including its independently cold lifecycle; Rust passed 132/check and Go passed 35/vet. Global config stayed `ba22912f…`, layout stayed `5639a50a…`, and the code worktree was clean at `4f18469`.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  Still pending CL's human-driven real Alt-/ observation; no interactive result is claimed.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  Remains deferred to j5's later gate after this task lands and j5 rebases, as previously validated.
+
+### Summary
+
+Bounded the last synchronous failure-path operations: oversized lines are processed in deadline-aware chunks and diagnostics expose only a useful 256-byte excerpt that fits without waiting for a blocked consumer. Both cycle-5 refutations are red/green covered, and the complete cold, cleanup, dependency, isolation, Rust, and Go matrices remain green; AC-6 and AC-7 keep their directed dispositions.
