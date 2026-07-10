@@ -66,6 +66,32 @@ remove_test_root() {
     TEST_ROOT=""
 }
 
+read_profile_value_until() {
+    local transcript="$1"
+    local key="$2"
+    local deadline="$3"
+    local line
+    WAIT_VALUE=""
+    while [ "$SECONDS" -lt "$deadline" ] && IFS= read -r line; do
+        line="${line//$'\r'/}"
+        case "$line" in
+            "$key="*)
+                WAIT_VALUE="${line#*=}"
+                return 0
+                ;;
+        esac
+    done < "$transcript"
+}
+
+print_transcript_excerpt() {
+    local transcript="$1"
+    local line count=0
+    while [ "$count" -lt 160 ] && IFS= read -r line; do
+        printf '%s\n' "$line" >&2
+        count=$((count + 1))
+    done < "$transcript"
+}
+
 wait_for_profile_value() {
     local transcript="$1"
     local key="$2"
@@ -75,17 +101,17 @@ wait_for_profile_value() {
     deadline=$((SECONDS + timeout_seconds))
     WAIT_VALUE=""
     while [ "$SECONDS" -lt "$deadline" ]; do
-        WAIT_VALUE="$(tr -d '\r' < "$transcript" | awk -F= -v wanted="$key" '$1 == wanted { sub(/^[^=]*=/, ""); print; exit }')"
+        read_profile_value_until "$transcript" "$key" "$deadline"
         if [ -n "$WAIT_VALUE" ]; then
             return 0
         fi
         if ! kill -0 "$launcher_pid" 2>/dev/null; then
-            sed -n '1,160p' "$transcript" >&2
+            print_transcript_excerpt "$transcript"
             fail "profile exited before printing $key"
         fi
         sleep 0.1
     done
-    sed -n '1,160p' "$transcript" >&2
+    print_transcript_excerpt "$transcript"
     fail "timed out waiting for profile value $key"
 }
 
@@ -725,6 +751,48 @@ test_profile_readiness_wall_clock() {
     remove_test_root
 }
 
+test_profile_readiness_delayed_poll() {
+    local root transcript output shim_dir real_tr launcher_pid status elapsed
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-delayed-poll-test.XXXXXX")"
+    TEST_ROOT="$root"
+    transcript="$root/transcript"
+    output="$root/output"
+    shim_dir="$root/bin"
+    real_tr="$(command -v tr)"
+    mkdir -p "$shim_dir"
+    : > "$transcript"
+    printf '%s\n' \
+        '#!/bin/bash' \
+        'sleep 2' \
+        'exec "$REAL_TR" "$@"' > "$shim_dir/tr"
+    chmod +x "$shim_dir/tr"
+    sleep 30 &
+    launcher_pid=$!
+
+    SECONDS=0
+    set +e
+    (
+        PATH="$shim_dir:$PATH"
+        REAL_TR="$real_tr"
+        PROFILE_READINESS_TIMEOUT_SECONDS=1
+        export PATH REAL_TR PROFILE_READINESS_TIMEOUT_SECONDS
+        wait_for_profile_value "$transcript" PROFILE_ROOT "$launcher_pid"
+    ) >"$output" 2>&1
+    status=$?
+    set -e
+    elapsed=$SECONDS
+    kill "$launcher_pid" >/dev/null 2>&1 || true
+    wait "$launcher_pid" 2>/dev/null || true
+
+    [ "$status" -ne 0 ] || fail "delayed transcript poll unexpectedly returned metadata"
+    grep -F "FAIL: timed out waiting for profile value PROFILE_ROOT" "$output" >/dev/null ||
+        fail "delayed transcript poll failed for an unexpected reason"
+    [ "$elapsed" -le 1 ] || fail "1-second readiness deadline returned after ${elapsed}s when one transcript poll blocked"
+
+    echo "PASS: delayed transcript poll could not overrun the one-second readiness deadline"
+    remove_test_root
+}
+
 test_profile_readiness_liveness() {
     local root transcript output launcher_pid status elapsed
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-profile-liveness-test.XXXXXX")"
@@ -819,6 +887,9 @@ case "${1:-all}" in
     profile-readiness-wall-clock)
         test_profile_readiness_wall_clock
         ;;
+    profile-readiness-delayed-poll)
+        test_profile_readiness_delayed_poll
+        ;;
     profile-readiness-liveness)
         test_profile_readiness_liveness
         ;;
@@ -834,6 +905,7 @@ case "${1:-all}" in
         test_worktree_profile_lifecycle
         test_profile_timeout_cleanup
         test_profile_readiness_wall_clock
+        test_profile_readiness_delayed_poll
         test_profile_readiness_liveness
         test_cold_profile_readiness
         ;;
