@@ -400,3 +400,20 @@ Validation recommends rejection: runtime boundaries pass when warm, but the comm
 ### Feedback Cycles
 
 - **Cycle 1 — validation → implementation (2026-07-10): REJECTED.** AC-4 failed from a fresh detached checkout: `tests/zellij-install-profile-test.sh all` passed five groups, then its fixed 10-second metadata wait expired while the mandatory clean `./build.sh` took about 1m42s. Warm-cache green is insufficient. Implementation must add a red cold-checkout regression, make readiness cover a clean build without hiding a dead launcher, clean the launcher/session/profile on timeout, and rerun the complete cold suite. AC-6 and AC-7 remain pending human-driven demos. Re-review stays with the cycle-1 validation worker after the fix.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Add a red process regression that reproduces the fresh-checkout metadata timeout during a mandatory clean build, recording the exact predicted failure before the fix.
+  RED exact: `FAIL: timed out waiting for profile value PROFILE_ROOT`; then `FAIL: fresh detached checkout profile lifecycle failed during mandatory clean build`. GREEN: commit `8c2fe5e` completed that lifecycle from a fresh detached checkout after its clean build.
+- DONE: Implement the smallest bounded readiness and cleanup change that permits a clean build, still fails a dead launcher, and removes launcher, Zellij session, and profile state on timeout or interruption without touching global files.
+  Commits `4d85004` and `8c2fe5e` retain per-poll launcher liveness, bound readiness at 180 seconds, and terminate the recorded process group before test-root removal; cleanup RED exact was `FAIL: timed-out readiness left disposable state: launcher,profile,session`, then GREEN passed with all three absent.
+- DONE: Run the complete shell suite from a new cold clone plus Rust 132-test/check and Go 35-test/vet verification; record exact before/after evidence and leave the worktree clean.
+  Fresh clone shell verification passed 8/8 behavior groups, including the final independently clean detached lifecycle; `cargo test` passed 132, `cargo check --tests` exited 0, grout passed 35 and vet clean, syntax was clean, no `zlc`/`zwp`/`zpc`/`zwt` sessions remained, and the code worktree was clean at `8c2fe5e`.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  Still pending CL's human-driven attached-session keypress; this implementation cycle does not claim it.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  Still pending CL's human-driven two-run drill; this implementation cycle does not claim it.
+
+### Summary
+
+Fixed the cold-cache false timeout with a bounded, liveness-aware readiness window and made timeout teardown remove the launcher process group, disposable session, and profile root. Red/green process evidence and a new-clone 8/8 shell run now cover AC-4's rejected path, while interactive AC-6 and AC-7 remain explicitly pending for the preserved validator and captain.
