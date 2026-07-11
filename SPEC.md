@@ -1,5 +1,11 @@
 # Zaphod — zellij pane-switcher sidebar
 
+> **Historical prototype record.** This file documents the shipped Zellij WASM
+> sidebar and its numbered technical landmines. It is not the product
+> architecture. The evergreen direction uses one Zaphod-managed tab or window,
+> leaves foreign views unchanged, and is defined in
+> [`docs/zaphod-workspace-architecture.md`](docs/zaphod-workspace-architecture.md).
+
 Spec and from-scratch learnings, distilled from the v1 prototype campaign
 (zellij 0.44.1, 2026-06-10).
 
@@ -154,9 +160,11 @@ these as laws.
     it yanks the user's view to that tab. Cross-tab "follow me" via
     `show_self`/`break_panes_to_tab_with_index` is therefore unusable. The
     per-tab sibling-spawn model (`open_plugin_pane_floating`) that replaced
-    it is retired too: the adopted architecture keeps a sidebar pane in every
-    tab's layout and toggles by cycling swap layouts
-    (`docs/docking-approach.md`), so nothing is shown, hidden, or spawned.
+    it is retired too. The shipped prototype kept a sidebar pane in each tab
+    it retrofitted and toggled by cycling swap layouts
+    (`docs/docking-approach.md`), so its steady-state toggle showed, hid, and
+    spawned nothing. The evergreen product instead creates or focuses one
+    managed view and never retrofits a foreign tab.
 17. **`set_selectable(false)` does not evict already-resident focus** — the
     pane arrives focused and stays "focused" visually. A manifest-driven
     bounce (own pane `is_focused` outside nav mode → `focus_previous_pane`)
@@ -364,7 +372,11 @@ these as laws.
     split-preserving fidelity ceiling; upstream family: #1825, #2829, #1758,
     #4647.
 
-## If building v2 from scratch
+## Historical v2 rebuild guidance
+
+The following recommendations describe how to rebuild the shipped WASM
+prototype within its old per-tab boundary. They preserve its engineering
+lessons but do not supersede the managed-view product architecture.
 
 1. **Manifest-derived state machine.** One `State` struct recomputed from
    `PaneUpdate`/`TabUpdate`; the only persistent fields are user intent
@@ -375,22 +387,19 @@ these as laws.
    effects; a drain step executes them from a safe context, never calling
    response-reading shims from `pipe()`/`load()`. No `unwrap` anywhere near
    shim responses.
-3. **Layout-first placement.** The sidebar pane lives in every toggled tab's
-   layout, with docked and undocked (`size=1` sliver) `swap_tiled_layout`
-   states; toggling steers swap layouts by name (see #29), and a damaged tab
-   first regenerates its swap set around the current arrangement
-   (`docs/docking-approach.md`, Toggle v3). The default layout stays
-   chrome-only with an explicit `tab { pane }` (see #27); tabs get the
-   sidebar + swap set from `new-tab --layout zaphod` at birth or from a
-   one-time `override_layout` retrofit on first toggle — complete KDL:
-   chrome, stacked main, both swaps carrying the tab's own dumped
-   arrangement (`docs/docking-approach.md`, Adopted architecture). Nothing
-   is spawned, hidden, or shown. Accept a fidelity ceiling: regenerating the
-   swaps preserves the user's splits across the rail-width flip, but a
-   deeply-nested percentage region flattens on collapse — zellij's swap
-   re-seat discards the layout tree when the percentage-constraint solve
-   fails at the changed width, and no template shape survives it (see #35).
-   Panes and content always survive; only the split nesting is lost.
+3. **Layout-first placement inside a prototype-owned tab.** The sidebar pane
+   lives in that tab's layout, with docked and undocked (`size=1` sliver)
+   `swap_tiled_layout` states; toggling steers swap layouts by name (see #29).
+   The old first-toggle retrofit regenerated a damaged or foreign tab's swap
+   set around its current arrangement (`docs/docking-approach.md`, Toggle v3),
+   but that experiment is historical and must not become a product entry path.
+   Create the managed tab with `new-tab --layout zaphod` instead. Its complete
+   KDL includes chrome, the main region, and both swaps. Nothing is spawned,
+   hidden, or shown during a steady-state toggle. Accept the prototype's
+   fidelity finding: a deeply nested percentage region can flatten on
+   collapse because Zellij's swap re-seat discards the layout tree when the
+   percentage-constraint solve fails at the changed width (see #35). Panes and
+   content survive; only the split nesting is lost.
 4. **Keybind = pipe toggle only**, with `floating true` + `skip_cache` (dev)
    + an identity config key. Treat any pane-less instance as dead weight to
    be starved, not managed.
