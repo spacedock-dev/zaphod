@@ -1,6 +1,11 @@
-# Docking via layouts — findings and proposed approach
+# Docking via layouts — prototype findings and shipped approach
 
-> Investigation date: 2026-06-20 · adopted architecture validated 2026-07-02
+> **Historical prototype record.** This document explains the shipped Zellij
+> WASM dock and its current-tab retrofit experiments. It is not the product
+> architecture. The evergreen direction uses one managed tab or window and is
+> defined in [`docs/zaphod-workspace-architecture.md`](zaphod-workspace-architecture.md).
+>
+> Investigation date: 2026-06-20 · shipped prototype validated 2026-07-02
 > zellij CLI 0.44.1 · `zellij-tile` locked at 0.44.3
 > Scope: replace the runtime `embed_multiple_panes` + resize-hysteresis dock with a
 > layout-driven docked tile. Supersedes the "runtime tiled docking is unwinnable"
@@ -14,7 +19,7 @@ The sidebar has two presentation modes:
   `:492`). x=0, fixed width, ~97% height, pinned. The only runtime-exact placement,
   but it **overlays** — it does not reserve space, so the underlying panes keep their
   full width and the rail sits on top of them. The rail machinery is deleted under
-  the adopted architecture (below).
+  the shipped prototype architecture (below).
 - **Docked tile** — the mode the user actually wants: a left column that **reserves
   space**, pushing the other panes aside.
 
@@ -169,7 +174,7 @@ than the swap path.
 ### Summon — floating pinned rail (superseded)
 
 This proposal kept `float_as_rail` / `rail_coordinates` for an on-demand summon in tabs
-that lack the layout (SPEC #12). The adopted architecture (below) supersedes it: the
+that lack the layout (SPEC #12). The shipped prototype architecture (below) supersedes it: the
 sidebar exists in every tab's layout, the retrofit override covers tabs without the
 swap set, and the summon machinery is deleted.
 
@@ -243,7 +248,7 @@ cycle never touched the session's vertical/horizontal/stacked swaps). The
 runtime-dock machinery (`fn dock`, `embed_multiple_panes`, the
 `dock_steps`/`docked`/`TARGET_COLS`/`MAX_DOCK_STEPS` state) is retired; the `⇄`
 header control also calls `next_swap_layout()`. Floating-rail summon was kept at
-the time for tabs without a docked instance; the adopted architecture (below)
+the time for tabs without a docked instance; the shipped prototype architecture (below)
 deletes it.
 
 **Caveats found during live validation:**
@@ -259,7 +264,7 @@ deletes it.
   (a CLI `zellij pipe` with a mismatched `--plugin-configuration` spawns a new
   floating instance instead of reaching the docked one).
 
-## Adopted architecture (validated live, 2026-07-02)
+## Shipped prototype architecture (validated live, 2026-07-02)
 
 The end state, mirroring yazelix's model:
 
@@ -697,7 +702,7 @@ minimal grant set is `ReadApplicationState` + `ChangeApplicationState` +
 
 ### What the rework deleted — and what it kept
 
-The adopted architecture removed the summon/spawn machinery and the degraded
+The shipped prototype architecture removed the summon/spawn machinery and the degraded
 absorb path. The former leader-election state was **kept and repurposed** for
 the relaxed election, not deleted — a distinction that matters because an
 earlier plan slated it for removal.

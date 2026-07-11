@@ -3,7 +3,7 @@
 > Prototype plan: 2026-07-07 · target architecture:
 > `docs/zaphod-workspace-architecture.md`
 > agentsview v0.36.1 · subspace recon at HEAD 9be5fbc · zellij CLI 0.44.1
-> Dock container shipped at v3.12 (`docs/docking-approach.md`, adopted architecture)
+> Dock container shipped at v3.12 (`docs/docking-approach.md`, historical prototype)
 > The shipped Zellij rail remains a prototype. New product work follows the
 > managed-view, hub, driver, dock, and provider boundaries below.
 
