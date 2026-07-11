@@ -1,17 +1,19 @@
 ---
-title: Staff software engineering coherence review for Sprint 1
-status: ideation
+review: v1
+kind: sprint-coherence
+workflow: agent-rail-dev
+status: reviewer-approved
+captain-decision: pending
 source: captain-requested independent full-sprint review after Sprint 1 ideation, 2026-07-11
-started: 2026-07-11T05:59:12Z
-completed:
-verdict:
-score: 1.0
-worktree:
-issue:
-pr:
-mod-block:
-id: 40c5qx8k5spz1y3fsrghyc5n
+source-entity-id: 40c5qx8k5spz1y3fsrghyc5n
+reviewed-tasks:
+  - foreground-attached-client-profile
+  - zaphod-native-cli-skeleton
+  - managed-view-driver-contract
+  - zellij-managed-identity-feasibility
 ---
+
+# Sprint 1 coherence review gate record
 
 ## Problem
 
