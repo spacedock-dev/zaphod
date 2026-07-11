@@ -1,5 +1,5 @@
 ---
-title: First dependable per-tab attention loop
+title: Sprint 2 operator-loop release gate
 status: backlog
 source: outcome-first roadmap Sprint 2, captain direction 2026-07-11
 sprint: s2-dependable-per-tab-attention-loop
@@ -14,10 +14,10 @@ issue:
 pr:
 mod-block:
 id: e6djd6wv1rxvj5zq4wqcw2ja
-group: walking-skeleton
+group: release-gate
 sprint-readiness: defer
-blocked-on: 7h-validation-and-continuity-gate
-blocked-reason: await the 7h validation gate and a continuity drill that identifies the smallest missing behavior
+blocked-on: 7h-validation-and-s2-delivery-task-validation
+blocked-reason: The three outcome tasks may ideate now; this integration gate waits for their validated behavior and the 7h live-profile pass.
 ---
 
 ## Problem
