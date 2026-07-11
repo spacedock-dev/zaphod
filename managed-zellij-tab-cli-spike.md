@@ -111,3 +111,32 @@ Managed-view convergence and native pane adoption work on Zellij 0.44.3. Option 
 ### Summary
 
 The evergreen architecture now makes one managed tab or window the workspace/session binding invariant. A thin Zellij controller owns native key and pane operations, while the portable launcher, hub, dock, and providers retain their independent boundaries; foreign-view retrofit work is no longer on the release path.
+
+## Stage Report: validation
+
+- DONE: Validate the implementation at its dispatched raw commit identity without trusting the implementation report.
+  The clean worktree HEAD was `ee4765cca737e377c00d573689d0fe37aec42bff`; `git diff --check ee4765c^ ee4765c` passed.
+- DONE: AC-1 — Idempotent managed entry.
+  The spec's one-managed-view, stable-ID create-or-focus claims match jk's three calls returning tab ID `2` with no duplicate tab or terminal.
+- DONE: AC-2 — Foreign-tab toggle guard.
+  The spec requires a stable-ID guard and no foreign-view effect, while lines 283-299 explicitly demote the focus-taking, 80x24-to-80x12 CLI `Run` pane to a test harness.
+- DONE: AC-3 — Pane adoption preserves identity.
+  The spec limits adoption to an explicit native move and accurately records pane `0` moving to tab `2` with its PID and the unrelated terminal preserved.
+- DONE: AC-4 — Ownership boundary.
+  Launcher convergence/preflight, controller-native tab and pane operations, and hub/provider/dock responsibilities match the spike inventory without moving product state into WASM.
+- DONE: AC-5 — Failure behavior.
+  Stale ID, duplicate reserved name, missing pane/controller, refusal, preflight, and non-automated `PermissionRequestResult` claims are bounded by jk's durable negative-case evidence.
+- FAILED: Verify the dated design became exactly one evergreen docs/ spec with preserved history, valid references, and no stale competing architecture path.
+  Rename/history and references pass (`R065`, prior commit `c66400d`, old path absent), but `docs/docking-approach.md:3,237-247,279-299` still calls current-tab retrofit the adopted/shipped path; `docs/plan-agent-rail.md:6` reinforces that stale label.
+- DONE: Cross-check every managed-view, keybinding, identity, pane-adoption, permission, and failure claim against the durable spike evidence; reject overclaims or hidden foreign-tab mutation.
+  The new evergreen spec passes line-by-line: both keys target the controller, CLI `Run` is prototype-only, stable IDs fail closed, and pane adoption is explicit and permission-gated.
+- DONE: Audit the revised delivery plan and diagrams for ownership/order consistency, prototype-versus-target clarity, and removal of j5/4d foreign-retrofit work from the release path.
+  Architecture flows preserve launcher/driver/hub/dock/provider ownership; plan steps 1-8 follow that order and park `j5`, `eh`, `fw`, and `4d` outside the release path.
+- DONE: Run an adversarial refutation audit on a disposable checkout.
+  Attacks covered stale-reference false negatives and synonyms, rename false positives/history, caller/reference impact, and semantic drift against the parent spec; executable panic/indexing paths were inapplicable to this docs-only diff.
+- SKIPPED: Re-run the live Zellij drill or prepare a new interactive demo.
+  The dispatch says no live rerun is required unless a claim lacks durable evidence; all revised-spec behavior claims had jk evidence, and the surviving defect is static documentation state.
+
+### Summary
+
+Commit `ee4765c` correctly defines the managed-view target, preserves the dated spec's history, and removes CLI `Run` and foreign-tab mutation from the product path. Validation recommends rejection because `docs/docking-approach.md` still presents the destructive foreign-tab retrofit as the adopted architecture and the revised plan repeats that label. Mark that document explicitly historical/superseded and remove the current “adopted architecture” wording before revalidation.
