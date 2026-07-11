@@ -168,10 +168,11 @@ retrofit docks the rail, installs the swap set, and preserves the tab's
 pane arrangement (falling back to stacking the panes when the tab's
 layout cannot be dumped).
 
-[SPEC.md](SPEC.md) carries the full validated spec, a 23-entry map of
-zellij-plugin landmines this prototype paid for, and the from-scratch v2
-design (manifest-derived state, two-phase command execution, layout-first
-placement).
+[SPEC.md](SPEC.md) records the shipped prototype and its numbered Zellij
+plugin landmines, including the historical rebuild guidance. For the evergreen
+product direction—one managed tab or window, portable dock, workspace hub,
+and multiplexer drivers—see
+[docs/zaphod-workspace-architecture.md](docs/zaphod-workspace-architecture.md).
 
 ## Development
 

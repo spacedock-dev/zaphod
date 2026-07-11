@@ -1,13 +1,40 @@
-# Agent rail — development plan
+# Agent rail — prototype record and workspace delivery plan
 
-> Plan date: 2026-07-07 · verified delivery order included below
+> Prototype plan: 2026-07-07 · target architecture:
+> `docs/zaphod-workspace-architecture.md`
 > agentsview v0.36.1 · subspace recon at HEAD 9be5fbc · zellij CLI 0.44.1
-> Dock container shipped at v3.12 (`docs/docking-approach.md`, adopted architecture)
-> Scope: the grout daemon, the row protocol, and the rail's rows section — M1
-> through the M2 seam. Walking skeleton first; each sprint exits on a demoed
-> criterion, not a checklist.
+> Dock container shipped at v3.12 (`docs/docking-approach.md`, historical prototype)
+> The shipped Zellij rail remains a prototype. New product work follows the
+> managed-view, hub, driver, dock, and provider boundaries below.
 
-## Decisions (grill, CL 2026-07-07)
+## Target delivery order
+
+Land product work in this order:
+
+1. Define the workspace/session binding and shared managed-view driver
+   contract.
+2. Build the thin Zellij controller and `Alt Shift z` create-or-focus path.
+   Guard `Alt /` by the invoking pane's stable tab ID.
+3. Add explicit pane adoption through the driver. Preserve the pane ID and
+   process PID; never automate consent.
+4. Define the hub's canonical item and local socket contracts.
+5. Build the portable dock TUI against that protocol.
+6. Add the tmux managed-window driver and run the shared driver suite against
+   both multiplexers.
+7. Adapt AgentsView session ingestion, then gate and review providers, behind
+   the hub contract.
+8. Add registered `zaphod notify` ingress and complete create, adopt, and
+   attach acceptance drills.
+
+The canonical install and isolated profile are already load-bearing test
+infrastructure. The foreign-tab retrofit tasks (`j5`, `eh`, `fw`, and `4d`)
+and the upstream transactional-retained-pane request remain parked outside the
+release path. Their evidence defines why Zaphod does not mutate foreign views.
+The `yb`, `7v`, and `pz` branches are prototype evidence and source material;
+rebase or extract them only after their behavior fits the new adapter
+contracts.
+
+## Shipped prototype decisions (2026-07-07)
 
 1. **Identity binding lives in the plugin.** The grout tags session rows with
    `cwd`; the plugin matches against its `PaneManifest`; no match renders as
@@ -29,20 +56,13 @@
    workflow dirs). A canonical gate-log directory is deferred until real
    emitters adopt one.
 
-## Verified delivery order
-
-Land changes in this load-bearing order: canonical install and the isolated
-worktree profile (this task) → j5 → eh → 7v → yb → hj → pz. The profile must
-record current main red and j5 green before j5 lands; eh builds on j5's stable
-one-terminal baseline. Rebase and revalidate yb after 7v, land hj after yb's
-timestamp seam, then rebase pz onto yb and repeat the gate walking skeleton.
-
-Before pz becomes a standing action, add a confirmation step before its
-irreversible approve POST. Its required drill must also fail loudly when the
-pinned `spacedock-subspace` dependency is absent; a skipped test with a green
-suite does not pass the gate.
+These decisions describe the running spike, not the target product boundary.
+They explain the code that exists today and remain useful during extraction.
 
 ## Sprint 0 — walking skeleton
+
+The following sprints record how the shipped prototype was built. They do not
+set the new product's delivery order.
 
 Every joint exercised end to end, nothing polished.
 
@@ -109,8 +129,9 @@ automates the discovery.
 
 ## References & constraints
 
-- Delivery order and safety gates are defined above. Dock container:
-  `docs/docking-approach.md`.
+- Target architecture and delivery order are defined in
+  `docs/zaphod-workspace-architecture.md` and above. The shipped dock
+  container remains documented in `docs/docking-approach.md`.
 - Landmine and seam facts above are from the 2026-07-07 agentsview spike
   (v0.36.1) and subspace recon (HEAD 9be5fbc), cited inline where they bear.
 - Constraints: single-user, single-machine. Row payload size limits are
