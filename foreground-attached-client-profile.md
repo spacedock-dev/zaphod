@@ -5,7 +5,7 @@ status: implementation
 source: managed-view roadmap Sprint 1 entry gate, senior staff review 2026-07-11
 started: 2026-07-11T05:09:21Z
 completed:
-verdict: APPROVED
+verdict: PASSED
 score: 1.0
 worktree: .worktrees/spacedock-ensign-foreground-attached-client-profile
 issue:
