@@ -158,13 +158,14 @@ adapter cannot turn a mismatch into a name-based fallback. Later
 `toggle_managed_layout`, and `open_surface` remain architecture-level
 extensions; they are not part of this Sprint 1 interface or implementation.
 
-Capabilities are negotiated rather than inferred from mux kind:
-`SessionIdentityV1`, `ManagedViewInventoryV1`, `PersistentManagedViewMarkerV1`,
-`CreateMarkedManagedViewV1`, and `FocusManagedViewByStableIdV1`. A driver
-without every capability needed for an operation returns `Unsupported` with no
-fallback mutation. Zellij may not advertise the marker and identity
-capabilities until the native feasibility gate proves them; the fake adapter
-does, allowing the portable core to be implemented and tested independently.
+Capabilities are negotiated rather than inferred from mux kind. The exact v1
+wire tokens, command requirements, and error behavior are frozen in the
+shared-contract addendum below; the CamelCase names used here are type names,
+not alternate advertised capability strings. A driver without every capability
+needed for an operation returns `Unsupported` with no fallback mutation. Zellij
+may not advertise its identity or marker capabilities until the native
+feasibility gate proves them; the fake adapter may advertise them in portable
+tests.
 
 The sibling `zaphod-native-cli-skeleton` packet is the required transport seam:
 
@@ -192,11 +193,12 @@ All portable operations and native envelopes use one tagged result shape:
 ```text
 Outcome<T> =
   | Success { value: T, mutation: Changed | Unchanged }
-  | Failure { error: BindingError, mutation: Unchanged | Indeterminate,
+  | Failure { error: ErrorCodeV1, mutation: Unchanged | Indeterminate,
               diagnostic: NativeDiagnostic? }
 ```
 
-`BindingError` is stable and machine-actionable:
+`ErrorCodeV1` includes the canonical protocol errors in the addendum and these
+stable, machine-actionable binding errors:
 `RegistryCorrupt`, `BindingConflict`, `SessionMissing`, `SessionReplaced`,
 `UnsupportedIdentity`, `ViewIdentityConflict`, `ReservedNameConflict`,
 `DuplicateManagedView`, `RepairRequired`, `Unsupported`, `Busy`,
@@ -227,13 +229,159 @@ invariant validation, inventory classification, and result-state transition)
 plus a deterministic fake adapter. This also prevents review findings F1–F10
 in the retired foreign-tab retrofit from widening this Sprint 1 lane.
 
+## Shared-contract addendum — Sprint 1 gate
+
+This is the concrete reframing required by the staff review's “Cross-packet
+interface and ownership assessment” and “Actionable staff recommendation.” It
+implements roadmap step 2's contract freeze before the three Sprint 1 lanes
+begin; it neither authorizes a Zellij controller nor advertises an unproved
+Zellij identity feature. Sources: `docs/roadmap.md` — “Dispatch and merge
+order”; `sprint-1-staff-coherence-review.md` — “Cross-packet interface and
+ownership assessment.”
+
+### Go binding-core owner and command dispatch
+
+`grout/internal/bindingcore` is the canonical Go owner of `BindingV1`, registry
+locking and atomic writes, canonical-root resolution, reverse uniqueness,
+inventory classification, recovery policy, and the injected `Driver` interface.
+It exposes a `Service`; `grout/internal/zaphodcli` decodes the typed envelope
+and dispatches once to that service; `grout/cmd/zaphod` only owns process
+startup, stdin/stdout, exit classification, and the handshake. Neither shell
+package may open the registry, infer an identity from a name or active client,
+choose a repair, or retry an indeterminate mutation. This uses the existing
+`grout` module while preserving the CLI packet's required command/wire
+boundary. Sources: `grout/go.mod`; `zaphod-native-cli-skeleton.md` —
+“Ownership and artifact boundary”; `docs/roadmap.md` — “Delivery rules.”
+
+| Exact command discriminant | Binding-core destination | Required v1 capability | Boundary |
+| --- | --- | --- | --- |
+| `binding.ensure` | `Service.Ensure` | `binding.ensure.v1` and `driver.session-identity.v1` when the service resolves a session candidate | Registry create/reuse only; no native-view mutation. |
+| `binding.inspect` | `Service.Inspect` | `binding.inspect.v1`; native classification additionally needs the driver capabilities named below | Read-only; the skeleton returns `Unsupported` until this service is linked. |
+| `binding.unbind` | `Service.Unbind` | `binding.unbind.v1` | Removes only the local binding. |
+| `binding.rebind` | `Service.Rebind` | `binding.rebind.v1` and `driver.session-identity.v1` | Replaces the exact session only after reverse-index preflight. |
+| `binding.repair` | `Service.Repair` | `binding.repair.v1`; `ReattachView` additionally needs inventory and marker capabilities | The service, never the CLI, selects the fail-closed repair transition. |
+| `binding.ensure-managed-view` | `Service.EnsureManagedView` | `binding.ensure-managed-view.v1` plus all required driver capabilities | Reserved and unadvertised until native identity evidence accepts it. |
+
+The `zaphod-native-cli-skeleton` packet must route the first five discriminants
+to this service when implemented, and must not acquire registry policy. The
+`zellij-managed-identity-feasibility` packet consumes only the injected driver
+interface and remains unable to rebind, repair, or write registry state.
+
+### Protocol-v1 capability, error, and mutation matrix
+
+All `Handshake`, `CommandEnvelope`, and `ResultEnvelope` values use
+`protocol_version: 1`. A handshake advertises only capabilities actually
+implemented for its selected driver. The initial skeleton therefore advertises
+only `protocol.handshake.v1`, `protocol.invoke.v1`, and `health.v1`; it
+advertises no `binding.*` or `driver.*` token. These exact strings replace any
+CamelCase capability spelling on the wire.
+
+| Layer | Exact v1 capability token | Advertise when | Required by |
+| --- | --- | --- | --- |
+| Transport | `protocol.handshake.v1` | The binary can emit one handshake line. | `zaphod protocol` |
+| Transport | `protocol.invoke.v1` | The binary can read one envelope and emit one correlated result. | `zaphod internal invoke` |
+| Transport | `health.v1` | Side-effect-free health is implemented. | `health` |
+| Binding | `binding.ensure.v1`, `binding.inspect.v1`, `binding.unbind.v1`, `binding.rebind.v1`, `binding.repair.v1` | The corresponding `bindingcore.Service` method is integrated and process-tested. | The same-named command only |
+| Binding | `binding.ensure-managed-view.v1` | The native convergence method and all of its driver preconditions are accepted. | `binding.ensure-managed-view` only |
+| Driver | `driver.session-identity.v1` | A driver returns an exact namespace, native session ID, and incarnation. | Ensure/rebind and native inspection |
+| Driver | `driver.managed-view-inventory.v1` | A driver returns a fresh exact-session view inventory. | Inspect, repair, and native convergence |
+| Driver | `driver.persistent-managed-view-marker.v1` | A driver can persist and freshly query the exact marker tuple below. | Inspect, repair, and native convergence |
+| Driver | `driver.create-marked-managed-view.v1` | A driver can create a view with that marker and confirm the result. | Native convergence |
+| Driver | `driver.focus-managed-view-by-stable-id.v1` | A driver proves focus by stable ID plus marker. | Native convergence |
+
+`SessionIdentityV1`, `ManagedViewInventoryV1`,
+`PersistentManagedViewMarkerV1`, and `CreateMarkedManagedViewV1` in the
+feasibility packet are the conceptual types for the four corresponding
+`driver.*` tokens above. A fake driver may advertise those tokens during the
+portable suite. Zellij advertises none of them until the feasibility spike
+passes its two-client, persistence/query, replacement, deterministic-ID-reuse,
+and crash-window evidence. Non-observation of ID reuse is not proof: the spike
+must provide a deterministic reuse witness or report an explicit unsupported
+result. `driver.focus-managed-view-by-stable-id.v1` remains absent for Zellij
+until a later focus proof; it is not implied by a successful marker spike.
+
+| Boundary condition | Canonical `ErrorCodeV1` | Required result and effect |
+| --- | --- | --- |
+| Invalid JSON or a missing/wrong required envelope field | `MalformedEnvelope` | Emit one v1 `ResultEnvelope` with the decoded nonempty `request_id`, or `""` when it cannot be decoded; `mutation: Unchanged`; do not dispatch. |
+| Request or handshake protocol major is not 1 | `ProtocolMismatch` | Emit or normalize one v1 failure under the decoded/sent request ID; `mutation: Unchanged`; do not dispatch. |
+| A caller receives a parseable response whose ID differs from its sent ID | `CorrelationMismatch` | Normalize locally to one failure under the sent ID; `mutation: Unchanged`; ignore the response value and do not retry or call a driver. |
+| Unknown command or missing advertised requirement | `Unsupported` | Emit one correlated failure with `mutation: Unchanged`; do not dispatch or fall back. |
+
+`Success` uses `Changed` only after a mutation is observed as complete and
+durable; it uses `Unchanged` for a read, reuse, or no-op. A failure is
+`Unchanged` unless a native mutation was issued and its completion cannot be
+observed; only then it is `Indeterminate`. An `Indeterminate` result requires
+fresh `binding.inspect` before any retry and never permits a name-based second
+create. The CLI packet must implement this matrix in its envelope fixtures;
+the binding-core packet must use it for every service transition; the
+feasibility packet must leave Zellij tokens absent on any failed row.
+
+### Disposable-profile lease and marker-pane handoffs
+
+`foreground-attached-client-profile` must publish one immutable, test-only
+`ProfileLeaseV1` at `$PROFILE_ROOT/profile-lease-v1.json` and print its path
+only after the foreground client is ready. It is an interface, not a standing
+configuration file:
+
+```text
+ProfileLeaseV1 {
+  schema: "zaphod.profile.v1",
+  profile_root: absolute disposable root,
+  namespace: opaque exact private Zellij server namespace,
+  native_session_id: exact disposable session name,
+  primary_client: { pid, pgid },        # OS-observed foreground PGID
+  attach: { zellij_bin, config_dir, data_dir, cache_dir, home_dir,
+            namespace, native_session_id },
+  teardown_owner: "foreground-attached-client-profile"
+}
+```
+
+`namespace` and `native_session_id` must be passed back verbatim, never
+derived from a path, display name, active client, or cwd. This lease does not
+claim an incarnation: `zellij-managed-identity-feasibility` owns the separate
+nonce proof before a `SessionIdentityV1` may be advertised. To attach client B,
+that packet supplies the immutable `attach` inputs plus a distinct test-owned
+PTY and returns an OS-observed `{ pid, pgid }` for B; it owns B's process group,
+temporary controller, permission cache, evidence, and crash barrier. The
+profile packet alone owns the base session, primary client, root, and final
+teardown. The CLI packet owns only `$PROFILE_ROOT/bin/zaphod`; it creates no
+client and may not tear down the lease. Each lane uses a fresh lease for its
+own test run; a later integrated run serializes use of one lease and releases
+the secondary client before the profile performs final cleanup. Sources:
+`foreground-attached-client-profile.md` — “Proposed approach”;
+`zaphod-native-cli-skeleton.md` — “Ownership and artifact boundary”; and
+`zellij-managed-identity-feasibility.md` — “Disposable offline-first harness.”
+
+The portable logical marker and the provisional Zellij marker pane map exactly
+as follows once the spike is allowed to test it:
+
+| Binding-core value | Required marker-pane evidence | Fresh query rule |
+| --- | --- | --- |
+| `BindingV1.binding_id` | Canonical lowercase UUID in plugin configuration `binding_id`; logical marker string is `zaphod.binding.v1/<binding_id>`. | Query matches the UUID exactly, never a reserved tab name. |
+| `BindingV1.session.incarnation` | Plugin configuration `session_incarnation` contains the exact opaque nonce. | Query rejects a missing or different nonce as replacement/conflict. |
+| Marker schema | Plugin configuration `schema == "zaphod.binding.v1"`. | Query rejects missing, altered, or duplicate schema tuples. |
+| Driver-supplied controller URL | The marker pane has the exact test-owned canonical local WASM URL. | Enumerate every tab through `dump_session_layout_for_tab(tab_id)`, structurally parse KDL, then cross-check the same plugin pane ID and URL with `list-panes --json -a -g -t`. |
+
+The fresh controller query returns `{ tab_id, marker_pane_id, controller_url,
+schema, binding_id, session_incarnation }`; `tab_id` becomes the recorded
+native-view locator only after the exact tuple and session match. The
+`marker_pane_id` is fresh-query evidence, not persisted ownership authority.
+The query runs through a fresh controller invocation, never a CLI active-tab
+action or a guessed client. Exactly one matching tuple can support the existing
+healthy or reattach paths;
+zero, malformed, mismatched, or multiple tuples take the existing fail-closed
+unsupported/conflict paths and never focus or create by name. The feasibility
+packet must consume this configuration/query mapping and record its proof or
+negative result; the CLI packet must carry it only through typed commands; the
+profile packet must supply the lease fields without claiming native identity.
+
 ## Riskiest mechanism and live evidence
 
 The riskiest unproven mechanism is Zellij's durable managed-view marker and
-fresh-query path across two attached clients. The spike proved that Zellij tab
-IDs can be stale or reused, so neither an ID nor a reserved name is adequate;
-it did not prove the exact persistent marker owner/query path needed by this
-contract.
+fresh-query path across two attached clients. Existing evidence makes a stale
+or reused tab ID unsafe, but it has not supplied the deterministic native
+ID-reuse witness, persistent marker owner, or query path needed by this
+contract. Neither an ID nor a reserved name is therefore adequate.
 
 The first later feasibility check (owned by
 `zellij-managed-identity-feasibility`, after
@@ -299,9 +447,11 @@ Verified by: a scripted fake adapter that records operation order and exposes
 its inventory only through the next inspection.
 
 **AC-6 — Packet and capability failures are portable and mutation-free.** A
-protocol-major mismatch, missing required capability, unsupported command,
-or request/response ID mismatch produces one typed `ResultEnvelope` failure
-with `Unchanged` and no driver call. A supported request receives exactly one
+malformed envelope returns `MalformedEnvelope`, a protocol-major mismatch
+returns `ProtocolMismatch`, a response-ID mismatch normalizes to
+`CorrelationMismatch`, and a missing required capability or unsupported command
+returns `Unsupported`. Every failure is one typed `ResultEnvelope` with
+`Unchanged` and no driver call; a supported request receives exactly one
 envelope that preserves its request ID.
 Verified by: prebuilt JSON handshake/envelope fixtures and a no-op fake driver;
 the assertions parse protocol values rather than matching implementation text.
@@ -333,8 +483,8 @@ demonstrations.
    timeout-after-mutation tables. Assert calls, outcomes, and mutation states,
    not prose emitted by the implementation.
 5. Run JSON protocol fixtures for the handshake and one-request/one-response
-   CLI envelope, including protocol-major/capability rejection and request-ID
-   correlation.
+   CLI envelope, including malformed-envelope, protocol-major, capability, and
+   correlation rejection with the frozen `ErrorCodeV1` and mutation outcomes.
 6. Do not run a live Zellij drill, tmux server, controller, or standing
    configuration mutation in this lane.
 
@@ -398,3 +548,20 @@ capability-gated driver contract. It makes recovery explicit after stale IDs or
 indeterminate mutations, gives the native CLI skeleton an interoperable typed
 envelope, and keeps the Zellij marker representation provisional until the
 separate disposable feasibility lane proves it.
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Name the canonical Go binding-core owner and map each binding command to it without assigning registry policy to the CLI shell.
+  The shared-contract addendum assigns `grout/internal/bindingcore` and maps all six discriminants to `Service` methods while limiting `cmd/zaphod` and `internal/zaphodcli` to process and wire boundaries.
+- DONE: Freeze one v1 handshake/capability/error matrix, including correlation and mutation outcomes, with Zellij identity capability absent until native proof.
+  The matrix fixes transport, binding, and driver tokens; canonical `MalformedEnvelope`, `ProtocolMismatch`, and `CorrelationMismatch`; and the only legal `Changed`, `Unchanged`, and `Indeterminate` transitions.
+- DONE: Define the shared profile-test interface and binding-ID-to-marker mapping needed by the CLI and feasibility lanes, with explicit dependency handoffs.
+  `ProfileLeaseV1` assigns the profile, CLI, and second-client teardown boundaries; the marker table binds the UUID and incarnation to KDL configuration plus a fresh structural query.
+
+### Summary
+
+The addendum converts the staff review's three implicit seams into a single,
+testable Sprint 1 contract. It reserves native Zellij behavior until the
+disposable feasibility lane supplies positive evidence or an explicit negative
+result, while allowing the portable binding and native-CLI lanes to proceed on
+one auditable interface.
