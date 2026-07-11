@@ -15,154 +15,349 @@ mod-block:
 
 ## Problem
 
-The managed-view spike proved Zellij mechanisms, but production work has no portable contract for binding one workspace to one multiplexer session and one stable managed view. Define the smallest contract that lets the launcher, Zellij controller, future tmux driver, and shared test suite agree without importing hub, dock, or provider concerns.
+Sprint 1 needs a recoverable binding core that can converge on exactly one
+managed view for a canonical workspace and native session without trusting a
+display name or a reused native ID. The architecture describes that end state,
+but the Zellij spike has not yet proved a durable marker, its owner/query path,
+or a multi-client invocation witness. The binding core must therefore encode
+policy and recovery now while treating Zellij's persisted representation as a
+feasibility-gated adapter detail.
 
 ## Seed direction
 
-Ideation must define binding identity and persistence, `ensure_managed_view`, list/focus/open behavior, driver-neutral errors and capabilities, stable-ID invalidation, fake-driver fixtures, and the boundary between portable launcher logic and native controller operations. It must propose the corresponding revision to the logical dispatch sequence in `docs/plan-agent-rail.md`.
+Freeze the portable identity, registry, recovery, result, and fake-adapter
+contract together with the native CLI packet seam. Do not freeze a Zellij
+socket, tab-marker, controller, layout, pane, or keybinding representation
+before `zellij-managed-identity-feasibility` proves it in the approved
+disposable profile.
 
 ## Dependency boundary
 
-This task is the foundation. It must not implement the Zellij controller, pane adoption, hub, dock, providers, or tmux. Controller implementation may begin only after this contract's ideation gate is approved.
+This task is the contract lane in roadmap Sprint 1. It may run in parallel with
+the native CLI skeleton ideation, then joins it at the shared contract gate.
+The portable registry/fake-adapter lane and the disposable Zellij-feasibility
+lane start only after that gate. No controller, live Zellij drill, standing
+configuration mutation, pane adoption, hub, dock, provider, or tmux product
+work is authorized here.
 
 ## Proposed approach
 
-### Binding identity and persistence
+### Durable identity and registry invariants
 
-Store a small versioned registry at the platform runtime directory under `zaphod/bindings-v1.json`. Create the directory with mode `0700`, the registry with mode `0600`, and guard every read-modify-write with one registry lock. Write a temporary file, sync it, rename it atomically, and sync the directory. One registry makes the two uniqueness rules transactional: one active binding per canonical root and one canonical root per live native session.
+The portable record is versioned and stored in the platform runtime directory
+at `zaphod/bindings-v1.json`. The directory is mode `0700`, the registry is
+mode `0600`, and all read-modify-write operations take one registry lock. A
+write creates a same-directory temporary file, syncs it, renames it atomically,
+then syncs the directory. An interrupted writer therefore leaves a complete
+old or new registry, never a partially written JSON document.
 
 ```text
-Binding {
-  schema: 1,
-  binding_id: UUID,                 # random generation marker
-  canonical_root: absolute real path,
-  workspace_key: sha256(canonical_root bytes),
-  mux: zellij | tmux,
-  session: SessionRef {
-    server_namespace,
-    native_id,
-    incarnation,
-    display_name,
+BindingV1 {
+  binding_id: UUID,                    # generation and desired native marker
+  canonical_root: CanonicalRoot,       # absolute, symlink-resolved path
+  root_key: sha256(canonical_root),    # filename/index aid, not authority
+  mux: MuxKind,
+  session: SessionIdentity {
+    namespace: OpaqueNativeNamespace,
+    native_session_id: OpaqueNativeId,
+    incarnation: OpaqueNativeIncarnation,
   },
-  managed_view: ManagedViewRef? {
-    native_id,
-    marker: binding_id,
-    reserved_name,
+  managed_view: Option<ManagedViewIdentity> {
+    native_view_id: OpaqueNativeId,
+    marker: "zaphod.binding.v1/<binding_id>",
+    reserved_name: advisory only,
   }
 }
 ```
 
-Resolve a workspace by taking the Git top level when present, then resolving symlinks; otherwise resolve the requested directory. The path, not the hash, remains the authoritative identity. The hash only names runtime artifacts.
+`CanonicalRoot` is the Git top level when available, otherwise the requested
+directory, followed by canonical filesystem resolution. Its path is the
+identity; `root_key` is only an index key. `SessionIdentity` is an opaque,
+exact triple supplied by a driver: multiplexer namespace, native session ID,
+and incarnation. A display name is diagnostic only. The core will not create
+or repair a binding unless all three identity fields are supplied with the
+driver's advertised identity capability. In particular, this design does not
+assume a Zellij socket field, marker store, or tab query protocol.
 
-`server_namespace` separates independent native servers. `incarnation` prevents a new same-name session from inheriting an old binding. The Zellij adapter uses the session socket's canonical directory plus file identity (`device`, `inode`, and modification time); a socket rename can recover a renamed session by that identity. The tmux adapter uses the canonical socket identity, native session ID such as `$0`, and `session_created`.
+The registry validates two indexes in one transaction: one active binding per
+canonical root, and one canonical root per `(mux, namespace, native ID,
+incarnation)`. A duplicate, unknown schema, malformed record, or conflicting
+reverse index is a fail-closed `RegistryCorrupt`/`BindingConflict`, never a
+best-effort merge. The previous valid file may be retained as an operator
+selected recovery input; it is never silently substituted.
 
-`binding_id` also marks the managed view. tmux stores it in the window option `@zaphod_binding`. The Zellij controller returns it with its stable tab ID when queried. A reserved display name aids discovery but never proves ownership.
+### View identity, invalidation, and explicit recovery
 
-### Portable convergence
+Stable IDs locate a native view but do not prove ownership. A view is owned
+only when the same exact session identity, stable view ID, and durable marker
+all agree. A reserved display name can find a suspicious candidate for an
+operator, but cannot validate, focus, or create over it.
 
-Implement `ensure_managed_view(binding)` once over a native adapter:
+| Observation from a fresh native inventory | Binding-core result | Native mutation |
+| --- | --- | --- |
+| Recorded ID and marker agree exactly once | `Healthy` | focus is permitted |
+| Recorded ID missing; exactly one matching marker | `RepairRequired(ReattachView)` | none until explicit repair |
+| Recorded ID exists with wrong/missing marker | `ViewIdentityConflict` | none |
+| Recorded ID missing; only reserved name exists | `ReservedNameConflict` | none |
+| More than one matching marker | `DuplicateManagedView` | none |
+| Session namespace, ID, or incarnation differs | `SessionReplaced` | none; require `--rebind` |
+| Native inspection cannot establish identity/marker | `UnsupportedIdentity` | none |
 
-1. Acquire the registry lock and re-read the binding.
-2. Resolve the session by namespace, native ID, and incarnation. Reject a replaced session.
-3. List native views and validate the recorded view by stable ID, marker, and reserved name.
-4. If the ID is stale but exactly one view carries the marker, recover that view and persist its ID.
-5. If no marked or reserved view exists and the session incarnation matches, create one view with the existing `binding_id`, persist its returned stable ID, and focus it.
-6. If the exact view exists, focus it only when needed.
-7. Reject every duplicate marker, unmarked reserved name, reused stable ID, or indeterminate native result without creating another view.
-
-The marker closes the crash window between native creation and registry persistence. A retry discovers the marked view rather than creating a duplicate. The registry lock serializes two local launchers.
-
-### Native adapter and public operations
-
-The portable layer exports these logical operations:
-
-```text
-ensure_workspace(root, mux, requested_session?) -> Binding
-ensure_managed_view(binding, invocation?) -> Created | Recovered | Focused | AlreadyFocused
-current_view(invocation) -> NativeViewRef
-list_panes(binding) -> [PaneInfo]
-focus_pane(binding, pane_id) -> Focused
-adopt_pane(binding, pane_id, explicit_intent) -> Adopted
-toggle_managed_layout(binding, invocation) -> Toggled | IgnoredForeignView
-open_surface(binding, trusted_launch) -> Opened
-session_exists(session_ref) -> bool
-```
-
-The shared implementation calls narrow adapter primitives: inspect session, list views, create marked view, focus stable view, resolve invoking pane/view, list/focus/move panes, toggle native layout, and open a trusted surface. Native adapters return observations; they do not choose rebind, repair, or conflict policy.
-
-Capabilities are explicit: `CreateManagedView`, `ResolveInvocation`, `FocusPane`, `AdoptPane`, `ManagedLayoutToggle`, `PopupSurface`, and `SplitSurface`. Zellij advertises layout toggle and pane adoption. tmux may omit `ManagedLayoutToggle`; the first release does not invent a cross-multiplexer toggle. Unsupported capabilities return `Unsupported` without fallback mutation.
-
-### Error and mutation model
-
-Every error has a stable kind and a mutation state, `Unchanged` or `Indeterminate`:
+The recovery verbs are deliberately distinct:
 
 ```text
-SessionMissing | SessionReplaced | ViewMissing | ViewIdentityConflict
-ReservedNameConflict | DuplicateManagedView | PaneMissing | StaleInvocation
-ControllerUnavailable | PermissionDenied | Unsupported | Busy
-PersistenceFailure | NativeFailure
+binding.inspect(root | binding_id) -> BindingInspection       # read-only
+binding.unbind(binding_id, explicit_intent) -> Unbound        # registry only
+binding.rebind(root, new_session, --rebind) -> Rebound        # atomic index swap
+binding.repair(binding_id, action) -> Repaired | RepairRequired
+ensure_managed_view(binding_id) -> Created | Focused | Healthy
 ```
 
-Preflight and identity errors must report `Unchanged`. A timed-out or disconnected native mutation reports `Indeterminate`; the caller re-inspects state before retrying and never issues a blind second mutation. Native stderr and exit status remain diagnostic fields, not portable error kinds.
+`inspect` never changes the registry or native session. `unbind` removes only
+the local association; it never deletes a user-facing native view or session.
+`rebind` is an explicit, atomic replacement after both old and new identities
+pass preflight and the reverse index is free. `repair(ReattachView)` may update
+the recorded stable ID only when an exact session has exactly one matching
+marker; `repair(RestoreRegistry)` validates an operator-provided prior record
+before atomically installing it. Other states remain visible failures. Normal
+`ensure_managed_view` creates only when the binding has no recorded view and
+the driver can create a marked view; it never turns a stale ID, name match,
+or indeterminate prior mutation into a second create.
 
-Stable IDs are necessary but insufficient. An ID with the wrong marker is `ViewIdentityConflict`, even when its name matches. A missing ID plus one matching marker is recoverable. A missing ID plus no marker and no reserved name is repairable only in the same session incarnation. A same-name session with a different incarnation requires explicit `--rebind`.
+This makes the create-before-persist crash window recoverable without guessing:
+after a known native create but failed registry write, `inspect` can expose a
+single marker candidate and the user can choose `repair`; after an
+`Indeterminate` native create, every retry begins with inspection rather than
+another mutation.
 
-### Ownership boundary
+### Minimal driver-neutral seam and native CLI packet
 
-The portable launcher owns canonical roots, the registry, locking, uniqueness, convergence, recovery, capability checks, and user-facing errors. Native drivers own observation and the smallest multiplexer mutations. The Zellij controller owns invocation context, tab marker reporting, guarded swap steering, and `break_panes_to_tab_with_id`. The tmux adapter owns socket/session/window/pane commands and native marker options. Hub items, provider parsing, review policy, dock rendering, and permission consent remain outside every driver.
+Sprint 1 freezes only binding operations, not the future pane, dock, provider,
+or layout surface. The portable core calls an adapter through these narrow
+operations:
+
+```text
+inspect_session(candidate) -> SessionObservation
+inspect_managed_views(exact_session) -> [ViewObservation]
+create_marked_view(exact_session, marker, reserved_name) -> ViewObservation
+focus_managed_view(exact_session, native_view_id, marker) -> Focused
+```
+
+Every observation returns the native opaque IDs plus the evidence needed to
+verify them. Every mutation accepts expected identity/marker values, so an
+adapter cannot turn a mismatch into a name-based fallback. Later
+`current_view`, `list_panes`, `focus_pane`, `adopt_pane`,
+`toggle_managed_layout`, and `open_surface` remain architecture-level
+extensions; they are not part of this Sprint 1 interface or implementation.
+
+Capabilities are negotiated rather than inferred from mux kind:
+`SessionIdentityV1`, `ManagedViewInventoryV1`, `PersistentManagedViewMarkerV1`,
+`CreateMarkedManagedViewV1`, and `FocusManagedViewByStableIdV1`. A driver
+without every capability needed for an operation returns `Unsupported` with no
+fallback mutation. Zellij may not advertise the marker and identity
+capabilities until the native feasibility gate proves them; the fake adapter
+does, allowing the portable core to be implemented and tested independently.
+
+The sibling `zaphod-native-cli-skeleton` packet is the required transport seam:
+
+```text
+zaphod protocol
+  -> Handshake { protocol_version, cli_version, capabilities }
+
+zaphod internal invoke   # one JSON request on stdin, exactly one JSON response
+  <- CommandEnvelope { protocol_version, request_id, command }
+  -> ResultEnvelope  { protocol_version, request_id, outcome }
+```
+
+The handshake's protocol major must match before any command runs; the caller
+compares advertised capabilities with the command's required capabilities and
+fails before invocation when they are missing. `internal invoke` echoes the
+same `request_id`, emits exactly one envelope even for errors, and rejects an
+unsupported command without native mutation. The skeleton may initially expose
+only inert `health` and `binding.inspect`; this task requires their envelope
+behavior, not managed-view behavior or a particular Zellij payload.
+
+### Typed result and mutation model
+
+All portable operations and native envelopes use one tagged result shape:
+
+```text
+Outcome<T> =
+  | Success { value: T, mutation: Changed | Unchanged }
+  | Failure { error: BindingError, mutation: Unchanged | Indeterminate,
+              diagnostic: NativeDiagnostic? }
+```
+
+`BindingError` is stable and machine-actionable:
+`RegistryCorrupt`, `BindingConflict`, `SessionMissing`, `SessionReplaced`,
+`UnsupportedIdentity`, `ViewIdentityConflict`, `ReservedNameConflict`,
+`DuplicateManagedView`, `RepairRequired`, `Unsupported`, `Busy`,
+`PermissionDenied`, `PersistenceFailure`, and `NativeFailure`.
+
+Preflight, parsing, capability, identity, and registry errors are
+`Unchanged`. `Indeterminate` is legal only after a native mutation was issued
+and completion cannot be observed (timeout, disconnect, or ambiguous native
+exit). It forbids a blind repeat: the next action must be `binding.inspect`,
+which may yield a repair path or a visible failure. Native stderr, exit code,
+and raw payload are diagnostics, never portable error identities.
+
+### Ownership and test boundary
+
+The portable launcher owns canonical-root resolution, registry locking and
+atomicity, both uniqueness rules, policy, capability checks, recovery choices,
+and user-facing remediation. A native driver owns only truthful observations
+and the smallest requested native mutation. The future Zellij controller owns
+its proved invocation witness and marker implementation; it must not decide
+rebind/repair policy. No tmux product adapter is built in this sprint.
+
+There is no existing product pure function to extend. The prototype's
+`src/main.rs::normalize_cwd` is intentionally not reused: it is an exact-text
+row-binding helper, while this contract requires filesystem canonicalization
+and a reverse-unique session identity. The implementation begins with new,
+isolated pure binding-domain functions (canonical-root resolution, registry
+invariant validation, inventory classification, and result-state transition)
+plus a deterministic fake adapter. This also prevents review findings F1–F10
+in the retired foreign-tab retrofit from widening this Sprint 1 lane.
 
 ## Riskiest mechanism and live evidence
 
-The riskiest mechanism is crash-safe recovery when a native stable ID disappears or is reused. The managed-tab spike observed Zellij return tab ID `2` for a failed creation and later reuse `2` for a different tab. Therefore, a stable ID or reserved name alone cannot prove ownership.
+The riskiest unproven mechanism is Zellij's durable managed-view marker and
+fresh-query path across two attached clients. The spike proved that Zellij tab
+IDs can be stale or reused, so neither an ID nor a reserved name is adequate;
+it did not prove the exact persistent marker owner/query path needed by this
+contract.
 
-A disposable tmux 3.6a server exercised the marker model. Session `$0`, managed window `@1`, and pane `%0` survived a rename, a move from index `1` to `5`, focus by stable ID, and `join-pane`; pane `%0` retained PID `26671`. Killing `@1` and creating the same reserved name produced `@2` without a marker. Adding marker `7df0f1d7-test-generation` made exactly one recovery candidate: `@2|zaphod-managed|7df0f1d7-test-generation`. Killing same-name session `$0` and recreating it on the same socket produced `$2` with a different `session_created`. These observations come from tmux's native IDs, PIDs, timestamps, and window options, not contract prose.
+The first later feasibility check (owned by
+`zellij-managed-identity-feasibility`, after
+`foreground-attached-client-profile` passes) is deliberately small: in an
+isolated Zellij 0.44.3 profile with two attached clients, invoke the proposed
+native controller from one client to create a candidate marked view, then use
+a fresh invocation from the other client to enumerate and return the exact
+same session identity, stable view ID, and marker. Kill the initiating helper
+after native creation but before portable persistence, then prove that a
+second inspection finds exactly one marker candidate rather than creating a
+second view. A missing durable marker/query witness, a mismatched invocation
+identity, or an ambiguous inventory rejects this design and sends it back to
+the shared contract gate. No live Zellij or tmux drill is run by this task.
 
 ## Acceptance criteria
 
 ### Offline
 
-**AC-1 — Registry uniqueness and atomicity.** Concurrent attempts to bind one root to two sessions, or one session to two roots, yield one committed binding and one conflict; a killed writer leaves either the old complete registry or the new complete registry.
-Verified by: process-level tests against a temporary runtime directory, with two independently started writers and JSON parsing after forced termination.
+**AC-1 — One owned view is the measurable end value.** From a test-harness
+inventory with one exact session and no managed view, concurrent
+`ensure_managed_view` calls, retries, and a simulated post-create crash leave
+exactly one view carrying the binding marker, one root-to-session entry, one
+session-to-root entry, and one `create_marked_view` call. A fixture that starts
+with two marked views must fail rather than choose one.
+Verified by: independently owned, barrier-controlled fake-adapter inventory
+and call log plus separately started process tests; expected counts are in the
+test harness, not in the registry implementation.
 
-**AC-2 — Exactly one managed view.** Two concurrent `ensure_managed_view` calls against an unbound fake session call `create_marked_view` exactly once and return the same stable view ID and marker.
-Verified by: a barrier-controlled fake adapter whose call log and final inventory are owned by the test harness.
+**AC-2 — Registry uniqueness survives concurrency, interruption, and bad
+state.** Attempts to bind one canonical root to two different exact sessions,
+or one exact session to two roots, produce one durable binding and one typed
+conflict. A killed writer leaves a parseable old or new complete registry;
+unknown schema, malformed JSON, and a broken reverse index return
+`RegistryCorrupt` with `Unchanged`.
+Verified by: temporary-runtime process tests that force termination before and
+after rename, then parse fixtures authored by the test harness in a new
+process.
 
-**AC-3 — Crash recovery and ID reuse fail closed.** A stale recorded ID plus one matching marker recovers without creation; a reused ID with the wrong marker, an unmarked reserved name, or duplicate markers returns the specified conflict with zero mutation calls.
-Verified by: table-driven fake inventories plus the native Zellij ID-reuse and tmux `@1` to `@2` observations above.
+**AC-3 — Stable-ID invalidation fails closed.** The fresh-inventory table maps
+a missing recorded ID plus exactly one marker to `RepairRequired`, a reused ID
+with wrong marker to `ViewIdentityConflict`, an unmarked reserved name to
+`ReservedNameConflict`, duplicate markers to `DuplicateManagedView`, and any
+changed session identity to `SessionReplaced`; all make zero native mutations.
+Verified by: table-driven fake inventories that model opaque IDs and markers,
+with call counts and expected status tags supplied outside the code under test.
 
-**AC-4 — Session incarnation prevents accidental inheritance.** Rename with the same incarnation updates the native name; a same-name session with a different incarnation returns `SessionReplaced` and performs no view mutation.
-Verified by: fake socket identities and a disposable native socket/session replacement fixture.
+**AC-4 — Inspect, unbind, rebind, and repair are safe and explicit.**
+`inspect` performs no registry or native mutation; `unbind` removes only the
+local association; `rebind --rebind` atomically preserves reverse uniqueness;
+and `repair(ReattachView)` updates a stable ID only for exactly one
+same-session marker candidate. Every other repair candidate remains a visible
+failure.
+Verified by: temporary-registry tests plus fake-adapter call logs that assert
+the independently specified mutation count for each command.
 
-**AC-5 — Capability and error portability.** Each adapter maps native failures to the same stable kinds and mutation states; an unsupported operation performs no native fallback.
-Verified by: the shared driver suite run against fake Zellij and tmux adapters with externally supplied exit statuses and inventories.
+**AC-5 — An indeterminate native mutation is never blindly repeated.** A fake
+that accepts `create_marked_view` then times out produces `NativeFailure` with
+`Indeterminate`; the next `ensure` inspects inventory and never issues a
+second create or focus until a safe repair outcome is known.
+Verified by: a scripted fake adapter that records operation order and exposes
+its inventory only through the next inspection.
 
-**AC-6 — Pane and invocation guards.** Foreign invocation returns `IgnoredForeignView` with zero layout calls; managed invocation issues one toggle. Adoption requires explicit intent and, when supported, preserves native pane ID and process identity.
-Verified by: fake call counts and the prior Zellij pane `0`/PID `18723` plus tmux pane `%0`/PID `26671` live observations.
+**AC-6 — Packet and capability failures are portable and mutation-free.** A
+protocol-major mismatch, missing required capability, unsupported command,
+or request/response ID mismatch produces one typed `ResultEnvelope` failure
+with `Unchanged` and no driver call. A supported request receives exactly one
+envelope that preserves its request ID.
+Verified by: prebuilt JSON handshake/envelope fixtures and a no-op fake driver;
+the assertions parse protocol values rather than matching implementation text.
 
 ### Interactive
 
-This contract changes no production keybinding or view. The later Zellij-controller and pane-adoption tasks own the captain's `Alt Shift z`, guarded `Alt /`, and move-pane demonstrations.
+No interactive acceptance criterion belongs to this contract-only task. It
+changes no keybinding, row, layout, or production view. The later isolated
+Zellij feasibility task owns the two-client marker drill; the later controller
+and pane-adoption tasks own `Alt Shift z`, guarded `Alt /`, and move-pane
+demonstrations.
 
 ## Test plan
 
-1. First invalidate the design with the crash-window table: stale ID plus matching marker must recover; stale/reused ID without the marker must not focus or create.
-2. Exercise registry locking, atomic replacement, process death, reverse uniqueness, and permission modes in a temporary runtime directory.
-3. Run the same convergence tables against a deterministic fake adapter: absent, existing, recovered, renamed session, replaced session, reserved-name collision, duplicate marker, native timeout, and persistence failure.
-4. Assert exact adapter call sequences and mutation counts, not messages written by the implementation.
-5. Run a disposable Zellij profile and tmux socket for stable IDs, markers, focus, replacement, and pane identity; never use `WORK` or standing configuration.
+1. **Later, and first before any Zellij implementation:** after the attached
+   profile gate, run the bounded two-client disposable Zellij marker/query and
+   create-before-persist crash check described above. It is a feasibility-task
+   check, not work authorized for this task; failure rejects the provisional
+   representation rather than adding a name-based workaround.
+2. Build pure tests for canonical-root resolution, `SessionIdentity` equality,
+   registry schema validation, reverse-index validation, and classification of
+   a supplied view inventory.
+3. Run independently started temporary-runtime writers through lock contention,
+   root/session conflicts, atomic rename interruption, corrupt-file detection,
+   unbind, rebind, and operator-selected registry restoration.
+4. Run the deterministic fake adapter through absent, healthy, stale ID,
+   unique marker candidate, wrong marker, reserved-name collision, duplicate
+   marker, replaced session, capability absence, persistence failure, and
+   timeout-after-mutation tables. Assert calls, outcomes, and mutation states,
+   not prose emitted by the implementation.
+5. Run JSON protocol fixtures for the handshake and one-request/one-response
+   CLI envelope, including protocol-major/capability rejection and request-ID
+   correlation.
+6. Do not run a live Zellij drill, tmux server, controller, or standing
+   configuration mutation in this lane.
 
 ## Proposed delivery-plan revision
 
-Replace the first two items under `docs/plan-agent-rail.md` → `Target delivery order` with:
+The task has no user-visible document diff: it intentionally changes no
+keybinding, row, layout, or behavior. Its planning-only proposal is to amend
+`docs/plan-agent-rail.md` → `Target delivery order` as follows:
 
-1. Define and implement the binding registry, driver-neutral types, error/capability model, fake adapter, shared contract suite, and generic managed-view convergence.
-2. Build the thin Zellij adapter/controller against that suite. Add `Alt Shift z` create-or-focus and guard `Alt /` by the invoking pane's stable tab ID and binding marker.
+1. Replace item 1 with: “Freeze and implement the canonical-root/session
+   binding registry, full session identity, reverse uniqueness,
+   inspect/unbind/rebind/repair commands, typed mutation-aware results, fake
+   adapter, and shared convergence suite. Keep native Zellij identity and
+   marker representation provisional until its feasibility gate.”
+2. Prefix item 2 with: “After the Sprint 1 shared contract and native-identity
+   gates pass,” and retain its controller/keybinding scope unchanged.
+3. Add a sequencing note that the roadmap’s Sprint 1 gate allows three later
+   parallel lanes—native artifact wiring, portable registry/fake suite, and
+   disposable Zellij feasibility—but forbids controller work before their
+   reconciliation.
 
-Keep current items 3–8 unchanged. This makes the fake contract and crash recovery executable before native controller work begins.
+This aligns the older product-order prose with `docs/roadmap.md` without
+changing the binding-in-plugin, Go grout, or `agent-event` decisions that
+remain scoped to the shipped prototype.
 
 ## Out of scope
 
-The Zellij controller implementation; production keybindings; pane-adoption UI; hub, dock, or provider protocols; tmux production code; cross-multiplexer layout toggle semantics; persistent item state; automatic rebind; automated permission consent; a global daemon; and any foreign-view retrofit.
+Implementing the registry, native CLI, controller, keybindings, pane adoption,
+hub, dock, providers, tmux product adapter, layout-toggle semantics, persistent
+item state, automatic rebind, automated permission consent, a global daemon,
+foreign-view retrofit, live Zellij drills, and standing multiplexer
+configuration changes. The task specifies only the portable contract and the
+proofs that later stages must supply.
 
 ## Stage Report: ideation
 
@@ -176,3 +371,20 @@ The Zellij controller implementation; production keybindings; pane-adoption UI; 
 ### Summary
 
 The shared contract treats native stable IDs as locators, not ownership proof. A portable converger owns policy and validates a session incarnation plus managed-view marker; Zellij and tmux adapters expose narrow observations and mutations. The fake contract suite and registry implementation should land before the Zellij controller.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Specify durable canonical-root/session/managed-view identity, marker and stable-ID invalidation, reverse uniqueness, and explicit inspect/unbind/rebind/repair recovery paths.
+  `Durable identity and registry invariants` and `View identity, invalidation, and explicit recovery` define opaque full native identity, transactional indexes, a fail-closed inventory table, and all four recovery verbs.
+- DONE: Freeze the minimal driver-neutral operations, capabilities, and typed error/result envelope including Unchanged versus Indeterminate, aligned with the proposed native CLI handshake.
+  `Minimal driver-neutral seam and native CLI packet` and `Typed result and mutation model` align the contract with `zaphod protocol` and one-request/one-response `zaphod internal invoke` without assuming an unproved Zellij payload.
+- DONE: Provide offline-first atomicity/fake-adapter/concurrency evidence and a bounded plan for later native feasibility; exclude controller, pane adoption, hub, dock, provider, tmux product work, and live Zellij drills.
+  AC-1–AC-6 and the ordered test plan require process/fake-adapter evidence; the first later two-client feasibility check is explicitly delegated behind the attached-profile gate, while `Out of scope` forbids product and live work here.
+
+### Summary
+
+This refresh replaces the earlier premature native assumptions with an opaque,
+capability-gated driver contract. It makes recovery explicit after stale IDs or
+indeterminate mutations, gives the native CLI skeleton an interoperable typed
+envelope, and keeps the Zellij marker representation provisional until the
+separate disposable feasibility lane proves it.
