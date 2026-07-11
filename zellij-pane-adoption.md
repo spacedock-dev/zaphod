@@ -1,9 +1,9 @@
 ---
 id: 1s5n4b0vq2mqcvv8j8gzzfn9
 title: Explicit Zellij pane adoption into the managed tab
-status: backlog
+status: ideation
 source: evergreen workspace architecture delivery step 3 and managed-tab option-2 spike, captain-authorized 2026-07-11
-started:
+started: 2026-07-11T04:21:34Z
 completed:
 verdict:
 score: 0.95
