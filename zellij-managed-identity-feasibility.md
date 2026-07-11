@@ -370,3 +370,30 @@ This alignment rework makes the feasibility lane a well-bounded consumer of
 the foreground lease and a strict producer of either native identity evidence
 or an explicit negative result. No spike, keybinding, controller, or standing
 Zellij configuration was run or changed during this ideation stage.
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Repair AC-O3 evidence or explicitly defer it to implementation with a cited reason.
+  AC-O3 evidence: product HEAD `d9226f2` pins `zellij-tile`/`zellij-utils` 0.44.3 (`Cargo.lock:2735-2752`); `src/main.rs:466-482` maps `TabUpdate.tab_id`, and `src/main.rs:905-924` requests a current `dump_session_layout_for_tab` result and treats that server dump as authoritative. `SPEC.md:73-83,280-286` and `docs/docking-approach.md:777-803` independently establish URL-plus-configuration instance identity, stable-ID routing, and live dump/layout state as the identity oracle.
+  Those sources support the proposed query's available inputs, but not AC-O3's end value: no per-binding marker, full-detach fresh client, structural KDL parser, or tuple result exists yet. That proof is deliberately deferred to implementation, where the test-only controller and leased live harness can exercise it; no live Zellij drill ran in ideation.
+- DONE: Preserve the fail-closed native-identity decision and no-drill boundary.
+  AC-O4 deferred proof remains mandatory: implementation must force and observe native raw-ID reuse, or return correlated `Unsupported` with `mutation: Unchanged` and advertise no Zellij identity capability. A tab ID, position, session name, display name, active client, or cwd is never an ownership fallback; neither a drill nor identity fallback was introduced.
+- DONE: Append a report-only ideation cycle; do not edit product files or redesign scope.
+  Sources inspected exactly: `Cargo.lock:2735-2752`, `src/main.rs:466-482,905-924`, `SPEC.md:73-83,181-184,280-286`, `docs/docking-approach.md:469-480,523-529,777-803`, and `docs/zaphod-workspace-architecture.md:281-294,437-441` at product HEAD `d9226f2`; only this split-root state record changed.
+
+### Summary
+
+The native query design now has auditable, independent source support for its
+live server inputs and URL/configuration carrier, while its durable-marker end
+value remains honestly unproved. Implementation must either demonstrate the
+fresh structural tuple in the leased harness or retain the correlated negative
+result; this report authorizes neither a live drill nor a fallback identity.
+
+### AC-by-AC evidence / deferred proof
+
+- AC-O1 — deferred to implementation: verbatim lease use, B PID/PGID, and release receipts require the foreground artifact plus a real B process; no run occurred here.
+- AC-O2 — deferred to implementation: two PTY key witnesses and one-marker convergence require the leased live controller/harness.
+- AC-O3 — source-supported design, implementation proof deferred: the cited pinned API, stable-ID route, and server URL/configuration oracle support the query inputs; only a fresh post-detach structural tuple can satisfy the AC.
+- AC-O4 — deferred and fail-closed: no deterministic native-ID-reuse witness exists yet; its only acceptable alternative is the correlated `Unsupported`/`Unchanged` negative result with no `driver.*` identity capability.
+- AC-O5 — deferred to implementation: the post-create/pre-persist barrier, fresh inspection, and zero-extra-create check require a live native mutation boundary.
+- AC-O6 — deferred to implementation: temporary-root/hash and B-release evidence require the foreground lifecycle suite around the leased harness.
