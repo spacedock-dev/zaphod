@@ -1,9 +1,9 @@
 ---
 id: qbf5syzpwvpggp2xgnd5asvf
 title: Managed-view binding and shared driver contract
-status: ideation
-source: evergreen workspace architecture delivery step 1, captain-authorized 2026-07-11
-started: 2026-07-11T04:15:01Z
+status: backlog
+source: managed-view roadmap Sprint 1 binding core; reframed by senior staff review 2026-07-11
+started:
 completed:
 verdict:
 score: 0.99
