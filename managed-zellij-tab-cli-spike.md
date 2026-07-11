@@ -159,3 +159,24 @@ Readers can now distinguish the shipped current-tab retrofit prototype from the 
 ### Summary
 
 Commit `ee4765c` correctly defines the managed-view target, preserves the dated spec's history, and removes CLI `Run` and foreign-tab mutation from the product path. Validation recommends rejection because `docs/docking-approach.md` still presents the destructive foreign-tab retrofit as the adopted architecture and the revised plan repeats that label. Mark that document explicitly historical/superseded and remove the current “adopted architecture” wording before revalidation.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: Independently inspect the exact two-doc correction after `ee4765c` at raw commit `4d2ca749a4493fbdb34a42801de88107e25f2fa9`.
+  Only `docs/docking-approach.md` and `docs/plan-agent-rail.md` changed; the worktree was clean and `git diff --check ee4765c..4d2ca74` passed.
+- DONE: Confirm `docs/docking-approach.md` is now unmistakably historical prototype evidence and preserves useful retrofit findings without presenting that file itself as product direction.
+  Its opening notice says “Historical prototype record,” “not the product architecture,” links the evergreen spec, and renames its internal heading to “Shipped prototype architecture.”
+- DONE: Confirm `docs/plan-agent-rail.md` no longer calls the docking document adopted architecture.
+  Line 6 now labels the v3.12 dock container “historical prototype,” while the managed-view target order and evergreen link remain intact.
+- DONE: Re-run old-path/title/status, link/path, formatting, rename, and history checks.
+  The old dated path/title/status are absent, link targets exist, the original move remains `R065`, and `git log --follow` reaches `c66400d` through `ee4765c`.
+- FAILED: Complete the focused repository-wide contradiction and stale target-claim audit.
+  `SPEC.md:157-159` still calls the every-tab sidebar model “the adopted architecture,” and `SPEC.md:367-394` recommends first-toggle retrofit as “v2 from scratch,” including another “Adopted architecture” citation at line 387.
+- DONE: Confirm the prior managed-view and spike acceptance evidence remains unaffected.
+  The evergreen architecture blob is identical at `ee4765c` and `4d2ca74`; AC-1 through AC-5 and jk's stable-ID, guard, adoption, permission, and failure evidence therefore remain unchanged.
+- SKIPPED: Re-run live Zellij.
+  The correction adds no behavior claim and the rejection is a static competing-document contradiction, so the durable live evidence remains sufficient.
+
+### Summary
+
+Recommendation: **REJECTED**. The two-doc correction is accurate and complete in isolation, but root `SPEC.md` still presents the foreign-tab retrofit as adopted and future-facing architecture, contradicting the evergreen managed-view spec. Mark `SPEC.md` as historical prototype evidence and/or rewrite its two target claims to point readers to `docs/zaphod-workspace-architecture.md`, then rerun the repository-wide search.
