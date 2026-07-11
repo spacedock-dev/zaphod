@@ -323,3 +323,16 @@ observed the actual primary foreground client, allowing later lanes to reuse
 the disposable profile without inheriting lifecycle or identity authority.
 The raw-key canary, signal cleanup, root removal, and standing-file isolation
 remain the foreground lane's proof; no captain-live drill was run or claimed.
+
+## Stage Report: implementation
+
+- DONE: Prove a raw PTY nonce reaches exactly one real disposable terminal before lease exposure.
+  `./tests/zellij-install-profile-test.sh all` passed the independent PTY-driver raw-master canary, sole-pane `list-panes`/`dump-screen` proof, and both early-file and early-`PROFILE_LEASE` rejection fixtures; see `a82bdcd`, `983460a`, and `0be78f5`.
+- DONE: Prove normal, INT, TERM, and HUP cleanup reaps processes and removes session/root without global config changes.
+  The same full suite passed normal, INT, TERM, HUP, forced-cleanup, no-TTY, and standing-config hash cases; the launcher reaps its foreground client group and removes only the private session/root (`c79551b`, `f0b5ea7`, `f799c90`).
+- DONE: Prove ProfileLeaseV1 is one-shot, immutable, exact, and bounded; record red/green test evidence.
+  Red evidence was `FAIL: timed out waiting for profile value PROFILE_LEASE`; green evidence is the full suite's exact schema/path/PID/PGID/digest/mode checks plus bounded private-session queries and early-publication rejection (`9069381`, `0be78f5`).
+
+### Summary
+
+The foreground launcher now owns one direct Zellij client, a private disposable profile, and an immutable test-only lease published only after the independent PTY observation and raw-terminal proof. Full shell, Rust, and Go verification passed (`132` Rust tests); README guidance makes the real-key path and isolation boundary explicit. No captain-live drill was run or claimed.
