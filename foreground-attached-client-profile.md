@@ -1,9 +1,9 @@
 ---
 id: 7hm8rw9kzp9m2chdmbe721qr
 title: Foreground attached-client disposable Zellij profile
-status: backlog
+status: ideation
 source: managed-view roadmap Sprint 1 entry gate, senior staff review 2026-07-11
-started:
+started: 2026-07-11T05:09:21Z
 completed:
 verdict:
 score: 1.0
