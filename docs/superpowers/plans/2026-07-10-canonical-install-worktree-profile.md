@@ -74,15 +74,15 @@
 - Modify: `README.md`
 - Modify: `docs/docking-approach.md`
 - Modify: `docs/agent-rail-dev/README.md`
-- Modify or create after first-officer clarification: `docs/prd-agent-rail.md`
+- Modify: `docs/plan-agent-rail.md`
 
 **Interfaces:**
 - Consumes: executable commands and verified delivery dependency audit from the approved entity.
-- Produces: canonical-install/candidate-profile operator paths, live-state oracle, global-hash discipline, architecture/data-flow diagram, current-main versus yb/pz boundary, and pz confirmation/fail-loud gates.
+- Produces: canonical-install/candidate-profile operator paths, live-state oracle, global-hash discipline, verified delivery order, and pz confirmation/fail-loud gates.
 
 - [ ] Replace ambiguous build/install examples with the primary-only global path and explicit unmerged-worktree profile path.
 - [ ] Add docking provenance/identity/oracle/hash guidance and correct the workflow dogfood sentence.
-- [ ] Add the approved delivery order and architecture/data-flow section to the authoritative PRD path once clarified.
+- [ ] Add the approved delivery order and safety gates to the tracked development plan.
 - [ ] Rehearse documented commands from the linked worktree and review the diff against AC-1 through AC-5.
 - [ ] Commit documentation as one operator-contract change.
 
