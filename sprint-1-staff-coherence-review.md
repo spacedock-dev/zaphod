@@ -218,3 +218,96 @@ workspace behavior.
 This evidence-only repair makes the existing recommendation auditable against
 the authoritative roadmap, architecture, and four task records. It leaves the
 recommendation, review scope, product files, and task designs unchanged.
+
+## Fresh independent re-review — Sprint 1 coherence (cycle 3)
+
+### Recommendation
+
+**APPROVE.** I independently re-read the current four packets, the roadmap,
+the architecture, and the earlier staff review. The revised packets now close
+the prior material design seams without promoting an unproved Zellij behavior
+to product scope. The approval is for the Sprint 1 ideation contract and its
+gated implementation sequence, not for a controller, a production keybinding,
+or a live-identity claim.
+
+### Prior material findings: closure check
+
+| Earlier material finding | Independent closure assessment | Evidence |
+| --- | --- | --- |
+| Binding-core ownership and command routing were implicit. | **Closed.** `grout/internal/bindingcore` owns binding state, registry policy, recovery, and the injected driver; `grout/internal/zaphodcli` performs one typed dispatch; `grout/cmd/zaphod` remains a process and wire boundary. The five currently eligible binding discriminants have named service destinations, while `binding.ensure-managed-view` is reserved and unadvertised. | `managed-view-driver-contract.md` — “Shared-contract addendum — Sprint 1 gate” / “Go binding-core owner and command dispatch”; `zaphod-native-cli-skeleton.md` — “Ownership and artifact boundary.” |
+| Capability, protocol-error, and mutation semantics could diverge. | **Closed.** One protocol-v1 matrix defines the initial three transport capabilities, delayed binding/driver advertisement, `MalformedEnvelope`, `ProtocolMismatch`, `CorrelationMismatch`, `Unsupported`, and the only legal `Changed`, `Unchanged`, and `Indeterminate` outcomes. The CLI and feasibility packet consume the same matrix. | `managed-view-driver-contract.md` — “Protocol-v1 capability, error, and mutation matrix”; `zaphod-native-cli-skeleton.md` — “Versioned native seam”; `zellij-managed-identity-feasibility.md` — “Contract-freeze prerequisites.” |
+| The foreground profile did not define a safe multi-client handoff or teardown boundary. | **Closed.** The immutable `ProfileLeaseV1` publishes only after the foreground PGID and session readiness checks. The foreground packet owns A, the root, and final teardown; feasibility owns B's PTY, PGID, controller artifacts, evidence, and release; the CLI owns only the lease-scoped candidate binary. B must release before final teardown, and each independent run receives a fresh lease. | `foreground-attached-client-profile.md` — “Proposed approach” and “AC-O2 — the attached client owns the foreground PTY process group before a lease is exposed”; `managed-view-driver-contract.md` — “Disposable-profile lease and marker-pane handoffs”; `zellij-managed-identity-feasibility.md` — “Shared lease and marker-tuple contract.” |
+| Binding identity was not tied to a queryable native marker. | **Closed as a feasibility-gated representation.** The shared tuple maps binding UUID, incarnation nonce, schema, and canonical controller URL into KDL configuration; a fresh controller must structurally query every tab and cross-check the live pane inventory. A name, active client, or bare tab ID cannot substitute. | `managed-view-driver-contract.md` — “Disposable-profile lease and marker-pane handoffs”; `zellij-managed-identity-feasibility.md` — “Shared lease and marker-tuple contract” and “Evidence matrix.” |
+| Reused native IDs could be treated as safe when reuse was merely not observed. | **Closed.** The feasibility harness must deterministically force and observe reuse. If it cannot, it returns correlated `Unsupported` with `Unchanged` and Zellij advertises none of the four identity/inventory/marker/create capabilities; it does not use a name, position, or fallback controller. | `managed-view-driver-contract.md` — “Protocol-v1 capability, error, and mutation matrix”; `zellij-managed-identity-feasibility.md` — “Evidence matrix,” “AC-O4 — Session replacement and deterministic native ID reuse cannot impersonate the original view,” and “Contract-freeze prerequisites.” |
+
+### Coherent delivery and remaining material issue
+
+The dependency order is now hard and mutually compatible:
+
+```text
+foreground PTY + ProfileLeaseV1 gate
+  -> shared binding/CLI contract freeze
+     -> CLI candidate/profile wiring
+     -> bindingcore registry + fake-adapter suite
+     -> disposable two-client Zellij feasibility spike
+  -> native-identity reconciliation and integrated evidence gate
+```
+
+This follows `docs/roadmap.md` — “Dispatch and merge order” and “Sprint
+gates.” The three post-freeze lanes may proceed independently because their
+shared lease rules give the profile lane final teardown ownership and require
+fresh leases per independent run. An integrated run serializes use of one
+lease and releases B before cleanup.
+
+**Remaining material issue: none in the ideation seams.** The still-unproved
+native Zellij identity mechanism is deliberately an implementation gate, not
+an omitted design decision. Before any Zellij identity capability is
+advertised, the native-identity gate must either pass every two-client,
+marker-query, replacement, deterministic-reuse, and crash-window row or emit
+the specified negative `Unsupported` result with no identity capability. That
+is the required next decision; it must not be replaced by an active-client,
+display-name, cwd, or tab-position fallback.
+
+### Acceptance-criteria audit trail
+
+| Acceptance criterion | Fresh review conclusion and supporting record evidence |
+| --- | --- |
+| **AC-1 — The proposed delivery sequence is coherent.** | The foreground gate precedes the contract freeze; only then do the CLI, portable core, and feasibility lanes start; native identity reconciles them before integration. Supporting task records: `foreground-attached-client-profile.md` — “Sprint role”; `managed-view-driver-contract.md` — “Dependency boundary” and “Shared-contract addendum — Sprint 1 gate”; `zellij-managed-identity-feasibility.md` — “Contract-freeze prerequisites.” Authoritative sequence: `docs/roadmap.md` — “Dispatch and merge order.” |
+| **AC-2 — Cross-packet seams are mutually compatible.** | Ownership, envelope semantics, lease handoff, marker query, and negative-capability behavior use one vocabulary without a duplicate policy owner. Supporting task records: `managed-view-driver-contract.md` — “Go binding-core owner and command dispatch,” “Protocol-v1 capability, error, and mutation matrix,” and “Disposable-profile lease and marker-pane handoffs”; `zaphod-native-cli-skeleton.md` — “Ownership and artifact boundary” and “Versioned native seam”; `foreground-attached-client-profile.md` — “Proposed approach”; `zellij-managed-identity-feasibility.md` — “Shared lease and marker-tuple contract.” |
+| **AC-3 — Sprint 1's user value is honest and actionable.** | The planned exit provides a safe foreground disposable profile, a lease-scoped inspectable candidate, and a recoverable binding foundation only where the driver evidence permits it. It does not promise a shipped managed view, production `Alt Shift z`/`Alt /`, adoption, hub, dock, provider, tmux product driver, or global installation. Supporting task records: `foreground-attached-client-profile.md` — “Captain-live” and “Out of scope”; `zaphod-native-cli-skeleton.md` — “Acceptance criteria” and “Out of scope”; `zellij-managed-identity-feasibility.md` — “Captain-live” and “Out of scope.” Authoritative boundary: `docs/roadmap.md` — “Sprint 1 — managed-view foundation and feasibility” and `docs/zaphod-workspace-architecture.md` — “Non-goals.” |
+| **AC-4 — The recommendation gives executable next decisions.** | Preserve the frozen owner/matrix/lease/tuple rules; dispatch implementation only in the stated gate order; record either all required Zellij evidence or the typed negative capability decision; park controller and product behavior until Sprint 2. Supporting task records: `managed-view-driver-contract.md` — “Test plan” and “Out of scope”; `zaphod-native-cli-skeleton.md` — “Test plan”; `zellij-managed-identity-feasibility.md` — “Evidence matrix,” “Test plan,” and “Contract-freeze prerequisites.” |
+
+### Updated Sprint 1 end-user journey
+
+At Sprint 1 exit, an operator can launch the documented foreground disposable
+profile, type into a real terminal, and verify cleanup without changing
+standing Zellij files. After the ready lease exists, the operator can inspect
+the repository-owned candidate at `$PROFILE_ROOT/bin/zaphod protocol`; it is a
+versioned, scoped diagnostic surface, not an installed product launcher. The
+binding core can create, inspect, reconcile, repair, and remove records only
+through exact identity and explicit recovery rules. If the Zellij feasibility
+gate is negative, the same interface reports `Unsupported` with no native
+mutation instead of guessing ownership.
+
+The ordinary managed-workspace journey remains later work: no production
+managed tab, keybinding, layout toggle, pane adoption, workspace hub, dock,
+provider behavior, tmux driver, or installer rollout ships in Sprint 1. This
+matches `docs/roadmap.md` — “Exit criteria” and “Sprint 2 — managed Zellij
+entry and guarded toggle,” plus `zellij-managed-identity-feasibility.md` —
+“Documentation change” and “Out of scope.”
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Independently re-review the revised four-packet Sprint 1 design against the roadmap, architecture, and historical staff findings.
+  All five former material seams now have a named owner, one contract, or a fail-closed feasibility disposition; no current packet claims a production Zellij behavior from unproved evidence.
+- DONE: Verify cross-packet lifecycle and native-identity safety boundaries.
+  `ProfileLeaseV1` separates A/B/client-binary ownership, the KDL tuple binds UUID and incarnation to a fresh query, and deterministic ID reuse now has only a proof-or-`Unsupported` outcome.
+- DONE: Return one recommendation, explicit AC-1 through AC-4 evidence citations, and an honest Sprint 1 exit journey.
+  The result is **APPROVE** for the gated ideation contract; native identity remains a hard implementation gate and product controller behavior remains parked.
+
+### Summary
+
+The revised packets are coherent enough to leave ideation. They preserve the
+roadmap's hard gates, converge on one owner and result vocabulary, and make
+the unresolved Zellij mechanism either demonstrably safe or explicitly
+unsupported before later product work can depend on it.
