@@ -542,3 +542,22 @@ Recommendation: REJECTED. Cycle 4 fixes blocking transcript polling and passes t
 ### Summary
 
 Bounded the last synchronous failure-path operations: oversized lines are processed in deadline-aware chunks and diagnostics expose only a useful 256-byte excerpt that fits without waiting for a blocked consumer. Both cycle-5 refutations are red/green covered, and the complete cold, cleanup, dependency, isolation, Rust, and Go matrices remain green; AC-6 and AC-7 keep their directed dispositions.
+
+## Stage Report: validation (cycle 5)
+
+- DONE: Standard offline verification.
+  Shell passed 13/13; Rust passed 132/check; Go passed 35/vet; missing-dependency behavior, hashes, cleanup, and worktree cleanliness passed.
+- FAILED: Boundary behavior — exactly chunk-sized metadata without a line terminator.
+  The parser accepted the record as complete before a line terminator arrived.
+- FAILED: Boundary behavior — timeout reporting to an output destination with no available capacity.
+  The write extended the whole readiness operation beyond the one-second target.
+- FAILED: AC-4 — Regression coverage is red first and rejects false confidence.
+  Under the existing strict framing, the two boundary cases remain outside the proven deadline contract.
+- SKIPPED: AC-6 — One profile has one candidate identity in a real session.
+  The captain has not driven the real Alt-/ observation; no interactive result is claimed.
+- SKIPPED: AC-7 — The profile supports the j5 red-baseline/candidate drill.
+  It remains deferred until v9 lands and j5 rebases.
+
+### Summary
+
+Recommendation: REJECTED under the existing strict AC-4 framing. Standard behavior is green; because the remaining cases fall outside the profile's required operating conditions, reframe the contract rather than start another repair cycle. AC-6 remains pending the captain, and AC-7 remains deferred to j5.
