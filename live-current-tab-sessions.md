@@ -1,6 +1,6 @@
 ---
 title: Live sessions arrive and lead back to work
-status: ideation
+status: backlog
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
