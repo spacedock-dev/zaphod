@@ -1,9 +1,9 @@
 ---
 id: fp8pn84km859qges2s2ffp5h
 title: Zellij managed-tab controller and guarded keybindings
-status: ideation
-source: evergreen workspace architecture delivery step 2 and managed-tab option-2 spike, captain-authorized 2026-07-11
-started: 2026-07-11T04:15:02Z
+status: backlog
+source: managed-view roadmap Sprint 2 controller delivery; ideation evidence preserved 2026-07-11
+started:
 completed:
 verdict:
 score: 0.98
