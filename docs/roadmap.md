@@ -118,25 +118,43 @@ find the next interruption.
 
 ### Scope
 
-Sprint 2 is one outcome-owned task plus one operator gate. It may reuse the
-current WASM rail and `grout` where they already serve the journey. It may
-change their internals only to close a failure exposed by the continuity gate.
+Sprint 2 is three outcome-owned delivery tasks plus one operator-loop release
+gate. They describe the legs of one journey, not a component sequence. The
+current WASM rail and `grout` remain reusable where they serve that journey.
+
+The three delivery tasks may enter ideation now. Implementation and live
+validation wait for `7h` to pass and for the relevant v1 gate/provider
+contracts to be available. The existing **First dependable per-tab attention
+loop** (`e6`) remains deferred as the integration and release-outcome anchor;
+it is not a generic implementation task. This does not change Sprint 1's
+scope, order, statuses, or paused lanes. It also creates no automatic
+dispatch: active `7h` and the current `4d` state may already occupy the two
+implementation slots.
 
 The sprint does not require a hub, a managed tab, a native launcher, a generic
 provider framework, tmux support, pane adoption, or inline review controls.
 Those are possible later responses to measured limits, not prerequisites.
 
-### Task and gate map
+### Outcome-owned delivery tasks and release gate
 
 | Item | Purpose | Dispatch rule |
 | --- | --- | --- |
-| **First dependable per-tab attention loop** | Own the full journey: one real session, one real pending review, focus, provider-owned open, and truthful post-decision update. | Prefiled with `sprint-readiness: defer`. Ideate only after `7h` passes and the continuity gate names the smallest missing behavior. |
-| **Sprint 2 operator-loop gate** | Reproduce the full live journey with a real session and review provider. | Run after the task's offline checks. A passing gate proves value; it does not authorize unrelated architecture work. |
+| **Live sessions arrive and lead back to work** | A persistent, profile-scoped subscriber performs initial load, SSE updates, reconnect, and periodic list refresh. It uses authoritative top-level-session filtering, binds sessions to the current tab, focuses one unambiguous pane, and expires stale rows. | Ideation is approved now. Implement and validate only after `7h`; reuse `yb`/`hj` evidence, not their stale dispatches. |
+| **Pending gates appear where the work came from** | The v1 gate skill supplies optional origin context. A valid origin maps to its exact tab; missing or malformed origin uses the global fallback. Reconcile only open gates so provider resolution updates or removes the row. Never infer origin from a path, CWD, or title, and never issue an inline verdict. | Ideation is approved now. Implementation waits for the applicable v1 gate/provider contract. |
+| **One v1 review opens and returns cleanly** | After accepting a delegated request, Zaphod opens one visible reviewer surface in the originating tab. The gate skill retains decision and routing semantics; Zaphod tracks the exact surface lifecycle and cleanup. Direct fallback is allowed only before Zaphod accepts. | Ideation is approved now. Implement after `7h` and the v1 review-surface contract; do not add hidden prewarm in this first slice. |
+| **First dependable per-tab attention loop** (`e6`) | Integrate the three legs into one release outcome: a live session and an open gate appear, the right pane focuses, one reviewer opens, and later provider resolution makes the rail truthful. | Remains prefiled and deferred as the integration/release-outcome anchor until the three delivery tasks supply the smallest proven behavior. |
+| **Sprint 2 operator-loop gate** | Reproduce the complete live journey in normal Zellij work and prove truthful post-resolution state. | Run after the integrated offline checks. A passing gate proves value; it does not authorize unrelated architecture work. |
 
 ### Explicit deferrals
 
 - `fp` — the managed-tab controller and guarded keybindings — remains deferred
   until a continuity-gate failure requires managed entry.
+- A hub, managed-tab adoption, and explicit pane adoption remain deferred;
+  they need an observed continuity failure, not architectural preference.
+- Hidden reviewer prewarm or pooling remains deferred until the visible,
+  accepted-delegation slice proves it is needed.
+- Inline verdicts and rail-owned review routing remain deferred permanently:
+  those semantics belong to the provider/gate skill.
 - `1s` — explicit pane adoption — is an optional later capability, pending an
   explicit product decision.
 - `bc`, `qb`, and `6v` remain paused as described in Sprint 1.
