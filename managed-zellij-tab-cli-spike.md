@@ -1,7 +1,7 @@
 ---
 id: jk0e6wnpqcd5c40yhe9pvegh
 title: Managed Zellij tab CLI entry and guarded toggle spike
-status: implementation
+status: validation
 source: captain-approved managed-tab option 2, 2026-07-11
 started: 2026-07-11T03:03:02Z
 completed:
