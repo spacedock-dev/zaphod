@@ -1,7 +1,7 @@
 ---
 id: 6vbb1n6rpv6qy0hs6z3avctx
 title: Zellij managed identity and marker feasibility spike
-status: ideation
+status: backlog
 source: managed-view roadmap Sprint 1 native feasibility lane, senior staff review 2026-07-11
 started: 2026-07-11T05:25:14Z
 completed:
