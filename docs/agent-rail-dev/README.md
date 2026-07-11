@@ -27,9 +27,9 @@ stages:
 
 # Agent-rail development
 
-Builds the zaphod agent rail per `docs/prd-agent-rail.md`, executing the sprint
-plan in `docs/plan-agent-rail.md`: the grout daemon, the row protocol, and the
-rail's rows section — walking skeleton first, then sessions-for-real,
+Builds the zaphod agent rail from `docs/plan-agent-rail.md`: the grout daemon,
+the row protocol, and the rail's rows section — walking skeleton first, then
+sessions-for-real,
 gates-for-real, and the M2 verdict seam. Each task is the smallest demoable
 unit of a sprint. This workflow is itself the rail's first dogfood tenant: its
 validation reviews run through spacedock-subspace with decision logs at the
@@ -103,7 +103,7 @@ CL greenlit the task; a worker designs it: problem, approach, acceptance
 criteria as entity-level end-state properties with `Verified by:` clauses, and
 a test plan matching the AC's level of abstraction.
 
-- **Inputs:** `docs/prd-agent-rail.md`, `docs/plan-agent-rail.md` (the decisions section is binding: binding-in-plugin, Go grout, two typed row kinds over pipe name `agent-event`, glob config), the landmine dossier woven through both, `SPEC.md` landmines, `docs/docking-approach.md` for the shipped container, `docs/review-findings-2026-07-07.md` for open findings that touch the task's code region.
+- **Inputs:** `docs/plan-agent-rail.md` (the decisions section is binding: binding-in-plugin, Go grout, two typed row kinds over pipe name `agent-event`, glob config), the landmine dossier woven through it, `SPEC.md` landmines, `docs/docking-approach.md` for the shipped container, `docs/review-findings-2026-07-07.md` for open findings that touch the task's code region.
 - **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; ACs split into **offline** (agent-reproducible) and **interactive** (settled only by CL's live demo); the task's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan — or the auditable negative `no spike needed: {the proven mechanisms it relies on}` on the record; when the task changes user-visible behavior (keybinds, rows, layout), a concrete doc diff proposed in the body and reviewed at this gate.
 - **Good:** at least one AC measures the end value the task exists for, against an independent baseline that can move the wrong way (a count, a timing, a behavior, resulting on-disk state) — a mechanism-only AC counts only when paired with the value-measuring AC it serves; every AC's expected value comes from outside the file under test; fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
 - **Bad:** an AC provable only by reviewing the entity's own prose; a string/substring/regex match over a file the implementer also writes (a tautology — the check polices its own author); a design that reaches beyond the task's sprint exit criterion; inventing new mechanisms when the spike already proved one.
@@ -165,8 +165,10 @@ sprint plan instead.
   implementation and validation stage definitions above.
 - **Dogfood posture.** The rail fails visible-not-blocking; the plugin
   pipe-unblock task leads sprint 0 because it is the one change protecting
-  CL's real sessions. `install.sh` points the layout at the repo wasm in
-  place — `./build.sh` hot-swaps what the next fresh session loads.
+  CL's real sessions. `install.sh` points the global layout only at the primary
+  checkout artifact. Unmerged hot-swap and live validation use
+  `scripts/zellij-worktree-test-profile.sh`; they never repoint standing global
+  config or layout files.
 - **Park-for-demo is correct posture.** When a task's next step is CL's live
   demo, parking it demo-ready and waiting for CL's window is right — not a
   stall. The FO keeps other tasks moving meanwhile.

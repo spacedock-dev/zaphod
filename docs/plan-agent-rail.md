@@ -1,6 +1,6 @@
 # Agent rail — development plan
 
-> Plan date: 2026-07-07 · executes `docs/prd-agent-rail.md`
+> Plan date: 2026-07-07 · verified delivery order included below
 > agentsview v0.36.1 · subspace recon at HEAD 9be5fbc · zellij CLI 0.44.1
 > Dock container shipped at v3.12 (`docs/docking-approach.md`, adopted architecture)
 > Scope: the grout daemon, the row protocol, and the rail's rows section — M1
@@ -28,6 +28,19 @@
 4. **Gate-log discovery: a grout config of globs for M1** (playground +
    workflow dirs). A canonical gate-log directory is deferred until real
    emitters adopt one.
+
+## Verified delivery order
+
+Land changes in this load-bearing order: canonical install and the isolated
+worktree profile (this task) → j5 → eh → 7v → yb → hj → pz. The profile must
+record current main red and j5 green before j5 lands; eh builds on j5's stable
+one-terminal baseline. Rebase and revalidate yb after 7v, land hj after yb's
+timestamp seam, then rebase pz onto yb and repeat the gate walking skeleton.
+
+Before pz becomes a standing action, add a confirmation step before its
+irreversible approve POST. Its required drill must also fail loudly when the
+pinned `spacedock-subspace` dependency is absent; a skipped test with a green
+suite does not pass the gate.
 
 ## Sprint 0 — walking skeleton
 
@@ -88,14 +101,15 @@ waiting agent.
 
 The rail fails visible-not-blocking: dead grout means stale rows, never a
 wedged session — the reason the pipe fix leads sprint 0. `install.sh` points
-the layout at the repo wasm in place, so `./build.sh` hot-swaps what the next
-fresh session loads. Artifact review moves into the fresh zellij session
-starting now: pre-sprint-2 gates reviewed there manually via `subspace-tui`;
-sprint 2 automates the discovery.
+the global layout only at the primary checkout artifact. Unmerged builds use
+`scripts/zellij-worktree-test-profile.sh` and never repoint standing config or
+layout files. Artifact review moves into the fresh zellij session starting
+now: pre-sprint-2 gates reviewed there manually via `subspace-tui`; sprint 2
+automates the discovery.
 
 ## References & constraints
 
-- PRD this plan executes: `docs/prd-agent-rail.md`. Dock container:
+- Delivery order and safety gates are defined above. Dock container:
   `docs/docking-approach.md`.
 - Landmine and seam facts above are from the 2026-07-07 agentsview spike
   (v0.36.1) and subspace recon (HEAD 9be5fbc), cited inline where they bear.

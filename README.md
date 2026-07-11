@@ -59,21 +59,41 @@ on `PATH` lacks the wasm std and fails with `can't find crate for core`.
 
 ## Usage
 
-### Toggle / navigate keybinds (config.kdl)
+### Canonical global install
+
+Build and install only from the primary checkout:
+
+```bash
+./build.sh
+./install.sh
+```
+
+The installer derives the primary checkout from Git's common directory and
+refuses linked worktrees, even when `ZELLIJ_CONFIG_DIR` points to a writable
+destination. It also requires every Zaphod `MessagePlugin` in the effective
+`config.kdl` to use the primary checkout's canonical WASM URL and `rail "1"`.
+On a mismatch, it reports each offending URL and writes nothing. It never
+rewrites keybinds.
+
+For the one-time cleanup, build the primary checkout and deliberately repoint
+each Zaphod keybind to
+`file:<PRIMARY_CHECKOUT>/target/wasm32-wasip1/release/zellij-sidebar.wasm`.
+Each message block must include `rail "1"`. This is the reference shape, not a
+worktree-install recipe:
 
 ```kdl
 keybinds {
     shared {
         bind "Alt /" {
-            MessagePlugin "file:/path/to/zellij-sidebar.wasm" {
+            MessagePlugin "file:<PRIMARY_CHECKOUT>/target/wasm32-wasip1/release/zellij-sidebar.wasm" {
                 name "toggle"
                 floating true
-                skip_cache true   // dev only: zellij's plugin cache is path-keyed
-                rail "1"          // identity key; see SPEC.md learnings #2-3
+                skip_cache true
+                rail "1"
             }
         }
         bind "Alt ." {
-            MessagePlugin "file:/path/to/zellij-sidebar.wasm" {
+            MessagePlugin "file:<PRIMARY_CHECKOUT>/target/wasm32-wasip1/release/zellij-sidebar.wasm" {
                 name "navigate"
                 floating true
                 skip_cache true
@@ -84,32 +104,60 @@ keybinds {
 }
 ```
 
-### Docked sidebar in every new tab (layout file)
+After cleanup, rerun `./install.sh`. The installer renders and parses the
+layout in a disposable Zellij 0.44.3 session, renames it atomically, and
+rechecks identity. A failed postflight restores the previous layout bytes.
+Use live state—not the rendered file—as the final oracle:
 
-`default_tab_template` works **only in layout files** (it is silently ignored
-in `config.kdl`):
-
-```kdl
-// ~/.config/zellij/layouts/default.kdl
-layout {
-    default_tab_template {
-        pane size=1 borderless=true { plugin location="zellij:tab-bar" }
-        pane split_direction="vertical" {
-            pane size=26 borderless=true {
-                plugin location="file:/path/to/zellij-sidebar.wasm"
-            }
-            children
-        }
-        pane size=1 borderless=true { plugin location="zellij:status-bar" }
-    }
-}
+```bash
+ZELLIJ_SESSION_NAME=<session> zellij action list-panes --json -a -g -t
+ZELLIJ_SESSION_NAME=<session> zellij action dump-layout
 ```
+
+Exactly one sidebar should remain before and after `Alt /`; every sidebar URL
+in the dump must name the primary checkout artifact.
+
+### Test an unmerged worktree
+
+Run the profile from the checkout under test. `--cwd` sets the terminal leaf
+used by the retrofit drill:
+
+```bash
+./scripts/zellij-worktree-test-profile.sh --cwd "$PWD"
+```
+
+The command builds that checkout, creates isolated config, layout, data, and
+permission state, and launches an attached session from `explicit-cwd.kdl`.
+It prints the profile root, session, commit, candidate URL, and exact
+`list-panes`/`dump-layout` inspection commands. In another terminal, start a
+resident control from the same profile:
+
+```bash
+PROFILE_ROOT=<printed-profile-root>
+SESSION_NAME=<printed-session-name>
+zellij --config-dir "$PROFILE_ROOT/config" --data-dir "$PROFILE_ROOT/data" \
+  --session zaphod-control --new-session-with-layout zaphod
+```
+
+Press the profile's real `Alt /` and use the printed live-state commands to
+verify one candidate identity. Clean up the control before the attached drill:
+
+```bash
+zellij delete-session --force zaphod-control
+zellij delete-session --force "$SESSION_NAME"
+```
+
+The profile's exit and signal traps delete its session, config, data, and
+permission state, then fail if the standing global `config.kdl` or
+`layouts/zaphod.kdl` existence or SHA-256 changed. The profile never copies,
+rewrites, or restores global files.
 
 ### Permissions
 
-On first launch the pane shows a permission prompt (`ReadApplicationState`,
-`ChangeApplicationState`, `ReadPaneContents`) — focus it and approve once;
-zellij caches the grant.
+On first launch in each disposable profile, the pane shows a permission prompt
+(`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`) — focus
+it and approve once; Zellij caches the grant only inside that profile's data
+root.
 
 ## Status
 
