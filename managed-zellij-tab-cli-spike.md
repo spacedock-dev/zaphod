@@ -59,3 +59,40 @@ If the mechanism passes, implementation updates the minimum-list workspace desig
 ## Out of scope
 
 Building the portable dock or workspace hub; tmux implementation beyond recording the analogous managed-window contract; editing production Zaphod code during the spike; installing a Zellij fork; reviving foreign-tab retained override; moving panes automatically without an explicit user action.
+
+## Stage Report: ideation
+
+- DONE: Prove idempotent CLI focus/create and managed-tab-only toggle behavior in disposable Zellij 0.44.3 sessions, measuring transient Run-pane effects and persistent foreign-tab invariants.
+  In session `zmspike0711`, three entry calls returned stable tab ID `2`; the final inventory held one managed tab, managed panes `5/6`, and no duplicate tab or terminal. Managed toggle changed `zaphod-docked` to `zaphod-sliver` and preserved pane IDs. Foreign toggle exited `3` and restored the original inventory.
+- DONE: Prove or refute pane adoption into the existing managed tab through the smallest 0.44.3 driver/controller seam, preserving stable pane ID and PID with no unrelated mutation.
+  A temporary `zellij-tile 0.44.3` controller moved terminal pane `0` from tab `0` to tab `2` through `break_panes_to_tab_with_id`; PID `18723` remained live, pane `14` and its PID remained intact, and the source tab restored pane `14` to `80x24`.
+- DONE: Return an evidence-backed ownership boundary and exact evergreen-spec/development-plan changes; stop without production edits if any core invariant fails.
+  No production file changed. The results require a native controller for keybindings and adoption; CLI `Run` remains a disposable proving harness.
+
+### Live findings
+
+- `current-tab-info --json` returned `No active tab found for current client` from the CLI link/Run client. Mapping `ZELLIJ_PANE_ID` through `list-panes --json --all` identified the invoking tab reliably.
+- A tiled `Run` probe created temporary terminal pane `13` and reduced foreign pane `0` from `80x24` to `80x12`. Exit removed pane `13` and restored `80x24`. A floating Run would avoid reflow but still flicker and take focus.
+- Stale binding `999` and an unbound reserved name each exited `65` without creating a tab. A nonexistent source pane returned no target and left the inventories unchanged.
+- A synchronized permission denial on distinct plugin URL `adopt-controller-deny.wasm` preserved source pane `15`, PID `50156`, and foreign tab `3`. The controller closed itself on denial.
+- Raw launch of a missing controller returned a plugin ID and left a Zellij error float. The launcher must preflight the exact controller artifact before sending any Zellij action.
+- Sending a denial keystroke before the permission prompt appeared did not deny the request and moved the pane. The driver must never automate permission responses; it must wait for Zellij's `PermissionRequestResult`.
+
+### Ownership boundary
+
+- Portable CLI: derive the workspace/session binding, lock convergence, inspect tabs, validate the bound ID and reserved name, create or focus the managed view, and preflight the controller artifact.
+- Zellij controller: resolve the real invoking pane/tab, enforce the managed-tab guard, steer the managed swap layout, move explicit pane IDs with `break_panes_to_tab_with_id`, and surface permission/result status.
+- Portable hub/dock: retain item identity, providers, review routing, rendering, and workspace policy. None belongs in the controller.
+
+### Evergreen documentation changes
+
+- Rename `docs/superpowers/specs/2026-07-10-zaphod-minimum-list-workspace-design.md` into one canonical evergreen architecture document directly under `docs/`.
+- Replace current-tab `ensure_dock` with `ensure_managed_view(binding)`: one managed Zellij tab or tmux window per binding; never retrofit a foreign view.
+- Define `Alt Shift z` as idempotent create-or-focus. Define `Alt /` as a controller request that changes layouts only when the invoking tab ID equals the recorded managed ID.
+- Define explicit pane adoption as an optional driver capability. Zellij uses `break_panes_to_tab_with_id`; the action preserves pane/process identity and may close an emptied source tab.
+- Update every diagram to show foreign views beside, rather than inside, the managed view. Remove the retained-layout transaction from the critical path.
+- Reorder `docs/plan-agent-rail.md`: managed-view binding and the minimal controller precede hub/dock/providers; park j5, eh, fw, 4d, and the upstream transactional request outside the release path.
+
+### Summary
+
+Managed-view convergence and native pane adoption work on Zellij 0.44.3. Option 2 proves the lifecycle but visibly disturbs the current tab, so the durable design should bind both keys to a minimal native controller while retaining CLI create/focus for external launch and testing.
