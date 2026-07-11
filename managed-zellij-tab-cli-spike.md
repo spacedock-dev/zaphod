@@ -198,3 +198,24 @@ Commit `ee4765c` correctly defines the managed-view target, preserves the dated 
 ### Summary
 
 Recommendation: **REJECTED**. The two-doc correction is accurate and complete in isolation, but root `SPEC.md` still presents the foreign-tab retrofit as adopted and future-facing architecture, contradicting the evergreen managed-view spec. Mark `SPEC.md` as historical prototype evidence and/or rewrite its two target claims to point readers to `docs/zaphod-workspace-architecture.md`, then rerun the repository-wide search.
+
+## Stage Report: validation (cycle 3)
+
+- DONE: Independently inspect the root `SPEC.md` correction at raw commit `0d444dfff8614b41e3a00027117b4aaf960d5517`.
+  The correction is scoped to `SPEC.md`; its opening now says historical prototype/landmine record, not product architecture, and links the managed-view evergreen spec.
+- DONE: Confirm `SPEC.md` no longer recommends every-tab or first-toggle foreign-tab retrofit as product direction.
+  Landmine 16 labels retrofit as shipped-prototype behavior, and historical rebuild item 3 forbids it as a product entry path and directs creation to a managed tab.
+- DONE: Re-run tracked-Markdown stale identity, adopted-architecture, future-retrofit, canonical-language, and local-link scans.
+  Old path/title/status and `adopted architecture` are absent; all tracked local Markdown link targets exist; historical retrofit hits in `SPEC.md` and `docs/docking-approach.md` are explicitly bounded.
+- FAILED: Eliminate competing canonical and future-facing documentation language across the full branch.
+  `README.md:171-174` still calls `SPEC.md` “the full validated spec” and its now-historical rebuild section “the from-scratch v2 design,” contradicting `SPEC.md:3-7,375-379` and omitting the evergreen architecture pointer.
+- DONE: Verify formatting, docs-only scope, rename/history, and worktree cleanliness.
+  `git diff --check` passed; branch changes are four Markdown docs only; the original move remains `R065` with history through `c66400d`; the code worktree is clean.
+- DONE: Confirm prior spike acceptance evidence remains unchanged.
+  The evergreen architecture blob is identical at `ee4765c` and `0d444df`, so AC-1 through AC-5 and jk's managed-view evidence are unaffected.
+- SKIPPED: Re-run live Zellij.
+  Cycle 3 changes documentation status only and introduce no unsupported behavior claim.
+
+### Summary
+
+Recommendation: **REJECTED**. The requested `SPEC.md` correction passes, including its historical boundary, evergreen link, and removal of retrofit product guidance. Update root `README.md` to describe `SPEC.md` as prototype/landmine evidence rather than the full/v2 product spec and point product architecture readers to `docs/zaphod-workspace-architecture.md`; no code or live-drill change is needed.
