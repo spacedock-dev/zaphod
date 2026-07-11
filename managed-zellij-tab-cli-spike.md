@@ -1,7 +1,7 @@
 ---
 id: jk0e6wnpqcd5c40yhe9pvegh
 title: Managed Zellij tab CLI entry and guarded toggle spike
-status: validation
+status: implementation
 source: captain-approved managed-tab option 2, 2026-07-11
 started: 2026-07-11T03:03:02Z
 completed:
@@ -96,6 +96,10 @@ Building the portable dock or workspace hub; tmux implementation beyond recordin
 ### Summary
 
 Managed-view convergence and native pane adoption work on Zellij 0.44.3. Option 2 proves the lifecycle but visibly disturbs the current tab, so the durable design should bind both keys to a minimal native controller while retaining CLI create/focus for external launch and testing.
+
+### Feedback Cycles
+
+- **Cycle 1 — validation → implementation (2026-07-11): REJECTED.** The evergreen spec, rename history, managed-view contract, and delivery order passed, but `docs/docking-approach.md` still presents current-tab retrofit as the adopted architecture and `docs/plan-agent-rail.md` repeats that stale label. Preserve the docking document as historical prototype evidence, mark it superseded by `docs/zaphod-workspace-architecture.md` for product direction, remove stale “adopted architecture” wording, and rerun the repository-wide contradiction/reference audit. No production or behavioral change is requested.
 
 ## Stage Report: implementation
 
