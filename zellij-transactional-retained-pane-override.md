@@ -1,6 +1,6 @@
 ---
 title: Zellij transactional retained-pane override for safe foreign-tab docking
-status: implementation
+status: validation
 score: 0.95
 source: j5 cycle-5 host-API blocker — captain selected Choice A, 2026-07-10
 started: 2026-07-10T15:03:06Z
