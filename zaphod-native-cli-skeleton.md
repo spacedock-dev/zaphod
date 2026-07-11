@@ -180,3 +180,20 @@ Zellij driver.
   shared contract freeze.
 - Hub, dock, provider, `notify`, grout row behavior, installer rollout, PATH
   install, global configuration mutation, or production release packaging.
+
+## Stage Report: ideation
+
+- DONE: Choose the smallest native zaphod package owner, artifact path, build/test-profile wiring, and isolation boundary without touching standing installation or global multiplexer state.
+  State commit `86ddb5f` selects `grout/cmd/zaphod`, `target/zaphod/zaphod`, and a profile-private `ZAPHOD_BIN` with no installer or Zellij call.
+- DONE: Define a version/capability handshake and typed command/result envelope that the shared binding contract can consume without managed-tab behavior.
+  The packet and sibling contract agree on `Handshake`, `CommandEnvelope`, `ResultEnvelope`, request-ID echo, capability checks, and `Changed|Unchanged|Indeterminate` outcomes.
+- DONE: Write bounded acceptance criteria and an offline-first test plan; exclude controller, keybinding, pane-adoption, hub, dock, and provider behavior.
+  AC-1 through AC-3 are agent-reproducible; AC-4 and the smallest profile E2E check are explicitly gated on foreground-profile validation.
+
+### Summary
+
+The native artifact is a Go command isolated from the WASM plugin and grout's
+row-emitter behavior, with an atomic candidate build and disposable-profile
+ownership. The only unresolved risk is safely exposing that second artifact
+through the existing foreground profile; its bounded check is deferred rather
+than assumed.
