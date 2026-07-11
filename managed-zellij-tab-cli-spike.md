@@ -150,6 +150,21 @@ Readers can now distinguish the shipped current-tab retrofit prototype from the 
 
 All three architecture documents now distinguish historical current-tab retrofit evidence from the evergreen managed-view direction. Root `SPEC.md` remains the authoritative technical-landmine record, not a competing product specification.
 
+## Stage Report: implementation (cycle 4)
+
+- DONE: Correct root `README.md`'s stale architecture pointer without changing prototype usage or build guidance.
+  Commit `3e35951` describes `SPEC.md` as the shipped prototype and numbered-landmine record, then links `docs/zaphod-workspace-architecture.md` for the evergreen product direction.
+- DONE: Preserve current prototype instructions and status.
+  The edit changes only the four-line architecture-reference paragraph; build, install, disposable-profile, permissions, and prototype behavior remain intact.
+- DONE: Run the full tracked-Markdown stale architecture, path, title, claim, and link scan.
+  Searches found no old dated-spec path/title, approved-design status, `adopted architecture`, “full validated spec,” or “from-scratch v2 design”; remaining every-tab claims occur only beneath the prominent historical notice in `docs/docking-approach.md`.
+- DONE: Verify paths, links, formatting, and repository cleanliness.
+  Both README link targets exist, the dated path is absent, `git diff --check` passed, and `git status --short --branch` reported clean after `3e35951`.
+
+### Summary
+
+The repository's reader entry point now separates shipped prototype instructions from the evergreen workspace product architecture. This final correction changes documentation only and leaves prototype operation untouched.
+
 ## Stage Report: validation
 
 - DONE: Validate the implementation at its dispatched raw commit identity without trusting the implementation report.
