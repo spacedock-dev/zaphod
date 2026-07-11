@@ -1,16 +1,17 @@
 ---
 title: Canonical install and isolated worktree test profile
-status: validation
+status: done
 source: finding — runtime audit found layout/keybind plugin identity split, 2026-07-10
 started: 2026-07-10T12:38:46Z
-completed:
-verdict:
+completed: 2026-07-11T00:11:21Z
+verdict: passed
 score: 0.95
 worktree: .worktrees/spacedock-ensign-canonical-install-and-worktree-test-profile
 issue:
 pr:
 mod-block:
 id: v9hwpzcc1cteqfdgta461f5f
+archived: 2026-07-11T00:11:21Z
 ---
 
 ## Problem
