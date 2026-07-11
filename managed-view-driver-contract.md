@@ -565,3 +565,22 @@ testable Sprint 1 contract. It reserves native Zellij behavior until the
 disposable feasibility lane supplies positive evidence or an explicit negative
 result, while allowing the portable binding and native-CLI lanes to proceed on
 one auditable interface.
+
+## Stage Report: ideation (cycle 4)
+
+- DONE: Repair AC-1 evidence or explicitly defer it to implementation with a cited reason.
+  AC-1's duplicate-free end value is supported by the independent Sprint 1 contract gate and exit requirement in `docs/roadmap.md:68-86` and the senior review's “Required gates and sprint exit” in `docs/agent-rail-dev/.spacedock-state/managed-view-sprint-review.md:66-75`; it is not runtime proof. The still-unmet barrier-controlled fake inventory/call log and separately started process test belong to implementation because only the built binding core can expose the create count, lock behavior, and resulting registry state for later independent rerun.
+- DONE: Repair AC-3 through AC-6 evidence or explicitly defer each to implementation with cited reasons.
+  AC-3: `docs/roadmap.md:11-14,82-85` requires stable IDs to be locators rather than ownership proof and recovery without display-name trust; `SPEC.md:179-187` independently records that manifest state, not sticky flags, is authoritative. The table-driven fake-inventory/call-count proof is still implementation work, while native reuse and marker proof remain explicitly owned by `docs/agent-rail-dev/.spacedock-state/zellij-managed-identity-feasibility.md:126-134`.
+  AC-4: `docs/roadmap.md:36-39,68-70,82-83` independently requires atomic storage, reverse uniqueness, explicit repair, and inspect/reconcile/remove outcomes. Temporary-registry and mutation-log proof is still implementation work because it must exercise the actual atomic write and command boundaries, then validation reruns it externally.
+  AC-5: the senior review requires typed mutation results and says indeterminate operations reconcile before retry (`docs/agent-rail-dev/.spacedock-state/managed-view-sprint-review.md:66-75`); its P1 finding rejects a coarse timeout result (`:40-42`). The scripted fake operation-order proof is still implementation work because it must observe a real service inspect before a second create, not merely restate the matrix.
+  AC-6: `docs/roadmap.md:11,33-35,49-51,74-75` requires transport before behavior and a versioned typed interface, while the senior review identifies the missing stable error semantics (`docs/agent-rail-dev/.spacedock-state/managed-view-sprint-review.md:39-44`). JSON envelope/no-op-driver fixtures remain implementation work because one-result correlation and zero driver calls are executable process behavior; the later validator must black-box rerun them.
+- DONE: Append a report-only ideation cycle; do not edit product files or redesign scope.
+  Preserved the bindingcore owner, protocol-v1 matrix, immutable `ProfileLeaseV1` handoff, and fail-closed identity direction; no Zellij drill or runtime pass is claimed. Sources inspected: this record §§ “Shared-contract addendum,” “Acceptance criteria,” and “Test plan”; `docs/roadmap.md:9-86`; `docs/agent-rail-dev/.spacedock-state/managed-view-sprint-review.md:30-75`; `SPEC.md:179-208`; `docs/docking-approach.md:775-805`; `docs/agent-rail-dev/README.md:100-139`; `docs/agent-rail-dev/.spacedock-state/zellij-managed-identity-feasibility.md:35-162`; `docs/agent-rail-dev/.spacedock-state/zaphod-native-cli-skeleton.md:77-120`; `docs/plan-agent-rail.md:10-35`; and `docs/review-findings-2026-07-07.md:1-50`.
+
+### Summary
+
+This report repairs the auditable ideation record without converting planned
+tests into claimed runtime evidence. AC-1 and AC-3 through AC-6 now each name
+their durable design source and the implementation/validation proof still
+required; native identity remains behind the disposable feasibility gate.
