@@ -132,6 +132,23 @@ The evergreen architecture now makes one managed tab or window the workspace/ses
 
 Readers can now distinguish the shipped current-tab retrofit prototype from the managed-view product architecture at the start of either planning path. The prototype’s live evidence remains available as historical engineering context.
 
+## Stage Report: implementation (cycle 3)
+
+- DONE: Mark root `SPEC.md` as a historical record of the shipped Zellij WASM sidebar and numbered technical landmines.
+  Commit `0d444df` adds a prominent notice and a valid link to `docs/zaphod-workspace-architecture.md` without renumbering or removing landmines.
+- DONE: Remove the remaining every-tab and first-toggle retrofit recommendations from the product direction.
+  Landmine #16 now labels per-tab layout behavior as shipped prototype evidence; the former v2 section is historical and directs new placement to a managed tab born from `new-tab --layout zaphod`.
+- DONE: Preserve the prototype’s technical findings.
+  The stable-toggle, swap-layout, percentage-flattening, pane-survival, and historical retrofit evidence remain documented within the old boundary.
+- DONE: Run repository-wide contradiction, path, link, and formatting checks.
+  `git diff --check` and evergreen-path checks passed; searches found no `adopted architecture`, old dated-spec path/title, approved-design status, or unlabeled competing product architecture.
+- DONE: Leave the worktree clean without production changes.
+  `git status --short --branch` reported clean after `0d444df`; only root `SPEC.md` changed.
+
+### Summary
+
+All three architecture documents now distinguish historical current-tab retrofit evidence from the evergreen managed-view direction. Root `SPEC.md` remains the authoritative technical-landmine record, not a competing product specification.
+
 ## Stage Report: validation
 
 - DONE: Validate the implementation at its dispatched raw commit identity without trusting the implementation report.
