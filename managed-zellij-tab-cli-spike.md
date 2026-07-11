@@ -96,3 +96,18 @@ Building the portable dock or workspace hub; tmux implementation beyond recordin
 ### Summary
 
 Managed-view convergence and native pane adoption work on Zellij 0.44.3. Option 2 proves the lifecycle but visibly disturbs the current tab, so the durable design should bind both keys to a minimal native controller while retaining CLI create/focus for external launch and testing.
+
+## Stage Report: implementation
+
+- DONE: Rename the approved dated minimum-workspace design into one evergreen docs/ architecture spec and update every repository reference without leaving a competing copy.
+  Commit `ee4765c` preserves a 65% Git rename to `docs/zaphod-workspace-architecture.md`; the dated path is absent and a repository-wide search found no stale references.
+- DONE: Replace foreign/current-view docking with the spike-proved managed-view lifecycle, stable-ID routing, production controller boundary, managed-only Alt-/, and explicit identity-preserving pane adoption.
+  The spec records the option-2 Run limitation, invoking-pane lookup, stable-ID guard, managed-only toggle, explicit pane/PID-preserving adoption, failure cases, and non-automated consent.
+- DONE: Reconcile the development plan with the new driver/hub/provider delivery order and clearly distinguish the shipped prototype from the target architecture; verify prose, diagrams, and links for contradictions.
+  `docs/plan-agent-rail.md` now separates the prototype record from the managed-view delivery order; `git diff --check`, path checks, and stale-term/reference searches passed.
+- SKIPPED: Red/green product tests.
+  This dispatch explicitly allowed documentation only; it changed no production source, tests, installed layout, or multiplexer state.
+
+### Summary
+
+The evergreen architecture now makes one managed tab or window the workspace/session binding invariant. A thin Zellij controller owns native key and pane operations, while the portable launcher, hub, dock, and providers retain their independent boundaries; foreign-view retrofit work is no longer on the release path.
