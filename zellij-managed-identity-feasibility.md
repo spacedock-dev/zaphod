@@ -11,6 +11,8 @@ worktree:
 issue:
 pr:
 mod-block:
+sprint: 1
+sprint-lane: held-after-7h
 ---
 
 ## Problem
