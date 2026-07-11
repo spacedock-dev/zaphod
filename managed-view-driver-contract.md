@@ -86,6 +86,13 @@ reverse index is a fail-closed `RegistryCorrupt`/`BindingConflict`, never a
 best-effort merge. The previous valid file may be retained as an operator
 selected recovery input; it is never silently substituted.
 
+`binding.ensure(canonical_root, exact_session)` is the initial binding verb.
+Under the same lock it returns the existing record only when both indexes name
+the same binding; it otherwise creates both index entries atomically or returns
+`BindingConflict`. It performs no native view mutation. Later public
+`ensure_workspace` may compose session creation/adoption with this verb, but
+that native behavior is outside this Sprint 1 core.
+
 ### View identity, invalidation, and explicit recovery
 
 Stable IDs locate a native view but do not prove ownership. A view is owned
@@ -106,6 +113,7 @@ operator, but cannot validate, focus, or create over it.
 The recovery verbs are deliberately distinct:
 
 ```text
+binding.ensure(canonical_root, exact_session) -> Bound | Existing
 binding.inspect(root | binding_id) -> BindingInspection       # read-only
 binding.unbind(binding_id, explicit_intent) -> Unbound        # registry only
 binding.rebind(root, new_session, --rebind) -> Rebound        # atomic index swap
@@ -246,10 +254,11 @@ the shared contract gate. No live Zellij or tmux drill is run by this task.
 
 **AC-1 — One owned view is the measurable end value.** From a test-harness
 inventory with one exact session and no managed view, concurrent
-`ensure_managed_view` calls, retries, and a simulated post-create crash leave
-exactly one view carrying the binding marker, one root-to-session entry, one
-session-to-root entry, and one `create_marked_view` call. A fixture that starts
-with two marked views must fail rather than choose one.
+`binding.ensure` and `ensure_managed_view` calls, retries, and a simulated
+post-create crash leave exactly one view carrying the binding marker, one
+root-to-session entry, one session-to-root entry, and one
+`create_marked_view` call. A fixture that starts with two marked views must
+fail rather than choose one.
 Verified by: independently owned, barrier-controlled fake-adapter inventory
 and call log plus separately started process tests; expected counts are in the
 test harness, not in the registry implementation.
@@ -273,6 +282,7 @@ Verified by: table-driven fake inventories that model opaque IDs and markers,
 with call counts and expected status tags supplied outside the code under test.
 
 **AC-4 — Inspect, unbind, rebind, and repair are safe and explicit.**
+`binding.ensure` atomically creates or reuses only an exact root/session pair;
 `inspect` performs no registry or native mutation; `unbind` removes only the
 local association; `rebind --rebind` atomically preserves reverse uniqueness;
 and `repair(ReattachView)` updates a stable ID only for exactly one
