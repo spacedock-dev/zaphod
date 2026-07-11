@@ -2,9 +2,9 @@
 title: First dependable per-tab attention loop
 status: backlog
 source: outcome-first roadmap Sprint 2, captain direction 2026-07-11
-sprint: 2
-sprint-lane: walking-skeleton
-sprint-entry: 7h validation gate plus continuity gate
+sprint: s2-dependable-per-tab-attention-loop
+sprint-lane:
+sprint-entry:
 score: 1.0
 started:
 completed:
@@ -14,6 +14,10 @@ issue:
 pr:
 mod-block:
 id: e6djd6wv1rxvj5zq4wqcw2ja
+group: walking-skeleton
+sprint-readiness: defer
+blocked-on: 7h-validation-and-continuity-gate
+blocked-reason: await the 7h validation gate and a continuity drill that identifies the smallest missing behavior
 ---
 
 ## Problem
