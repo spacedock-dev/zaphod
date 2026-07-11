@@ -235,3 +235,24 @@ Recommendation: **REJECTED**. The two-doc correction is accurate and complete in
 ### Summary
 
 Recommendation: **REJECTED**. The requested `SPEC.md` correction passes, including its historical boundary, evergreen link, and removal of retrofit product guidance. Update root `README.md` to describe `SPEC.md` as prototype/landmine evidence rather than the full/v2 product spec and point product architecture readers to `docs/zaphod-workspace-architecture.md`; no code or live-drill change is needed.
+
+## Stage Report: validation (cycle 4)
+
+- DONE: Independently inspect the README-only correction at raw commit `3e35951397919ab3fcccce4d2d14e5b3da49d967`.
+  The five-line replacement labels `SPEC.md` as shipped prototype/landmine evidence and links `docs/zaphod-workspace-architecture.md` for evergreen product direction.
+- DONE: Confirm README retains accurate current prototype usage and status.
+  Feature, install, disposable-profile, permission, current-tab toggle, and one-time retrofit instructions are unchanged and remain explicitly under “Working prototype.”
+- DONE: Re-run the complete tracked-Markdown contradiction and stale-claim audit.
+  Old dated path/title/status, `adopted architecture`, “full validated spec,” and “from-scratch v2 design” are absent; remaining retrofit/current-tab claims are bounded as current prototype or historical evidence.
+- DONE: Verify all tracked local Markdown links and repository paths.
+  Every local Markdown target exists, no local anchor links require separate validation, the old dated spec is absent, and README's `SPEC.md` and evergreen links resolve.
+- DONE: Verify formatting, docs-only scope, R065 rename/history, and clean worktree.
+  `git diff --check` passed; the branch changes only five Markdown docs; the rename remains `R065` with history through `c66400d`; worktree HEAD is clean.
+- DONE: Confirm prior spike acceptance evidence remains unchanged.
+  The evergreen architecture blob is identical at `ee4765c` and `3e35951`, so AC-1 through AC-5 and jk's managed-view evidence are unaffected.
+- SKIPPED: Re-run live Zellij.
+  The final change corrects only documentation authority and adds no unsupported behavior claim.
+
+### Summary
+
+Recommendation: **PASSED**. README now cleanly separates shipped per-tab prototype instructions from the evergreen managed-view product architecture, and the complete tracked-Markdown audit found no stale competing direction or broken local link. Commit `3e35951` is documentation-only, formatting-clean, history-preserving, and ready to advance.
