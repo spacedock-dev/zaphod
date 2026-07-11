@@ -1,13 +1,13 @@
 ---
 id: 68mb9yq4v90fnb8gwhe1kjwy
 title: Senior staff review of the managed-view implementation sprint
-status: implementation
+status: ideation
 source: captain-requested full-sprint review of managed-view ideation and dispatch sequence, 2026-07-11
 started: 2026-07-11T04:31:09Z
 completed:
 verdict:
 score: 1.0
-worktree: .worktrees/spacedock-ensign-managed-view-sprint-review
+worktree:
 issue:
 pr:
 mod-block:
