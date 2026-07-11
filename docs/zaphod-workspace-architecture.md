@@ -1,8 +1,6 @@
-# Zaphod Minimum List Workspace Design
+# Zaphod Workspace Architecture
 
-**Date:** 2026-07-10
-
-**Status:** Approved design
+**Status:** Evergreen architecture
 
 ## Outcome
 
@@ -39,7 +37,7 @@ The first release must:
 
 1. Offer one public launcher, `zaphod`.
 2. Create a Zellij or tmux workspace, adopt the current session, or attach to
-   an existing session.
+   an existing session without changing foreign tabs or windows.
 3. Run one hub for each active canonical workspace root.
 4. Show sessions and review items in a portable dock TUI.
 5. Focus a bound session pane from the dock.
@@ -48,6 +46,8 @@ The first release must:
 8. Keep provider truth in the provider's durable store.
 9. Expose failures without erasing the last good projection.
 10. Test both multiplexers through the same behavioral contract.
+11. Converge on one managed view per workspace/session binding.
+12. Move a pane into the managed view only after an explicit user action.
 
 ## Non-goals
 
@@ -59,8 +59,11 @@ The first release excludes:
 - arbitrary commands supplied by events;
 - automatic reassignment between workspaces;
 - a provider marketplace or automatic provider discovery;
-- a collapsed sliver or cross-multiplexer dock-toggle abstraction; and
-- automatic dock insertion into every future tab or window.
+- a cross-multiplexer dock-toggle abstraction;
+- automatic dock insertion into every future tab or window;
+- retrofitting a dock into a foreign tab or window;
+- automatic pane adoption; and
+- a patched or forked Zellij.
 
 ## User experience
 
@@ -87,8 +90,14 @@ zaphod [PATH]
 ```
 
 Zaphod detects the current multiplexer and session. It adopts that session,
-starts or reuses the workspace hub, and ensures one dock in the current tab or
-window. It never starts a nested multiplexer.
+starts or reuses the workspace hub, and creates or focuses the binding's
+managed tab or window. It leaves the invoking foreign view unchanged and never
+starts a nested multiplexer.
+
+Inside Zellij, `Alt Shift z` performs the same idempotent create-or-focus
+operation. Zaphod records the managed tab's stable ID. `Alt /` changes the
+managed tab's swap layout only when the invoking pane belongs to that recorded
+tab; it has no layout effect in a foreign tab.
 
 #### Attach to an existing session
 
@@ -102,14 +111,28 @@ native session-switch or adoption operation instead of nesting another client.
 An existing binding identifies the driver. An unbound session name requires
 `--mux zellij|tmux` when both multiplexers are available.
 
-Every path is idempotent. Repeated entry reuses the hub and repairs a missing
-dock without duplicating panes. One canonical root may have only one active
-session binding, and one session may bind only one root. Zaphod reports either
-conflict and requires `--rebind`; it never guesses which binding to replace.
+Every path is idempotent. Repeated entry reuses the hub and repairs or focuses
+one managed view without duplicating panes or tabs. One canonical root may
+have only one active session binding, and one session may bind only one root.
+Zaphod reports either conflict and requires `--rebind`; it never guesses which
+binding to replace.
+
+### Managed view and pane adoption
+
+Each binding owns one Zaphod-managed Zellij tab or tmux window. Zaphod creates
+that view from its own layout, so it owns the dock, terminal slots, and swap
+layouts from birth. Other tabs and windows remain foreign, even when they
+belong to the same multiplexer session.
+
+A user may explicitly adopt an existing terminal into the managed view. The
+driver moves the native pane; it does not reconstruct or respawn it. A
+successful move preserves the pane ID and process PID, leaves unrelated panes
+untouched, and may close an emptied source view according to multiplexer
+behavior. Zaphod never automates the consent or permission response.
 
 ### Dock
 
-The portable TUI opens as a 32-column dock in the adopted tab or window. It has
+The portable TUI opens as a 32-column dock in the managed tab or window. It has
 two sections:
 
 ```text
@@ -140,29 +163,26 @@ focuses its bound pane. `Enter` on a review opens a provider-owned UI in a
 Zellij floating command pane or tmux popup, with a normal split as the tmux
 fallback.
 
-The first release docks only the current tab or window. Running `zaphod` from
-another tab or window adopts that view and inserts one dock there. All dock
-instances share the workspace hub.
+The first release has one dock per workspace/session binding. Running `zaphod`
+from another tab or window focuses the same managed view. It never inserts a
+dock into the invoking foreign view.
 
 ## Architecture
 
 ```text
 AgentsView SSE -----\
-gate artifacts ------> provider adapters -- upsert/remove --\
-tool hooks ----------/                                     |
-                                                           v
-                                                  workspace hub
-                                              filter · model · route
-                                                   |           |
-                                      snapshot/delta|           |action
-                                                   v           v
-                                             portable dock   action router
-                                                               |       |
-                                                        provider       multiplexer
-                                                         adapter         driver
-                                                               \       /
-                                                                v     v
-                                                      review surface or pane focus
+gate artifacts ------> provider adapters -- upsert/remove --> workspace hub
+tool hooks ----------/                                      filter · model · route
+                                                                    |       |
+                                                     snapshot/delta |       | action
+                                                                    v       v
+                                                              portable   action
+                                                                dock      router
+                                                                            |
+                                                           provider adapter + mux driver
+                                                                            |
+                                                                            v
+                                                    managed view · review surface · pane focus
 ```
 
 ### Launcher
@@ -174,8 +194,9 @@ internal hub and dock commands remain implementation details.
 Workspace identity starts with the canonical root. Its active binding records
 the multiplexer kind and native session identifier. Small records in Zaphod's
 platform runtime directory support attach and adoption without a global broker
-process. A binding admits one hub and many dock clients, but at most one dock in
-each adopted tab or window.
+process. A binding admits one hub and exactly one managed view. The binding
+records the view's native stable ID, not only its display name. A reserved name
+helps discovery but never overrides an inconsistent or duplicate binding.
 
 ### Workspace hub
 
@@ -237,15 +258,56 @@ Zellij and tmux implement the same driver contract:
 
 ```text
 ensure_workspace
-ensure_dock
+ensure_managed_view
+current_view
 list_panes
 focus_pane
+adopt_pane
+toggle_managed_layout
 open_surface
 session_exists
 ```
 
+`ensure_managed_view(binding)` creates the managed tab or window from a Zaphod
+layout when absent and otherwise focuses its recorded stable ID.
+`toggle_managed_layout` succeeds only when the invoking pane resolves to that
+ID. `adopt_pane` requires an explicit pane ID and user action. Drivers fail
+closed on stale bindings, duplicate reserved names, missing controllers, or
+permission refusal.
+
 The drivers translate these operations into native commands and layouts. A
 provider never calls Zellij or tmux; the dock never calls either multiplexer.
+
+#### Zellij controller boundary
+
+The option-2 spike used CLI helpers launched through Zellij's `Run` action to
+prove create-or-focus and guarded toggle behavior. That harness is not the
+product keybinding: a tiled `Run` pane briefly took focus and reduced an
+80×24 foreign pane to 80×12 before restoring it. `current-tab-info` also failed
+for the transient CLI client, while mapping `ZELLIJ_PANE_ID` through
+`list-panes --json --all` identified the invoking tab reliably.
+
+The durable Zellij driver therefore includes a thin native controller. Both
+keybindings target it. For `Alt Shift z`, it executes the native half of the
+launcher's validated create-or-focus request. For `Alt /`, it resolves the
+invoking pane and stable tab ID before calling the managed swap-layout action.
+It also moves explicitly selected panes with `break_panes_to_tab_with_id`.
+
+The portable launcher still derives bindings, serializes convergence,
+validates names and IDs, and preflights the controller artifact. External
+entry and tests may use the CLI's create-or-focus path directly. Providers,
+hub routing, item state, and dock rendering never enter the controller.
+
+The spike moved terminal pane `0` into managed tab `2` without changing its PID
+and without replacing an unrelated terminal. It also proved that stale IDs,
+unbound reserved names, missing source panes, and permission denial can leave
+foreign layouts unchanged. A missing controller must fail before launch;
+Zellij otherwise opens an error float. The driver waits for
+`PermissionRequestResult` and never sends an automated consent keystroke.
+
+The tmux driver offers the analogous managed-window contract. Its native
+implementation may differ, but the observable guards and identity guarantees
+remain the same.
 
 The Zellij driver should preserve the prototype's verified layout and focus
 knowledge when that knowledge serves this contract. It should not preserve
@@ -344,6 +406,10 @@ Zaphod never infers that opening a surface approved or resolved a review.
 | Slow dock | Coalesce updates by item ID and replace deltas with a fresh snapshot when needed. |
 | Sequence gap | Request a full snapshot before applying more deltas. |
 | Conflicting workspace binding | Report the bound root and require explicit rebind. |
+| Stale managed-view ID | Report the stale binding; do not use a matching display name or create another view. |
+| Duplicate reserved view name | Fail visibly and require repair; do not choose either view. |
+| Toggle from a foreign view | Make no layout, pane, focus, or process change. |
+| Pane adoption denied or unavailable | Preserve the source pane and PID; report the refusal or missing controller. |
 
 ## Security boundaries
 
@@ -368,8 +434,8 @@ Verification proceeds from pure contracts to live multiplexers:
    slow consumers, action results, and command-injection refusal.
 3. **Provider contract tests:** recorded AgentsView and gate fixtures, source
    outage and recovery, notify validation, and trusted launch preparation.
-4. **Driver tests:** the same ensure/list/focus/open scenarios against fake
-   Zellij and tmux binaries.
+4. **Driver tests:** the same managed-view convergence, guard, adoption,
+   list/focus/open, and failure scenarios against fake Zellij and tmux binaries.
 5. **Disposable live profiles:** extend the isolated Zellij profile introduced
    by the canonical install and worktree test work, and add an equivalent tmux
    fixture. Inspect live pane state rather than generated configuration.
@@ -383,7 +449,14 @@ The live acceptance suite must prove:
 - bare `zaphod` inside Zellij or tmux adopts the current session without
   nesting;
 - `zaphod attach` initializes or reuses an existing session;
-- repeated entry leaves one hub and at most one dock in the current view;
+- repeated entry leaves one hub and exactly one managed view for the binding;
+- entry from a foreign view focuses the managed view without changing the
+  foreign pane inventory or geometry;
+- `Alt /` advances one known swap-layout state in the managed view and has no
+  layout effect elsewhere;
+- explicit pane adoption preserves the pane ID and process PID;
+- stale IDs, duplicate reserved names, missing controllers, and denied
+  adoption fail visibly without creating a second managed view;
 - detach and reattach preserve the runtime while the session exists;
 - an ambiguous session stays unfocused;
 - a provider failure marks stale data without clearing unrelated items;
@@ -395,16 +468,22 @@ The live acceptance suite must prove:
 
 ## Migration from the prototype
 
-Migration should preserve proved behavior and move ownership in four cuts:
+Migration should preserve proved behavior and move ownership in five cuts:
 
-1. Define the canonical item and local socket contracts around the existing
-   `grout` normalization code.
-2. Build the portable dock and Zellij driver, replacing `zellij pipe` transport
-   and WASM-owned rows while retaining useful Zellij layout tests.
-3. Add the tmux driver and run the shared driver contract against both
-   multiplexers.
-4. Move hard-coded review actions behind the provider contract and add the
-   registered notify ingress.
+1. Define managed-view bindings and the shared driver contract.
+2. Build the thin Zellij controller, idempotent create-or-focus entry, guarded
+   toggle, and explicit identity-preserving pane adoption.
+3. Define the canonical item and local socket contracts around the existing
+   `grout` normalization code, then build the portable dock.
+4. Add the tmux managed-window driver and run the shared driver contract
+   against both multiplexers.
+5. Move AgentsView and review ingestion behind provider contracts, then add
+   the registered notify ingress.
+
+The old foreign-tab retrofit work (`j5`, `eh`, `fw`, and `4d`) no longer blocks
+this path. Its findings remain evidence for the foreign-view boundary. The
+parked upstream transactional-retained-pane request is optional research, not
+a release dependency.
 
 The implementation language is not an architectural requirement. The plan
 should favor reuse of the existing Go `grout` code for the hub and provider
@@ -415,10 +494,10 @@ and driver contracts.
 
 The minimum release ships:
 
-- `zaphod` create, adopt, and attach behavior;
+- `zaphod` create, adopt, attach, and idempotent managed-view behavior;
 - one workspace hub and local socket protocol;
 - one portable dock TUI;
-- Zellij and tmux drivers;
+- Zellij and tmux drivers with managed-only toggle and explicit pane adoption;
 - AgentsView and Spacedock/subspace adapters;
 - registered `zaphod notify` ingress;
 - session focus and review open actions; and
