@@ -44,12 +44,6 @@ sprint=<slug>`; add `--where 'sprint-readiness != defer' --fields group` to
 see its ready delivery roles. Readiness informs First Officer policy; it does
 not override the workflow's normal dispatch guards.
 
-Sprint membership is frontmatter, not a hard-coded roadmap list. Query a
-sprint with `spacedock status --workflow-dir docs/agent-rail-dev --where
-sprint=<slug>`; add `--where 'sprint-readiness != defer' --fields group` to
-see its ready delivery roles. Readiness informs First Officer policy; it does
-not override the workflow's normal dispatch guards.
-
 ## File Naming
 
 Each task lives as either:
