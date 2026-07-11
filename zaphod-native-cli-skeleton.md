@@ -1,9 +1,9 @@
 ---
 id: bc7r9aj9s4a799dxt0qvebfq
 title: Native zaphod CLI skeleton and artifact ownership
-status: backlog
+status: ideation
 source: managed-view roadmap Sprint 1 foundation, senior staff review 2026-07-11
-started:
+started: 2026-07-11T05:21:24Z
 completed:
 verdict:
 score: 0.98
