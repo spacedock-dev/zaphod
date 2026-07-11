@@ -27,32 +27,52 @@ grout root package would couple it to the row-emitter executable.
 
 ### Ownership and artifact boundary
 
-Keep native code in the existing Go module, `grout/go.mod`, but give it its
-own package boundary: public command source at `grout/cmd/zaphod` and pure
-wire/dispatch code at `grout/internal/zaphodcli`. This is smaller and more
-coherent than adding a second root Go module, while keeping it independent of
-both the Rust/WASM plugin and the current `grout` row-emitter `main` package.
+Keep native code in the existing Go module, `grout/go.mod`, with three
+non-overlapping boundaries:
+
+- `grout/cmd/zaphod` owns process startup, stdin/stdout, exit
+  classification, and the one-line handshake only.
+- `grout/internal/zaphodcli` owns typed `CommandEnvelope` decoding,
+  protocol/correlation normalization, and exactly one typed dispatch to a
+  service.
+- `grout/internal/bindingcore` owns `BindingV1`, registry locks and atomic
+  writes, canonical-root resolution, reverse uniqueness, inventory
+  classification, recovery policy, and its injected `Driver` interface
+  through a `Service`.
+
+This keeps the command independent of the Rust/WASM plugin and the current
+`grout` row-emitter `main` package. Neither shell package may open the
+registry, infer an identity from a name or active client, choose a repair, or
+retry an indeterminate mutation. When implemented, the five `binding.*`
+discriminants dispatch once to the corresponding `bindingcore.Service`
+method; until then the skeleton returns `Unsupported` without dispatch.
 No existing grout row, pipe, or Zellij behavior is imported into the CLI.
-There is no native CLI pure function to extend: `grout/rows.go` is deliberately
-row-protocol-specific. The implementation starts with isolated pure
-`Handshake` validation, `CommandEnvelope` decoding, and outcome construction
-in `grout/internal/zaphodcli`, then gives the command a thin stdin/stdout
-adapter.
+There is no native-CLI pure function to extend: `grout/rows.go` is
+deliberately row-protocol-specific. The new pure boundaries are isolated
+envelope validation/normalization in `zaphodcli` and registry/recovery
+transitions in `bindingcore`.
 
 Add `scripts/build-zaphod.sh` to build this command atomically. Its default
 output is the ignored worktree-local artifact `target/zaphod/zaphod`; an
-explicit `--output PATH` supports a disposable-profile artifact. It uses the
-Go tool chain only, injects a nonempty CLI version, and never calls
-`install.sh`, `zellij`, or writes a user configuration directory.
-`install.sh` remains the sole global installer and gains no native-binary
-copy/PATH behavior in this sprint.
+explicit `--output PATH` supports the lease-scoped candidate at
+`$PROFILE_ROOT/bin/zaphod`. It uses the Go tool chain only, injects a
+nonempty CLI version, and never calls `install.sh`, `zellij`, or writes a
+user configuration directory. `install.sh` remains the sole global installer
+and gains no native-binary copy/PATH behavior in this sprint.
 
-The existing `scripts/zellij-worktree-test-profile.sh` will create its
-temporary root before candidate builds, call
-`scripts/build-zaphod.sh --output "$PROFILE_ROOT/bin/zaphod"`, and print
-`ZAPHOD_BIN=` beside its current metadata. The binary therefore belongs to the
-profile and disappears with it. This is test wiring only: it adds no layout
-reference, keybinding, or Zellij invocation.
+The candidate is leased through the immutable, test-only `ProfileLeaseV1`
+published by `foreground-attached-client-profile` at
+`$PROFILE_ROOT/profile-lease-v1.json` only after its primary foreground
+client is ready. The profile harness supplies the exact lease
+`profile_root` and uses
+`scripts/build-zaphod.sh --output "$PROFILE_ROOT/bin/zaphod"`; it may print
+`ZAPHOD_BIN` as a convenience, but the lease is the ownership contract.
+The CLI creates no Zellij client, owns neither base nor secondary-client
+teardown, and never derives namespace or session identity from a path, display
+name, active client, or cwd. If a future typed command carries a marker tuple,
+each value remains an opaque typed field; the CLI does not interpret it as
+identity. This is test wiring only: it adds no layout reference, keybinding,
+or Zellij invocation.
 
 ### Versioned native seam
 
@@ -64,39 +84,50 @@ reference, keybinding, or Zellij invocation.
 
 `protocol_version` is a wire-compatibility major, not the binary release
 version. A caller compares it and its required capabilities before invoking a
-command; an absent capability means no fallback or implicit success.
+command; an absent capability means no fallback or implicit success. All
+`Handshake`, `CommandEnvelope`, and `ResultEnvelope` values use
+`protocol_version: 1`.
 
-`zaphod internal invoke` accepts one JSON `CommandEnvelope` on stdin and
-writes exactly one correlated `ResultEnvelope` on stdout. The shared names and
-semantics, coordinated with the parallel binding-contract packet, are:
+`zaphod internal invoke` accepts one JSON
+`CommandEnvelope { protocol_version, request_id, command }` on stdin and
+writes exactly one correlated
+`ResultEnvelope { protocol_version, request_id, outcome }` on stdout.
+`request_id` is a nonempty opaque value copied verbatim when it can be
+decoded; `command` is a tagged, typed union, never a shell string or
+free-form argv. The initial handshake advertises exactly
+`protocol.handshake.v1`, `protocol.invoke.v1`, and `health.v1`. It
+advertises no `binding.*` or `driver.*` capability until the corresponding
+`bindingcore.Service` or driver capability is integrated and process-proved.
 
-- `Handshake { protocol_version, cli_version, capabilities }` identifies the
-  artifact and only capabilities it actually implements.
-- `CommandEnvelope { protocol_version, request_id, command }` has a nonempty
-  opaque `request_id` copied verbatim to the response. `command` is a tagged,
-  typed union, never a shell string or free-form argv.
-- `ResultEnvelope { protocol_version, request_id, outcome }` is emitted once
-  for every stdin input line. If a request ID cannot be decoded, it uses an
-  empty ID and a typed input failure; stderr remains diagnostic only.
-- `Outcome<T>` is either `Success { value, mutation: Changed|Unchanged }` or
-  `Failure { error, mutation: Unchanged|Indeterminate, diagnostic? }`.
-  `Indeterminate` is reserved for a future issued-native-mutation whose
-  completion cannot be observed; this skeleton's failures are `Unchanged`.
+The envelope fixtures and implementation use this exact
+`ErrorCodeV1`/mutation matrix:
 
-The skeleton implements only side-effect-free `health`, which returns the
-handshake with `Unchanged`, and parses `binding.inspect` only to return typed
-`Unsupported` until the binding core owns behavior. Future
-`binding.unbind`, `binding.rebind`, and `binding.repair` variants are not
-implemented or advertised here. No command resolves a display name, active
-client, shell command, or Zellij state.
+| Boundary condition | Required v1 result |
+| --- | --- |
+| Invalid JSON or a missing/wrong required envelope field | `MalformedEnvelope`, one result under the decoded nonempty request ID or ``, `Unchanged`, and no dispatch. |
+| Request or handshake protocol major is not 1 | `ProtocolMismatch`, one result under the decoded/sent request ID, `Unchanged`, and no dispatch. |
+| A caller receives a parseable response whose ID differs from its sent ID | Normalize locally to `CorrelationMismatch` under the sent ID, `Unchanged`; ignore the response value, do not retry, and do not call a driver. |
+| Unknown command or a missing advertised requirement | `Unsupported`, one correlated `Unchanged` failure with no dispatch or fallback. |
+
+`Success` uses `Changed` only after a mutation is observed complete and
+durable; it uses `Unchanged` for a read, reuse, or no-op. A failure is
+`Unchanged` unless a native mutation was issued and completion cannot be
+observed; only that case may be `Indeterminate`, which requires fresh
+`binding.inspect` before any retry and never permits a name-based second
+create. The skeleton implements only side-effect-free `health`, returning
+the handshake with `Unchanged`. It may decode known binding discriminants
+only to return `Unsupported` until the binding core is linked. No command
+resolves a display name, active client, shell command, or Zellij state.
 
 ### Documentation change proposed
 
 Add a short **Native CLI candidate** section to `README.md` showing
-`./scripts/build-zaphod.sh` and `./target/zaphod/zaphod protocol`, and state
-that Sprint 1 creates no installed command, Zellij action, layout, or global
+`./scripts/build-zaphod.sh` and `./target/zaphod/zaphod protocol`. It will
+state that a disposable profile exposes its leased candidate only at
+`$PROFILE_ROOT/bin/zaphod`, after `ProfileLeaseV1` is ready, and that Sprint
+1 creates no installed command, Zellij action, layout, client, or global
 configuration. That makes the direct inspection path discoverable without
-promising managed-view behavior.
+promising managed-view or binding behavior.
 
 ## Acceptance criteria
 
@@ -105,35 +136,42 @@ promising managed-view behavior.
 **AC-1 — A clean worktree owns one executable, versioned native interface.**
 `scripts/build-zaphod.sh` creates exactly one executable at the documented
 default path, and `zaphod protocol` returns one parseable handshake with
-`protocol_version == 1`, a nonempty CLI version, and the baseline protocol
-capabilities. The expected identity comes from this shared Sprint 1 contract,
-not generated source text.
+`protocol_version == 1`, a nonempty CLI version, and exactly
+`protocol.handshake.v1`, `protocol.invoke.v1`, and `health.v1`. It
+advertises no `binding.*` or `driver.*` token. The expected identity comes
+from the shared Sprint 1 contract, not generated source text.
 
 Verified by: an external process test builds from a fresh worktree, parses the
-binary's stdout as JSON, checks line count and fields, and runs `go test ./...`
-plus `go vet ./...` from `grout`.
+binary's stdout as JSON, checks line count and the exact capability set, and
+runs `go test ./...` plus `go vet ./...` from `grout`.
 
 **AC-2 — Typed invocation is correlated and fail-closed before native behavior
 exists.** For `health`, `internal invoke` returns one result whose protocol
 and request ID exactly match the request and whose mutation is `Unchanged`.
-A protocol-major mismatch, malformed envelope, or unavailable binding command
-returns one typed failure/unsupported result and never falls back to display
-names, active clients, shell execution, or a Zellij command.
+Malformed input, a protocol-major mismatch, a correlation mismatch, and an
+unavailable binding command produce exactly `MalformedEnvelope`,
+`ProtocolMismatch`, `CorrelationMismatch`, and `Unsupported`,
+respectively, with the matrix's request-ID and `Unchanged` rules. They never
+fall back to display names, active clients, shell execution, or a Zellij
+command.
 
 Verified by: black-box stdin/stdout tests exercise valid, malformed,
-unsupported, and incompatible fixtures; a fake `zellij` on `PATH` fails the
-test if the skeleton attempts to invoke it.
+unsupported, incompatible, and mismatched-correlation fixtures; a fake
+`zellij` on `PATH` fails the test if the skeleton attempts to invoke it.
 
-**AC-3 — Candidate-profile ownership is isolated and recoverable.** The
-worktree profile exposes executable `ZAPHOD_BIN` under its printed temporary
-root; its handshake works while the profile is alive. On normal exit or
-`INT`/`TERM`/`HUP`, the temporary root and its binary disappear, the profile
-session is absent, and SHA-256 states of the standing config and
-`layouts/zaphod.kdl` equal their independently captured baselines.
+**AC-3 — Candidate-profile ownership follows its lease and is recoverable.**
+After the profile packet publishes its immutable `ProfileLeaseV1`, the
+candidate exists only at `$PROFILE_ROOT/bin/zaphod` under that lease's exact
+root; its handshake works while the lease is alive. It creates no base or
+secondary Zellij client, and owns no client or profile teardown. On profile
+normal exit or `INT`/`TERM`/`HUP`, the temporary root and its binary
+disappear, the profile session is absent, and SHA-256 states of the standing
+config and `layouts/zaphod.kdl` equal their independently captured baselines.
 
 Verified by: extend the existing process-level disposable-profile regression
-to run the printed candidate binary, then exercise normal and signal cleanup
-paths and compare pre/post file states. This is an automated offline-style
+to consume the lease's exact root, run the candidate, record that it creates
+no extra client/process group, then exercise normal and signal cleanup paths
+and compare pre/post file states. This is an automated offline-style
 regression, but it is not scheduled until the foreground-profile validation
 gate passes.
 
@@ -141,10 +179,10 @@ gate passes.
 
 **AC-4 — A person can inspect the candidate without changing their
 multiplexer.** After the foreground attached-client profile passes its gate,
-CL can run the printed `ZAPHOD_BIN protocol` inside that disposable profile,
-see the one-line handshake, keep the terminal canary responsive, and exit with
-no changed standing Zellij files. No keybinding, pane, tab, layout, or
-controller action is expected.
+CL can use the ready lease's `$PROFILE_ROOT/bin/zaphod protocol` inside that
+disposable profile, see the one-line handshake, keep the terminal canary
+responsive, and exit with no changed standing Zellij files. No keybinding,
+pane, tab, layout, client, or controller action is expected.
 
 Verified by: the post-gate disposable-profile drill uses the existing
 foreground canary and independent before/after global-file hashes; CL observes
@@ -153,21 +191,25 @@ the command and cleanup live.
 ## Test plan
 
 **Riskiest unproven mechanism:** a profile that already builds a WASM candidate
-can safely create, expose, and clean up a second native executable without
-weakening its foreground-process or global-isolation guarantees. The first,
-smallest end-to-end invalidator is therefore: after the foreground-profile
-gate, start a candidate profile under the existing process harness, wait for
-`PROFILE_ROOT` and `ZAPHOD_BIN`, run `"$ZAPHOD_BIN" protocol`, then terminate
-the profile and prove the binary/root/session are gone while the pre/post
-standing-file hashes match. It does not exercise a key, managed tab, or
-Zellij driver.
+can publish an immutable `ProfileLeaseV1`, create and expose a second native
+executable only at that lease's root, and clean it up without weakening its
+foreground-process or global-isolation guarantees. The first, smallest
+end-to-end invalidator is therefore: after the foreground-profile gate, start
+a candidate profile under the existing process harness, wait for its ready
+lease, run `"$PROFILE_ROOT/bin/zaphod" protocol`, verify it created no
+secondary client, then terminate the profile and prove the binary/root/session
+are gone while the pre/post standing-file hashes match. It does not exercise a
+key, managed tab, binding service, or Zellij driver.
 
 1. Add pure Go tests for handshake validation, capability membership, tagged
-   command decoding, and each outcome/mutation state.
+   command decoding, response-correlation normalization, and every exact
+   `ErrorCodeV1`/mutation row.
 2. Add black-box binary tests for one-line stdout, request-ID correlation,
-   exit classification, and malformed/unknown input.
+   exit classification, exact capability advertisement, and
+   malformed/unknown/incompatible input.
 3. Add the profile process regression above only after the foreground-profile
-   task validates; run normal, `INT`, `TERM`, and `HUP` cleanup cases.
+   task validates; consume `ProfileLeaseV1`, run normal, `INT`, `TERM`,
+   and `HUP` cleanup cases, and prove that the CLI created no client.
 4. Run `go test ./...` and `go vet ./...` in `grout` plus the unchanged Rust
    suite, followed by the bounded CL inspection drill for AC-4.
 
@@ -175,9 +217,9 @@ Zellij driver.
 
 - Any managed-view controller, Zellij/tmux command, keybinding, tab creation,
   layout change, pane adoption, or native-ID decision.
-- Binding storage, reverse uniqueness, repair policy, or implementation of
-  binding commands; those belong to `managed-view-driver-contract` after the
-  shared contract freeze.
+- Binding storage, reverse uniqueness, repair policy, driver implementation,
+  or implementation of binding commands; those belong to
+  `managed-view-driver-contract` after the shared contract freeze.
 - Hub, dock, provider, `notify`, grout row behavior, installer rollout, PATH
   install, global configuration mutation, or production release packaging.
 
@@ -197,3 +239,19 @@ row-emitter behavior, with an atomic candidate build and disposable-profile
 ownership. The only unresolved risk is safely exposing that second artifact
 through the existing foreground profile; its bounded check is deferred rather
 than assumed.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Align the Go ownership and command-dispatch design to grout/internal/bindingcore, grout/internal/zaphodcli, and grout/cmd/zaphod.
+  The revised ownership boundary assigns registry/recovery policy to `bindingcore`, one typed envelope dispatch to `zaphodcli`, and process-only work to `cmd/zaphod`.
+- DONE: Adopt the exact protocol-v1 capability, error, correlation, and mutation matrix without advertising binding or driver capabilities before integration/proof.
+  The packet now requires the three-token initial handshake and the canonical `MalformedEnvelope`, `ProtocolMismatch`, `CorrelationMismatch`, `Unsupported`, and mutation semantics in fixtures and black-box checks.
+- DONE: Specify candidate-binary use through ProfileLeaseV1 without creating clients, inferring identity, or owning lease teardown.
+  The candidate is constrained to `$PROFILE_ROOT/bin/zaphod` under the ready immutable lease; profile ownership and client teardown remain with the foreground-profile packet.
+
+### Summary
+
+This alignment revision makes the native CLI a narrow transport shell over the
+future binding core rather than a second policy owner. It freezes its initial
+wire behavior and lease-scoped artifact ownership while keeping binding and
+driver capabilities unadvertised until independently integrated and proved.
