@@ -1,13 +1,13 @@
 ---
 id: 7hm8rw9kzp9m2chdmbe721qr
 title: Foreground attached-client disposable Zellij profile
-status: ideation
+status: implementation
 source: managed-view roadmap Sprint 1 entry gate, senior staff review 2026-07-11
 started: 2026-07-11T05:09:21Z
 completed:
-verdict:
+verdict: APPROVED
 score: 1.0
-worktree:
+worktree: .worktrees/spacedock-ensign-foreground-attached-client-profile
 issue:
 pr:
 mod-block:
