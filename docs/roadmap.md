@@ -1,133 +1,161 @@
 # Zaphod roadmap
 
-This roadmap defines the delivery sequence for the managed workspace product.
-The architecture lives in
-[`docs/zaphod-workspace-architecture.md`](zaphod-workspace-architecture.md).
-`docs/plan-agent-rail.md` and the root prototype documents remain historical
-build records; they do not override this sequence.
+This roadmap orders product work by the operator outcome it delivers. The
+current per-tab WASM rail is a supported baseline: it already helps an
+operator see what is happening in the current tab and act on it. The
+[workspace architecture](zaphod-workspace-architecture.md) remains the
+long-term design; it does not authorize replacing working behavior without a
+demonstrated operator benefit.
+
+`docs/plan-agent-rail.md`, the root prototype documents, and their old sprint
+numbers are historical build records. They remain useful evidence, but this
+file controls delivery order.
 
 ## Delivery rules
 
-- Prove native identity and transport before building behavior on top of them.
-- Keep portable policy outside multiplexer-specific controllers.
-- Treat stable native IDs as locators, not ownership proof.
-- Fail closed with an operator-visible recovery path.
-- Run interactive captain drills only after independently reproducible
-  infrastructure and offline checks pass.
+- Start each product sprint from one complete operator journey, not from a
+  component list.
+- Preserve reliable behavior until a replacement proves equal or better value
+  in the same operator journey.
+- Name the operator failure before replacing a working surface. Architectural
+  neatness alone is not a failure.
+- Keep review truth and review resolution in the provider. Zaphod may surface
+  a review and open the provider UI; it does not render a provider form or
+  issue a verdict.
+- Run live captain drills only after reproducible offline checks pass.
 - Never mutate standing Zellij or tmux configuration during development tests.
 
-## Sprint 1 — managed-view foundation and feasibility
+## Current product baseline
 
-### Goal
+The shipped rail is reliable for its current tab. It lists terminal panes and
+agent state, and its companion process can surface session and review rows.
+Session actions focus a bound pane. Review actions open the provider's review
+surface. This is the behavior later work must preserve or improve.
 
-Establish trustworthy test infrastructure, one owned native `zaphod`
-executable, a recoverable driver-neutral binding core, and proved Zellij
-identity mechanisms. This sprint does not ship production keybindings or pane
-adoption.
+The legacy `grout` and rail tasks contain valuable evidence:
 
-### Filed tasks
+- `yb` and `7v` show session ingestion, stale-data handling, and the current
+  rail's focus behavior.
+- `pz` proves that a provider-owned gate server, rather than a direct log
+  append, owns durable resolution and waiter wake-up.
 
-1. **`foreground-attached-client-profile`** — make the disposable Zellij
-   client own the foreground terminal; prove PTY input, cleanup, signal
-   handling, temporary-root removal, and unchanged global files.
-2. **`zaphod-native-cli-skeleton`** — choose the package owner and artifact
-   path; add build and test-profile wiring, a version handshake, and typed
-   command/result plumbing without managed-tab behavior.
-3. **`managed-view-driver-contract`** — implement full session identity,
-   atomic binding storage, reverse uniqueness, mutation-aware results, fake
-   adapters, and inspect/unbind/rebind/repair operations. Keep the persisted
-   Zellij representation provisional until the native feasibility gate.
-4. **`zellij-managed-identity-feasibility`** — prove or reject the exact
-   multi-client invocation witness, persistent marker owner and query path,
-   session replacement/incarnation, native ID reuse, and
-   create-before-persist recovery. Spike code remains disposable.
+Their implementation boundaries do not become mandatory product architecture.
+In particular, do not carry forward `pz`'s rail-issued `approve` action: it
+violates the provider-owned review boundary.
 
-### Dispatch and merge order
+## Sprint 1 — trusted test-profile onramp (in flight)
 
-1. Complete and merge `foreground-attached-client-profile` first. No other
-   task may schedule an interactive Zellij drill before its validation gate.
-2. Ideate the native CLI and reframed binding core together, then freeze their
-   artifact path, version handshake, full session identity, and typed result
-   envelope at a shared contract gate.
-3. After that freeze, run three safe lanes in parallel:
-   - native CLI artifact and profile wiring;
-   - portable registry, recovery commands, and fake-adapter suite;
-   - throwaway Zellij identity and marker feasibility.
-4. Reconcile all three lanes at the native identity gate. Revise the contract
-   if witness, marker, incarnation, namespace targeting, or crash recovery
-   fails; do not compensate with active-tab, pane, cwd, or session-name
-   guessing.
-5. Merge only after the integrated contract suite, process tests, disposable
-   native drills, and global-isolation checks pass together.
+### End value
 
-### Sprint gates
+An operator can exercise real keys in an isolated Zellij profile and trust
+that exit, signals, and cleanup leave standing configuration untouched. This
+is an enabling exception to the walking-skeleton rule: it makes later product
+drills trustworthy without claiming to ship a new attention surface.
 
-- **Infrastructure:** the attached client owns the PTY foreground process
-  group and raw input reaches a terminal canary; normal exit and
-  `INT`/`TERM`/`HUP` clean up without changing standing files.
-- **Contract:** concurrent and killed writers, schema handling, reverse
-  uniqueness, stale/corrupt recovery, typed `Unchanged`/`Indeterminate`
-  results, and explicit operator repair are independently reproduced.
-- **Native identity:** two-client invocation witness, persistent marker
-  ownership, detach/reattach, session replacement, ID reuse, and the
-  create/persist crash window are proved against disposable Zellij 0.44.3.
-- **Integration:** one test-profile `zaphod` artifact owns the versioned
-  interfaces, all required suites pass on the merged branch, and no standing
-  multiplexer state changes.
+### Locked scope and sequence
 
-### Exit criteria
+Sprint 1 has completed staff review. Do not add to or reshape its task bodies,
+statuses, worktrees, or order. The First Officer may maintain its delivery
+metadata in frontmatter.
 
-- A human can type and exercise real keys in the disposable profile.
-- The repository owns one buildable, versioned native `zaphod` artifact.
-- Bindings can be created, inspected, reconciled, repaired, and removed
-  without trusting display names or reused native IDs.
-- Zellij invocation, marker, incarnation, and crash-recovery mechanisms are
-  either proved and frozen or rejected with the controller architecture sent
-  back for revision.
-- No captain demo is used to discover test-infrastructure failure.
+Its membership is the query `sprint=s1-trusted-test-profile-onramp`. The
+`group` and `sprint-readiness` fields make the release lane visible without
+duplicating a mutable task list in this document.
 
-## Sprint 2 — managed Zellij entry and guarded toggle
+1. **`foreground-attached-client-profile` (`7h`)** is the sole active Sprint 1
+   release-path lane. It must pass its foreground-PTY, raw-input, cleanup, and
+   global-isolation gate.
+2. **`zaphod-native-cli-skeleton` (`bc`)**, **`managed-view-driver-contract`
+   (`qb`)**, and **`zellij-managed-identity-feasibility` (`6v`)** remain
+   captain-approved but paused after `7h`. They are neither canceled nor
+   automatically dispatched.
+3. No Sprint 2 product task depends on those paused lanes unless the
+   continuity gate below identifies an operator failure that needs the
+   managed-workspace path.
 
-Task `zellij-managed-tab-controller` consumes the accepted Sprint 1 contract.
-It ships idempotent `Alt Shift z` create-or-focus and makes `Alt /` issue no
-native layout action outside the recorded managed tab. Its first check proves
-the real key invocation witness; implementation cannot fall back to active
-client, tab, pane, cwd, or display-name guessing.
+### Gate
 
-Sprint 2 exits after repeated and concurrent entry leaves exactly one managed
-tab, foreign views remain unchanged, structured failures reconcile safely,
-and the captain accepts real-key focus, permission, flicker, and latency in
-the repaired disposable profile.
+The `7h` validation gate is Sprint 1's stop point. Passing it authorizes
+safe, repeatable live drills; it does not automatically start `bc`, `qb`, or
+`6v`.
 
-## Sprint 3 — explicit pane adoption
+## Continuity gate — keep, evolve, or replace the per-tab rail
 
-Task `zellij-pane-adoption` consumes the persistent marker/controller target
-and mutation-aware result envelope accepted in Sprint 2. Pure request
-validation, permission transitions, and reconciliation may begin once shared
-types stabilize, but native movement waits for the transport invalidation
-gate.
+Run this gate after `7h` passes and before dispatching paused foundation work
+or a replacement architecture.
 
-Sprint 3 first proves one correlated existing-instance request across the
-permission gap without auto-launch. It then adds exactly one native move with
-post-permission revalidation, pane/PID preservation, unrelated-pane
-preservation, explicit empty-source behavior, and visible recovery.
+### Question
 
-## Later delivery
+Can the current per-tab rail complete the operator's attention loop in normal
+Zellij work, or is there a concrete failure that it cannot correct without a
+different boundary?
 
-After managed-view entry and adoption are stable:
+### Drill
 
-1. Define the workspace hub's canonical item and local socket contracts.
-2. Build the portable dock TUI against that protocol.
-3. Add the tmux managed-window driver and run the shared driver suite against
-   both multiplexers.
-4. Adapt AgentsView session ingestion, then gate and review providers.
-5. Add registered `zaphod notify` ingress and complete create, adopt, attach,
-   detach, and reattach acceptance drills.
+In one real working tab, the operator must be able to:
 
-## Parked outside the release path
+1. see a live session that needs attention;
+2. focus that session's bound pane from the rail;
+3. see one pending review;
+4. open the provider-owned review UI from the rail;
+5. make the decision in that provider; and
+6. see the resulting provider state reflected without tab hunting.
 
-Keep the foreign-tab retrofit tasks `j5`, `eh`, `fw`, and `4d`, the upstream
-transactional retained-pane request, automatic adoption or consent, global
-installer rollout, and any Zellij fork outside these sprints. Treat `yb`,
-`7v`, and `pz` as prototype evidence to extract only after their behavior fits
-the new hub, driver, and provider contracts.
+Record every missed item, stale state, wrong focus target, foreign-tab change,
+or review-launch failure. A successful drill keeps the per-tab rail as the
+product baseline. A replacement path requires a named failure and an
+equal-or-better cutover drill for this journey.
+
+## Sprint 2 — dependable per-tab attention loop
+
+### End value
+
+From normal Zellij work, an operator sees live session and pending-review
+attention in the current tab, focuses the right session, or opens the review
+in its provider-owned UI. After the provider resolves the review, the rail
+shows truthful updated state. The operator no longer hunts through tabs to
+find the next interruption.
+
+### Scope
+
+Sprint 2 is one outcome-owned task plus one operator gate. It may reuse the
+current WASM rail and `grout` where they already serve the journey. It may
+change their internals only to close a failure exposed by the continuity gate.
+
+The sprint does not require a hub, a managed tab, a native launcher, a generic
+provider framework, tmux support, pane adoption, or inline review controls.
+Those are possible later responses to measured limits, not prerequisites.
+
+### Task and gate map
+
+| Item | Purpose | Dispatch rule |
+| --- | --- | --- |
+| **First dependable per-tab attention loop** | Own the full journey: one real session, one real pending review, focus, provider-owned open, and truthful post-decision update. | Prefiled with `sprint-readiness: defer`. Ideate only after `7h` passes and the continuity gate names the smallest missing behavior. |
+| **Sprint 2 operator-loop gate** | Reproduce the full live journey with a real session and review provider. | Run after the task's offline checks. A passing gate proves value; it does not authorize unrelated architecture work. |
+
+### Explicit deferrals
+
+- `fp` — the managed-tab controller and guarded keybindings — remains deferred
+  until a continuity-gate failure requires managed entry.
+- `1s` — explicit pane adoption — is an optional later capability, pending an
+  explicit product decision.
+- `bc`, `qb`, and `6v` remain paused as described in Sprint 1.
+- `j5`, `eh`, `fw`, `4d`, and `m1` remain foreign-tab retrofit or upstream
+  research, outside this release path.
+- `s6`, `n5`, `hj`, `yb`, `7v`, and `pz` remain evidence or narrowly scoped
+  repair candidates until the attention-loop task selects a proven need.
+
+## Sprint 3 — evidence-led expansion
+
+Sprint 3 is not preallocated to a component. Its goal follows the first
+failure that remains after Sprint 2's operator gate: for example, reliable
+reconnection and stale-state recovery, a second supported tab/workspace, or a
+managed-workspace migration that passes the continuity cutover test. Write its
+task only after Sprint 2 records that evidence.
+
+## Operational note
+
+The workflow currently has no dispatchable tasks because its two implementation
+slots are occupied by active `7h` and stale `4d` state. This roadmap recommends
+deferral of `4d` because it is outside the release path; it does not mutate its
+state. A captain decision is required before changing that record.

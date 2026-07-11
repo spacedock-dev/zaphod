@@ -27,14 +27,22 @@ stages:
 
 # Agent-rail development
 
-Builds the zaphod agent rail from `docs/plan-agent-rail.md`: the grout daemon,
-the row protocol, and the rail's rows section — walking skeleton first, then
-sessions-for-real,
-gates-for-real, and the M2 verdict seam. Each task is the smallest demoable
-unit of a sprint. This workflow is itself the rail's first dogfood tenant: its
-validation reviews run through spacedock-subspace with decision logs at the
-globbable gates location, so the rail being built learns to surface the very
-gates that built it.
+Tracks Zaphod delivery work. The authoritative sequence is
+`docs/roadmap.md`; `docs/zaphod-workspace-architecture.md` defines the
+long-term boundary, and `docs/plan-agent-rail.md` records historical prototype
+work. The current per-tab rail is a product baseline, not disposable scaffolding.
+
+Each task must advance one operator outcome or close a measured failure in an
+existing outcome. The workflow remains its own dogfood tenant: its validation
+reviews leave decision logs at the globbable gates location, and the rail may
+surface those reviews. The rail opens the provider's UI; it never writes an
+inline verdict.
+
+Sprint membership is frontmatter, not a hard-coded roadmap list. Query a
+sprint with `spacedock status --workflow-dir docs/agent-rail-dev --where
+sprint=<slug>`; add `--where 'sprint-readiness != defer' --fields group` to
+see its ready delivery roles. Readiness informs First Officer policy; it does
+not override the workflow's normal dispatch guards.
 
 ## File Naming
 
@@ -60,6 +68,9 @@ Every task file has YAML frontmatter. Fields are documented below; see
 | `title` | string | Human-readable task name |
 | `status` | enum | One of: backlog, ideation, implementation, validation, done |
 | `source` | string | Where this task came from (plan sprint, retrospective, finding) |
+| `sprint` | string | Sprint slug used for membership queries, for example `s1-trusted-test-profile-onramp` |
+| `group` | string | Role within that sprint, such as `walking-skeleton` or `contingent-enablement` |
+| `sprint-readiness` | string | `ready` or `defer`; a delivery-planning filter, not a machine dispatch lock |
 | `started` | ISO 8601 | When active work began |
 | `completed` | ISO 8601 | When the task reached terminal status |
 | `verdict` | enum | PASSED or REJECTED — set at validation |
@@ -89,12 +100,14 @@ id-style: sd-b32
 ### `backlog`
 
 A task enters backlog as a seed from the sprint plan (or a finding promoted
-from triage). Ungated: the FO advances tasks in sprint-plan order; CL
-reprioritizes conversationally.
+from triage). Ungated: the FO advances a ready task only when its sprint-entry
+gate permits it; CL reprioritizes conversationally.
 
-- **Inputs:** `docs/plan-agent-rail.md` sprint ordering; the task's seed description.
+- **Inputs:** `docs/roadmap.md` sprint outcome and ordering; the task's seed
+  description; and, when relevant, the current per-tab baseline.
 - **Outputs:** a one-paragraph problem statement and the sprint it serves.
-- **Good:** the task is the smallest unit that demos on its own; sprint-0 tasks lead.
+- **Good:** the task is the smallest unit that demos an operator outcome or
+  closes a measured baseline failure; the roadmap's current outcome leads.
 - **Bad:** a task that bundles two behaviors; a task whose exit can't be demoed in the fresh zellij session.
 
 ### `ideation`
@@ -103,7 +116,12 @@ CL greenlit the task; a worker designs it: problem, approach, acceptance
 criteria as entity-level end-state properties with `Verified by:` clauses, and
 a test plan matching the AC's level of abstraction.
 
-- **Inputs:** `docs/plan-agent-rail.md` (the decisions section is binding: binding-in-plugin, Go grout, two typed row kinds over pipe name `agent-event`, glob config), the landmine dossier woven through it, `SPEC.md` landmines, `docs/docking-approach.md` for the shipped container, `docs/review-findings-2026-07-07.md` for open findings that touch the task's code region.
+- **Inputs:** `docs/roadmap.md` for the sprint outcome and explicit deferrals;
+  `docs/zaphod-workspace-architecture.md` for durable product boundaries;
+  the shipped baseline in `README.md`; `SPEC.md` landmines;
+  `docs/docking-approach.md`; and relevant prototype records. Historical
+  `docs/plan-agent-rail.md` decisions are evidence, not binding product
+  architecture.
 - **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; ACs split into **offline** (agent-reproducible) and **interactive** (settled only by CL's live demo); the task's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan — or the auditable negative `no spike needed: {the proven mechanisms it relies on}` on the record; when the task changes user-visible behavior (keybinds, rows, layout), a concrete doc diff proposed in the body and reviewed at this gate.
 - **Good:** at least one AC measures the end value the task exists for, against an independent baseline that can move the wrong way (a count, a timing, a behavior, resulting on-disk state) — a mechanism-only AC counts only when paired with the value-measuring AC it serves; every AC's expected value comes from outside the file under test; fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
 - **Bad:** an AC provable only by reviewing the entity's own prose; a string/substring/regex match over a file the implementer also writes (a tautology — the check polices its own author); a design that reaches beyond the task's sprint exit criterion; inventing new mechanisms when the spike already proved one.
@@ -163,9 +181,9 @@ sprint plan instead.
 - **Test-first authoring, external-proof ACs, and detached adversarial audit**
   (the dev-shape proof disciplines) are mandatory here, folded into the
   implementation and validation stage definitions above.
-- **Dogfood posture.** The rail fails visible-not-blocking; the plugin
-  pipe-unblock task leads sprint 0 because it is the one change protecting
-  CL's real sessions. `install.sh` points the global layout only at the primary
+- **Dogfood posture.** The historical sprint-0 pipe-unblock work established
+  the rail's visible-not-blocking safety baseline. Keep that behavior in every
+  current task. `install.sh` points the global layout only at the primary
   checkout artifact. Unmerged hot-swap and live validation use
   `scripts/zellij-worktree-test-profile.sh`; they never repoint standing global
   config or layout files.
@@ -205,6 +223,9 @@ id:
 title: Task title here
 status: backlog
 source:
+sprint:
+group:
+sprint-readiness:
 started:
 completed:
 verdict:
