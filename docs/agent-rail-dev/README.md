@@ -36,6 +36,12 @@ validation reviews run through spacedock-subspace with decision logs at the
 globbable gates location, so the rail being built learns to surface the very
 gates that built it.
 
+Sprint membership is frontmatter, not a hard-coded roadmap list. Query a
+sprint with `spacedock status --workflow-dir docs/agent-rail-dev --where
+sprint=<slug>`; add `--where 'sprint-readiness != defer' --fields group` to
+see its ready delivery roles. Readiness informs First Officer policy; it does
+not override the workflow's normal dispatch guards.
+
 ## File Naming
 
 Each task lives as either:
@@ -60,6 +66,9 @@ Every task file has YAML frontmatter. Fields are documented below; see
 | `title` | string | Human-readable task name |
 | `status` | enum | One of: backlog, ideation, implementation, validation, done |
 | `source` | string | Where this task came from (plan sprint, retrospective, finding) |
+| `sprint` | string | Sprint slug used for membership queries, for example `s1-trusted-test-profile-onramp` |
+| `group` | string | Role within that sprint, such as `walking-skeleton` or `contingent-enablement` |
+| `sprint-readiness` | string | `ready` or `defer`; a delivery-planning filter, not a machine dispatch lock |
 | `started` | ISO 8601 | When active work began |
 | `completed` | ISO 8601 | When the task reached terminal status |
 | `verdict` | enum | PASSED or REJECTED — set at validation |
@@ -205,6 +214,9 @@ id:
 title: Task title here
 status: backlog
 source:
+sprint:
+group:
+sprint-readiness:
 started:
 completed:
 verdict:
