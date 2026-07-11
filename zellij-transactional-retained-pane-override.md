@@ -423,6 +423,36 @@ checks. Verification found one fixture-shape bug and one focused-test filter
 gap; `3a92ae8` repairs only those proof artifacts, while production/runtime
 paths remain byte-for-byte unchanged and no fork is shipped.
 
+## Stage Report: implementation (cycle 3)
+
+- FAILED: Wire an actual server action/caller path, including plugin event and/or CLI result as claimed.
+  The series changes only `tab/mod.rs`, a new tab helper, and a serializable utility result; it has no `CliAction`/`Action`, IPC protobuf, `PluginCommand`/shim, event protobuf, `ScreenInstruction`, `PluginInstruction`, or `PtyInstruction` caller path.
+- FAILED: Immediately before the single commit, compare the plan's stable tab_id to the actual target tab and recheck retained-pane identity/fingerprint.
+  `commit_retained_override` compares a detached helper fingerprint but receives no `Tab`/screen target; no running server operation checks `plan.tab_id` against the selected tab immediately before commit.
+- FAILED: Return explicit Applied/Rejected through the actual caller.
+  Patch 0003 defines serde data and local `cli_exit_status`/`cli_stderr` methods only; `plugins/zellij_exports.rs::run_action` still keeps only `affected_pane_id` and emits legacy `ActionComplete`, while CLI completion has no transactional result.
+- FAILED: Run both feasible N=2 and impossible-layout N=2 through that path.
+  The verifier runs pure planner/result unit tests; no route, screen, plugin, PTY, tab, plugin event, or CLI operation invokes the helper.
+- FAILED: Externally observe before/after pane IDs, geometry, process/PID survival, zero terminal spawn/drop, and caller-visible rejection/nonzero rather than storing declarative fixture strings.
+  `verify.sh` hashes the KDL fixtures into `pane-snapshots.json` and runs no Zellij session/process observer, so it records no live IDs, PIDs, geometry, spawn/drop messages, or caller exit.
+- FAILED: Ensure the verifier runs every load-bearing rejection/result test, not a narrow filter.
+  Cycle 2 widened the existing result filter, but the load-bearing integration tests do not exist; the current passing set cannot prove the requested operation.
+- DONE: Preserve wrong-base/apply-drift controls and the inert Zaphod installer/Cargo/runtime boundary; do not install, ship, select, or require a fork.
+  Cycle-2 controls remain repeatable at `3a92ae8`; cycle 3 made no code or proof-kit change, selected no patched runtime, and left the implementation worktree clean.
+- SKIPPED: Repair the proof kit to satisfy the real-operation requirements.
+  A bounded repair is impossible: CLI/plugin decode must add public protobuf/API variants, screen must preplan by stable tab, plugin staging must bypass legacy PTY terminal spawning, screen must replan and unload on drift, tab must exact-commit, and both NotificationEnd and plugin Event must carry the typed result.
+
+### Summary
+
+Cycle 3 confirms the validation rejection is architectural, not another
+fixture defect. The legacy route is `Action::OverrideLayout` -> screen mutation
+-> plugin loading -> `PtyInstruction::OverrideLayout` terminal spawning ->
+`Tab::override_layout`; inserting the helper into that route cannot prevent
+pre-commit side effects or return a typed result. Implementing the requested
+operation therefore requires the broad upstream action/protobuf/thread redesign
+described above; per the captain's stop condition, no helper-only substitute was
+added and commit `3a92ae8` remains unchanged.
+
 ## Stage Report: validation
 
 - DONE: Independently replay the exact-base ordered patch series and prove the unchanged server test is API-red before implementation, planner-green after implementation, and result-contract green after the final patch.
