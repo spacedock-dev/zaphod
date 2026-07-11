@@ -305,6 +305,11 @@ entry and guarded toggle,” plus `zellij-managed-identity-feasibility.md` —
 - DONE: Return one recommendation, explicit AC-1 through AC-4 evidence citations, and an honest Sprint 1 exit journey.
   The result is **APPROVE** for the gated ideation contract; native identity remains a hard implementation gate and product controller behavior remains parked.
 
+AC-1 evidence: `foreground-attached-client-profile.md` — “Sprint role”; `managed-view-driver-contract.md` — “Dependency boundary”; `zellij-managed-identity-feasibility.md` — “Contract-freeze prerequisites.”
+AC-2 evidence: `managed-view-driver-contract.md` — “Shared-contract addendum — Sprint 1 gate”; `zaphod-native-cli-skeleton.md` — “Ownership and artifact boundary”; `foreground-attached-client-profile.md` — “Proposed approach”; `zellij-managed-identity-feasibility.md` — “Shared lease and marker-tuple contract.”
+AC-3 evidence: `foreground-attached-client-profile.md` — “Captain-live”; `zaphod-native-cli-skeleton.md` — “Acceptance criteria”; `zellij-managed-identity-feasibility.md` — “Out of scope.”
+AC-4 evidence: `managed-view-driver-contract.md` — “Test plan”; `zaphod-native-cli-skeleton.md` — “Test plan”; `zellij-managed-identity-feasibility.md` — “Evidence matrix.”
+
 ### Summary
 
 The revised packets are coherent enough to leave ideation. They preserve the
