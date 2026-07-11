@@ -421,3 +421,21 @@ RED→GREEN runs and independent Zaphod metadata, installer, Rust, Go, and shell
 checks. Verification found one fixture-shape bug and one focused-test filter
 gap; `3a92ae8` repairs only those proof artifacts, while production/runtime
 paths remain byte-for-byte unchanged and no fork is shipped.
+
+## Stage Report: validation
+
+- DONE: Independently replay the exact-base ordered patch series and prove the unchanged server test is API-red before implementation, planner-green after implementation, and result-contract green after the final patch.
+  Two fresh disposable runs at `55a2121` reproduced stable patch IDs and exits RED 101, planner GREEN 0 (1/1), and result helper GREEN 0 (3/3); wrong-base and corrupted-context controls stopped before Cargo.
+- DONE: Attack atomic rejection and result semantics at N=2 boundaries, wrong base/apply drift, stale tab identity, impossible geometry, spawn/drop side effects, and caller-visible rejection without trusting implementation logs.
+  The audit REJECTS: no server/plugin/CLI integration or process matrix exists, `tab_id` is unchecked at commit, the N=2 rejection test is not run by the verifier, and the claimed pane snapshots are static fixture hashes/invariant strings.
+- DONE: Prove the proof kit remains inert to Zaphod production paths, installer output, Cargo metadata, ordinary Rust/Go/shell suites, and runtime selection; prepare the exact later live-gate evidence without claiming a shipped fork.
+  Protected diffs, normalized metadata, installer SHA-256, Rust 132/check, Go 35/vet, and shell syntax pass with the kit removed; the gate artifact records that an exact live command is impossible until an upstream surface or separately approved fork exists and gives the required later evidence sequence.
+
+### Summary
+
+Validation independently confirms the harness's narrow RED/GREEN phases and
+Zaphod inertness, but rejects the deliverable against AC-1 through AC-5 and the
+process-evidence portion of AC-7. The subspace draft, decision record, per-AC
+evidence, refutation audit, and activation boundary are under
+`.spacedock-state/gates/zellij-transactional-retained-pane-override*`; no fork
+was installed, selected, shipped, or required.
