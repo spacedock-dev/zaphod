@@ -396,3 +396,28 @@ cleanly and no production or installer path consumes it. Behavioral RED/GREEN,
 Cargo metadata, installer, and ordinary-suite evidence is deliberately
 unclaimed because the first officer's compile hold was never released; those
 commands remain the validation-stage entry point, without selecting a fork.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: After the first officer releases the disk hold, run the complete disposable RED→GREEN host proof plus relevant Zaphod Rust/Go/shell verification, record exact evidence, and leave the implementation worktree clean; do not ship or select a fork.
+  `CARGO_INCREMENTAL=0 RUSTFLAGS='-C debuginfo=0' tools/zellij-transactional-override/verify.sh --fetch --artifacts /tmp/4d-zellij-proof-{3,4}` passed twice at exact base `55a2121`; both report RED 101, GREEN 0, result-contract 0, and cleanup `complete`.
+- DONE: Record the exact red output and before/after test counts required by the implementation stage definition.
+  RED was Rust `E0432`: `no plan_retained_override`, `no PlanError`, and `no RetainedPane in tab::transactional_override`; the identical server test then passed 1/1 (1,231 filtered), and the result contract passed 3/3 (386 filtered).
+- DONE: Repair only proof-kit defects if verification exposes them, using red-first evidence; commit any changes.
+  Run 1 preserved the expected API RED but exposed `Implicit sizing within fixed-size panes is not supported`; commit `3a92ae8` changes only the test fixture to Zellij's flexible `Size -> PaneGeom` pattern and widens the verifier filter to include the rejection/CLI-nonzero test.
+- DONE: Prove exact-base and apply-drift controls before compilation.
+  Wrong-base control rejected before Cargo; a copied kit with corrupted 0002 context rejected in ordered-series preflight with phase exits still null. Runs 3/4 have identical stable patch IDs `ab01695a`, `ffd08f9b`, `65c0ceaf` and identical phase verdicts.
+- DONE: Prove no installer, Cargo graph, runtime, or protected production path consumes the kit.
+  Normalized `cargo metadata --locked --no-deps --format-version 1` is byte-identical at `c66400d` and candidate; fresh installer outputs with identical sentinel wasm normalize to SHA-256 `72ac869886aad8b912cc5763ef5cfc3a0b92bc79a08f8b663a442855c4a5261b`.
+- DONE: Run the relevant ordinary Zaphod verification without a patched runtime.
+  `cargo test --locked` passed 132 tests; `cargo check --locked --tests` completed 181 crates; `go test ./...` passed 35 tests, `go vet ./...` found no issues, and every repository shell script passed `bash -n`.
+- DONE: Preserve the inert runtime boundary and leave the worktree clean.
+  Protected-path diff and reference search across `src/`, Cargo files, build/install scripts, layouts, and `grout/` are empty; only the proof kit changed, no patched binary or fork was selected, and verifier clones/sessions were cleaned.
+
+### Summary
+
+Cycle 2 closes the compile-held evidence gap with two reproducible exact-base
+RED→GREEN runs and independent Zaphod metadata, installer, Rust, Go, and shell
+checks. Verification found one fixture-shape bug and one focused-test filter
+gap; `3a92ae8` repairs only those proof artifacts, while production/runtime
+paths remain byte-for-byte unchanged and no fork is shipped.
