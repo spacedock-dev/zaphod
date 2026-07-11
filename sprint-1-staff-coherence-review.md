@@ -1,8 +1,8 @@
 ---
 title: Staff software engineering coherence review for Sprint 1
-status: backlog
+status: ideation
 source: captain-requested independent full-sprint review after Sprint 1 ideation, 2026-07-11
-started:
+started: 2026-07-11T05:59:12Z
 completed:
 verdict:
 score: 1.0
