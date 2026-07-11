@@ -1,16 +1,18 @@
 ---
 title: Zellij transactional retained-pane override for safe foreign-tab docking
-status: implementation
+status: validation
 score: 0.95
 source: j5 cycle-5 host-API blocker — captain selected Choice A, 2026-07-10
 started: 2026-07-10T15:03:06Z
 completed:
-worktree: .worktrees/spacedock-ensign-zellij-transactional-retained-pane-override
+worktree:
 issue:
 pr:
-verdict:
+verdict: REJECTED
 mod-block:
 id: 4dt6vkakec3fmmpm5s0kgtch
+parked: 2026-07-12
+parked-reason: Captain parked the orphaned rejected upstream proof task; branch and reports retained, no active worktree or worker.
 ---
 
 ## Problem
