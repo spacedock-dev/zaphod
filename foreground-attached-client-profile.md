@@ -11,8 +11,10 @@ worktree: .worktrees/spacedock-ensign-foreground-attached-client-profile
 issue:
 pr:
 mod-block:
-sprint: 1
-sprint-lane: release-path
+sprint: s1-trusted-test-profile-onramp
+sprint-lane:
+group: walking-skeleton
+sprint-readiness: ready
 ---
 
 ## Problem
