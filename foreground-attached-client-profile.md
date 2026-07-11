@@ -17,9 +17,21 @@ mod-block:
 
 The canonical disposable profile backgrounds its attached Zellij client, so it can render but cannot reliably own or read the controlling terminal. Repair the profile before any real-key acceptance drill consumes captain time.
 
+The current diagnostic metadata is also not a safe handoff to the later CLI
+and native-feasibility lanes: a consumer could infer a session or teardown
+right from a path, display name, or active client. The foreground lane must
+publish one narrow, test-only lease after foreground readiness instead of
+leaving those lanes to derive identity or lifecycle ownership.
+
 ## Sprint role
 
 This is Sprint 1's mandatory entry task and merges before other live Zellij work. Limit changes to the disposable profile and process-level tests. Prove foreground process-group ownership, raw PTY input reaching a terminal canary, normal and signal cleanup, temporary-root removal, and unchanged standing config/layout hashes.
+
+The foreground task is the sole owner of the base profile root, private
+namespace, primary client, exact disposable session, and final teardown. It
+also publishes the immutable test-only `ProfileLeaseV1` needed by later lanes.
+It does not attach or clean up a second PTY client, prove session incarnation
+or a marker, or acquire CLI ownership.
 
 ## Riskiest unproven mechanism
 
@@ -27,49 +39,100 @@ The current trailing `&` makes the attached client an asynchronous Bash job.
 With monitor mode off, Bash redirects that job's stdin to `/dev/null`; it may
 render a session but cannot be the reliable receiver of the operator's PTY
 bytes. The first invalidation must therefore exercise the actual transport,
-not Zellij's control-plane input commands.
+not Zellij's control-plane input commands. It must also prove that a lease is
+not exposed before the kernel sees the primary client in the foreground.
 
 Smallest end-to-end check: launch the current profile under a test-owned PTY,
 write a nonce-bearing `printf` command to the PTY master, select the live
 terminal from `action list-panes --json`, and require the nonce in that
 terminal's live `action dump-screen --pane-id` output. The current background
 launch is expected to fail that check. After the repair, the same test must
-also read the PTY foreground PGID from the kernel and prove that it is the
-attached client's own process group.
+independently read the PTY foreground PGID from the kernel, prove that it is
+the attached client's own process group, and only then observe and parse the
+published `PROFILE_LEASE` path. No second attachment, marker pane, or captain
+drill belongs to that invalidation.
 
 ## Proposed approach
 
 Keep `scripts/zellij-worktree-test-profile.sh` a disposable-profile launcher;
 do not add a controller, production binding, or standing-file write. Make its
-attached client a Bash monitor-mode job and foreground it immediately:
+attached client a Bash monitor-mode job and foreground it immediately, then
+publish one bounded test interface for the later lanes:
 
 1. Fail loudly before launch unless the profile has a controllable terminal.
    Enable Bash job control (`set -m`), start the one attached Zellij client as
    a job, record its PID, then use `fg` immediately. This gives the client its
    own process group and transfers the profile PTY foreground group to that
    client instead of leaving an asynchronous job with stdin detached.
-2. Print the actual `CLIENT_PID` with the existing disposable metadata. The
-   test may use it as a kernel identity, never as a claim by the script.
-   Once `fg` returns, retain the existing EXIT/signal cleanup and global-file
-   comparison; when cleanup interrupts an active job, terminate and reap that
-   client process group before removing the temporary root.
-3. Add a test-local, repository-owned PTY driver using only the Python 3
+2. Keep the current temporary config, data, and layout roots, and add
+   disposable cache and home roots beneath the same absolute `PROFILE_ROOT`.
+   Allocate one opaque private namespace and one exact disposable session name
+   before launch; retain both values exactly as selected. They are inputs to
+   later attachment, not values to reconstruct from a path, display name,
+   active client, or cwd.
+3. Start a repository-owned, test-only readiness publisher as part of the
+   profile lifecycle. It observes the controlling PTY from the OS, waits until
+   the primary PID is live, `getpgid(CLIENT_PID) == tcgetpgrp(pty)`, and the
+   exact private session is observable. It neither injects a key nor invokes a
+   Zellij action. Before those observations succeed it writes and prints no
+   lease. After they succeed it atomically writes the lease with a temporary
+   file plus rename, makes the completed file read-only inside the private
+   root, and prints exactly `PROFILE_LEASE=<path>` once. The profile cleanup
+   reaps this publisher along with the primary-client process group. Existing
+   early `PROFILE_ROOT` and `SESSION_NAME` lines remain foreground-test
+   diagnostics only; dependent lanes must treat `PROFILE_LEASE` as the sole
+   ready-to-share handoff.
+4. The published file is exactly
+   `$PROFILE_ROOT/profile-lease-v1.json`; its stable `ProfileLeaseV1` shape is:
+
+   ```json
+   {
+     "schema": "zaphod.profile.v1",
+     "profile_root": "/absolute/disposable/root",
+     "namespace": "opaque-exact-private-zellij-namespace",
+     "native_session_id": "exact-disposable-session-name",
+     "primary_client": {"pid": 1234, "pgid": 1234},
+     "attach": {
+       "zellij_bin": "/exact/path/to/zellij",
+       "config_dir": "/absolute/disposable/root/config",
+       "data_dir": "/absolute/disposable/root/data",
+       "cache_dir": "/absolute/disposable/root/cache",
+       "home_dir": "/absolute/disposable/root/home",
+       "namespace": "opaque-exact-private-zellij-namespace",
+       "native_session_id": "exact-disposable-session-name"
+     },
+     "teardown_owner": "foreground-attached-client-profile"
+   }
+   ```
+
+   All fields are immutable once the file is published: `schema` is exactly
+   `zaphod.profile.v1`, `profile_root` and every filesystem attach input are
+   absolute, and the duplicated `namespace` and `native_session_id` values
+   equal their top-level values byte-for-byte. A consumer passes every attach
+   field back verbatim; it may not derive or normalize namespace/session data.
+   The lease proves neither a session incarnation nor marker-pane ownership,
+   and it carries no permission, controller, or candidate-binary authority.
+5. Ownership is deliberately asymmetric. This task owns the base root,
+   namespace, session, primary client, lease publisher, and final teardown.
+   `zellij-managed-identity-feasibility` owns any second PTY client, its
+   PID/PGID, temporary controller, permission cache, evidence, and teardown;
+   it must release that client before the profile's final cleanup. The CLI
+   task owns only `$PROFILE_ROOT/bin/zaphod`; it creates no client and cannot
+   alter or tear down the lease. Every independent run receives a fresh lease.
+6. Add a test-local, repository-owned PTY driver using only the Python 3
    standard-library `pty`, `os`, and `subprocess` modules. It must preflight
    `python3`, allocate the slave PTY itself, retain the master for byte writes,
-   and expose the profile's metadata to the shell test. No `expect`, terminal
-   emulator, or hidden human terminal is allowed.
-4. Extend `tests/zellij-install-profile-test.sh`'s profile lifecycle helpers
-   to run the profile through that driver. The driver obtains
-   `os.getpgid(CLIENT_PID)` and `os.tcgetpgrp(master_fd)` independently of the
-   profile, writes an externally generated alphanumeric nonce to the master,
-   and uses Zellij's live `list-panes` plus `dump-screen` only to observe the
-   terminal result. It must not use `zellij action write` or `write-chars`,
-   because those bypass the attached-client input path being proved.
-5. Preserve the current temp config/layout/data roots, `file_state` snapshot
-   discipline, unique session naming, Zellij 0.44.3 gate, and existing
-   identity/layout validators. The canary is the ordinary sole terminal shell
-   executing the raw nonce command; it introduces no new profile keybinding,
-   persistent layout, or production artifact.
+   and independently observe the primary process-group facts before consuming
+   the lease. It writes an externally generated alphanumeric nonce to the
+   master and uses Zellij's live `list-panes` plus `dump-screen` only to
+   observe the terminal result. It must not use `zellij action write` or
+   `write-chars`, because those bypass the attached-client input path being
+   proved.
+7. Preserve the current `file_state` snapshot discipline, unique session
+   naming, Zellij 0.44.3 gate, and existing identity/layout validators. The
+   canary is the ordinary sole terminal shell executing the raw nonce command;
+   it introduces no new profile keybinding, persistent layout, or production
+   artifact.
 
 The design extends the test-only `start_profile_process` and
 `run_profile_signal_foreground` lifecycle helpers. It deliberately does not
@@ -94,13 +157,36 @@ the PTY master, and polls the live dump until that nonce appears. It contains
 no authored dump fixture; should one ever be needed, it must record Zellij's
 real single-line dump shape rather than synthetic multiline KDL.
 
-**AC-O2 — the attached client owns the foreground PTY process group (mechanism serving AC-O1).** While AC-O1's session is alive,
+**AC-O2 — the attached client owns the foreground PTY process group before a lease is exposed (mechanism serving AC-O1).** While AC-O1's session is alive,
 `CLIENT_PID == getpgid(CLIENT_PID) == tcgetpgrp(test_pty_master)`. A detached,
-background, or merely rendered client cannot satisfy this equality.
+background, or merely rendered client cannot satisfy this equality. No
+`PROFILE_LEASE` line or `$PROFILE_ROOT/profile-lease-v1.json` may appear
+before the independent OS observation and exact private-session readiness.
 
-Verified by: `tests/zellij-install-profile-test.sh worktree-profile` invokes the PTY driver, reads both process-group values from the OS after metadata is emitted, and fails before any raw-input assertion if they differ. The current `&` launch is the predicted red baseline: it cannot pass the raw canary because Bash gives its asynchronous client `/dev/null` as stdin.
+Verified by: `tests/zellij-install-profile-test.sh worktree-profile` invokes
+the PTY driver, records both process-group values from the OS, and fails before
+any raw-input assertion if they differ. Only after it records the equality and
+the live session may it consume `PROFILE_LEASE`; the current `&` launch is the
+predicted red baseline because Bash gives its asynchronous client `/dev/null`
+as stdin.
 
-**AC-O3 — normal non-signal completion is contained.** After the live
+**AC-O3 — ProfileLeaseV1 is an immutable, bounded test handoff.** While the
+base profile is live, the one published path is exactly
+`$PROFILE_ROOT/profile-lease-v1.json` and its parsed object has the fixed
+schema, absolute root/attach paths, opaque exact namespace, exact native
+session ID, OS-observed primary PID/PGID, and teardown owner specified above.
+Its two attach identity fields equal their top-level values byte-for-byte;
+the completed bytes do not change before cleanup. It contains no incarnation,
+marker, permission, controller, or candidate-binary ownership claim.
+
+Verified by: the focused process test parses the emitted file with an external
+JSON parser, compares the primary fields with the PTY driver's OS observation
+and launch inputs, captures its completed digest during the live session, and
+requires the same digest immediately before normal cleanup. The test starts no
+secondary client: later feasibility evidence must consume the fields verbatim
+and own client B separately.
+
+**AC-O4 — normal non-signal completion is contained.** After the live
 profile session ends through the normal Zellij session-termination path, the
 profile process returns, its named session is absent, its emitted temporary
 root no longer exists, and the pre-launch `file_state` values for both
@@ -109,25 +195,25 @@ root no longer exists, and the pre-launch `file_state` values for both
 
 Verified by: `tests/zellij-install-profile-test.sh worktree-profile` captures SHA-256 sentinels before launch, terminates the disposable session without sending a POSIX signal, waits for the profile, and compares the saved hashes and root/session existence. A companion missing-file fixture verifies the profile creates neither standing file nor standing directory.
 
-**AC-O4 — foreground INT, TERM, and HUP clean up.** For three separate fresh
+**AC-O5 — foreground INT, TERM, and HUP clean up.** For three separate fresh
 profiles, delivery of `INT`, `TERM`, or `HUP` to the proven foreground client
 PGID leaves no client/job, named Zellij session, or profile root and preserves
 the same two pre-launch global-file states. Each profile exits nonzero rather
 than reporting a successful normal run.
 
-Verified by: `tests/zellij-install-profile-test.sh worktree-profile` runs three fresh signal cases; its PTY driver signals the PGID measured for AC-O2 (not the test runner's group), waits with a bounded deadline, then asserts session absence, root removal, process reaping, and exact before/after hashes.
+Verified by: `tests/zellij-install-profile-test.sh worktree-profile` runs three fresh signal cases; its PTY driver signals the PGID measured for AC-O2 (not the test runner's group), waits with a bounded deadline, then asserts session absence, root removal, process reaping, lease disappearance with the root, and exact before/after hashes.
 
-**AC-O5 — failure is visible rather than a silent fallback.** Invoking the
+**AC-O6 — failure is visible rather than a silent fallback.** Invoking the
 attached profile without a controllable terminal fails before creating a
 session or profile root and tells the operator that an attached terminal is
 required.
 
 Verified by: `tests/zellij-install-profile-test.sh profile-no-tty` checks
-nonzero exit, no session, and no temporary-root metadata. This prevents a
-future refactor from reintroducing a background/detached fallback just to make
-CI appear green.
+nonzero exit, no session, no temporary-root metadata, and no lease path. This
+prevents a future refactor from reintroducing a background/detached fallback
+just to make CI appear green.
 
-### Captain-live (only after AC-O1 through AC-O5 pass)
+### Captain-live (only after AC-O1 through AC-O6 pass)
 
 **AC-I1 — a human can safely exercise real keys.** From an ordinary terminal,
 the captain runs the documented disposable-profile command, sees the attached
@@ -147,24 +233,32 @@ the kernel process-group or raw-input infrastructure claims.
    nonce from live `dump-screen` after a raw master write; do not substitute
    `action write-chars`, a transcript match, or a hand-authored dump.
 2. Make the smallest launcher change: terminal preflight, `set -m`, one
-   attached client job, emitted client PID, immediate `fg`, and bounded
-   job-group cleanup/reap. Re-run the same test green, requiring both the
-   kernel PGID equality and dump-screen nonce.
-3. Rework the existing normal lifecycle case around the PTY driver. Verify
+   attached client job, immediate `fg`, and bounded job-group cleanup/reap.
+   Add the one-shot readiness publisher, but require it to remain silent until
+   the OS foreground-PGID observation and exact session readiness succeed.
+   Re-run the same test green, requiring both the kernel equality and
+   dump-screen nonce.
+3. Extend that focused process test to wait for `PROFILE_LEASE`, parse its JSON
+   externally, compare every field with the launch and OS observations, and
+   compare its completed digest before normal cleanup. It must reject an early,
+   duplicate, mutable, path-derived, or identity-overclaiming lease. It must
+   not attach a second client or use a marker pane.
+4. Rework the existing normal lifecycle case around the PTY driver. Verify
    the existing layout/identity checks still use the disposable files, then
-   verify normal session termination, root deletion, session deletion, and
-   present/missing standing-file snapshots.
-4. Run three isolated signal cases (`INT`, `TERM`, `HUP`) against the actual
-   foreground client PGID. Do not reuse a possibly contaminated profile root
-   or session name between cases; retain bounded liveness diagnostics.
-5. Run the focused shell suite and its existing timeout/readiness regressions,
+   verify normal session termination, lease/root deletion, session deletion,
+   and present/missing standing-file snapshots.
+5. Run three isolated signal cases (`INT`, `TERM`, `HUP`) against the actual
+   foreground client PGID, plus the no-TTY failure case. Do not reuse a
+   possibly contaminated profile root or session name between cases; retain
+   bounded liveness diagnostics and prove that no lease survives either path.
+6. Run the focused shell suite and its existing timeout/readiness regressions,
    then the relevant full shell suite. Zellij-dependent cases retain the exact
    0.44.3 preflight and the PTY driver retains an explicit `python3`
    preflight, so a missing prerequisite fails loudly.
-6. Only then prepare the captain-live script: start the profile, type the
-   marker, observe it, exit, and confirm that no standing configuration was
-   repointed. Record it for validation rather than using the captain to
-   diagnose an offline failure.
+7. Do not run a captain-live drill as part of this ideation rework. After the
+   offline packet is green, AC-I1 remains a separate captain validation of the
+   resulting operator experience; it is never used to diagnose PTY, lease, or
+   cleanup infrastructure.
 
 ## Documentation change
 
@@ -172,19 +266,24 @@ Update the README's disposable-profile instructions to say that the command
 is foreground-attached, is the supported place to exercise real candidate
 keys, and removes its disposable session/root on normal exit or interruption.
 Keep the existing isolation warning explicit: it never installs, rewrites, or
-restores standing Zellij configuration or layouts. No user-facing production
-keybinding documentation changes in this task.
+restores standing Zellij configuration or layouts. Explain that
+`PROFILE_LEASE` is a test-harness handoff, not a user-facing identity or
+configuration interface. No user-facing production keybinding documentation
+changes in this task.
 
 ## Out of scope
 
 - Production managed-tab behavior, `Alt Shift z`, or any new production
   keybinding.
-- Pane adoption, pane movement, focus policy, identity markers, or session
-  incarnation/reuse work.
+- A second PTY client, its process group/teardown, temporary controller,
+  permissions, marker pane, native identity query, or session
+  incarnation/reuse evidence; those belong to the feasibility lane.
 - Any write, restore, or migration of standing Zellij configuration, layout,
   cache, or data directories.
-- Zellij controller architecture, native CLI behavior, and the Sprint 1
-  driver-contract or identity-feasibility tasks.
+- Zellij controller architecture, native CLI behavior, or ownership beyond
+  `$PROFILE_ROOT/bin/zaphod`; the CLI may not create clients or tear down this
+  lease.
+- Executing a captain-live drill during this rework.
 
 ## Stage Report: ideation
 
@@ -203,3 +302,20 @@ process group and carry an independently generated raw nonce to a terminal
 dump. The offline suite owns all infrastructure and cleanup evidence before a
 captain types real keys; the live drill is reserved for the resulting safe
 operator experience.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Publish the immutable ProfileLeaseV1 test-only interface only after the primary foreground client is ready, with exact lease fields and non-derivation rules.
+  `Proposed approach` defines the one-shot `$PROFILE_ROOT/profile-lease-v1.json` publication condition, fixed JSON shape, byte-exact duplicated identity fields, and AC-O2/AC-O3 process evidence.
+- DONE: Specify base-profile versus secondary-client lifecycle/PGID/teardown ownership so CLI and feasibility lanes can share the profile safely.
+  `Sprint role` and `Proposed approach` assign the base root/session/client A/final cleanup here, client B and its PGID/teardown to feasibility, and only `$PROFILE_ROOT/bin/zaphod` to the CLI.
+- DONE: Preserve the foreground PTY proof and global-isolation boundary without claiming session incarnation or native marker identity.
+  AC-O1 and AC-O4, AC-O5, and AC-O6 retain the raw PTY, cleanup, and standing-file-hash proof; the lease and out-of-scope rules explicitly deny incarnation and marker ownership, while AC-I1 remains deliberately deferred to captain validation.
+
+### Summary
+
+The task now exposes a single immutable, test-only lease only after the OS has
+observed the actual primary foreground client, allowing later lanes to reuse
+the disposable profile without inheriting lifecycle or identity authority.
+The raw-key canary, signal cleanup, root removal, and standing-file isolation
+remain the foreground lane's proof; no captain-live drill was run or claimed.
