@@ -110,14 +110,20 @@ the CLI and spike will both touch the disposable-profile/test surface; assign
 one profile-integration owner or isolate their helpers before merge so this is
 also source-level safe concurrency.
 
+**Sources:** `docs/roadmap.md` — “Delivery rules,” “Dispatch and merge order,”
+and “Sprint gates”; `foreground-attached-client-profile.md` — “Sprint role”
+and AC-O1–AC-O5; `zaphod-native-cli-skeleton.md` — “Test plan”;
+`managed-view-driver-contract.md` — “Dependency boundary”; and
+`zellij-managed-identity-feasibility.md` — “Contract-freeze prerequisites.”
+
 ### Cross-packet interface and ownership assessment
 
-| Seam | Assessment and required gate decision |
-| --- | --- |
-| Foreground profile -> CLI and spike | The profile proves one foreground client; the CLI adds `ZAPHOD_BIN`, while the spike needs a second independently foregrounded attachment. Freeze a small profile-test interface: session/namespace metadata, profile root, client PGID, attachment command inputs, and teardown ownership. The foreground lane owns the base lifecycle, the CLI lane owns the candidate binary, and the spike owns the second PTY client. |
-| CLI -> binding core | `Handshake`, correlated envelopes, and mutation states agree, but the CLI currently owns only `health` and unsupported `binding.inspect`; no packet names the Go package/process that implements the registry verbs and is invoked by `cmd/zaphod`. Assign that owner at the contract gate (within the existing `grout` module) and map each `binding.*` command to it before implementation. |
-| Handshake -> driver capabilities/errors | The CLI's baseline transport capabilities and the contract's native identity capabilities are compatible but not yet one advertised vocabulary. Publish one v1 matrix for transport, binding, and driver capabilities plus canonical malformed-envelope, protocol-mismatch, and correlation error tags. Zellij identity capabilities must remain absent until the spike proves them. |
-| Binding contract -> Zellij spike | The binding UUID, schema, incarnation, and marker concepts are compatible, but `zaphod.binding.v1/<binding_id>` must be explicitly mapped to the marker-pane configuration and fresh-query evidence at the native-identity gate. The spike, not the portable core, owns proof of namespace, incarnation, marker persistence, and queryability. |
+| Seam | Assessment and required gate decision | Sources |
+| --- | --- | --- |
+| Foreground profile -> CLI and spike | The profile proves one foreground client; the CLI adds `ZAPHOD_BIN`, while the spike needs a second independently foregrounded attachment. Freeze a small profile-test interface: session/namespace metadata, profile root, client PGID, attachment command inputs, and teardown ownership. The foreground lane owns the base lifecycle, the CLI lane owns the candidate binary, and the spike owns the second PTY client. | `foreground-attached-client-profile.md` — “Proposed approach”; `zaphod-native-cli-skeleton.md` — “Ownership and artifact boundary”; `zellij-managed-identity-feasibility.md` — “Disposable offline-first harness.” |
+| CLI -> binding core | `Handshake`, correlated envelopes, and mutation states agree, but the CLI currently owns only `health` and unsupported `binding.inspect`; no packet names the Go package/process that implements the registry verbs and is invoked by `cmd/zaphod`. Assign that owner at the contract gate (within the existing `grout` module) and map each `binding.*` command to it before implementation. | `zaphod-native-cli-skeleton.md` — “Versioned native seam”; `managed-view-driver-contract.md` — “Minimal driver-neutral seam and native CLI packet.” |
+| Handshake -> driver capabilities/errors | The CLI's baseline transport capabilities and the contract's native identity capabilities are compatible but not yet one advertised vocabulary. Publish one v1 matrix for transport, binding, and driver capabilities plus canonical malformed-envelope, protocol-mismatch, and correlation error tags. Zellij identity capabilities must remain absent until the spike proves them. | `zaphod-native-cli-skeleton.md` — “Versioned native seam”; `managed-view-driver-contract.md` — “Minimal driver-neutral seam and native CLI packet” and “Typed result and mutation model”; `zellij-managed-identity-feasibility.md` — “Contract-freeze prerequisites.” |
+| Binding contract -> Zellij spike | The binding UUID, schema, incarnation, and marker concepts are compatible, but `zaphod.binding.v1/<binding_id>` must be explicitly mapped to the marker-pane configuration and fresh-query evidence at the native-identity gate. The spike, not the portable core, owns proof of namespace, incarnation, marker persistence, and queryability. | `managed-view-driver-contract.md` — “Durable identity and registry invariants” and “View identity, invalidation, and explicit recovery”; `zellij-managed-identity-feasibility.md` — “Proposed approach” and “Evidence matrix.” |
 
 ### Material integration risks and gate handling
 
@@ -144,6 +150,12 @@ production managed view/controller, `Alt Shift z`, `Alt /`, pane adoption,
 workspace hub, dock, provider adapters/notify ingress, tmux product driver,
 and installer rollout exactly as the roadmap requires.
 
+**Sources:** `docs/roadmap.md` — “Delivery rules,” “Sprint 2 — managed Zellij
+entry and guarded toggle,” “Sprint 3 — explicit pane adoption,” “Later
+delivery,” and “Parked outside the release path.” The architecture source is
+`docs/zaphod-workspace-architecture.md` — “Non-goals”; each Sprint 1 packet's
+“Out of scope” supplies the task-level boundary.
+
 ### End-user value and journey at Sprint 1 exit
 
 At a passing Sprint 1 exit, an operator can use the documented foreground
@@ -158,6 +170,13 @@ This is deliberately not a managed-workspace user journey yet. The managed
 view, production keybindings, pane adoption, workspace hub, portable dock,
 and AgentsView, review, and notify providers remain unshipped; a temporary
 spike marker or test key is evidence, not a user-facing entry path.
+
+**Sources:** `docs/roadmap.md` — “Sprint 1 — managed-view foundation and
+feasibility” (Goal, Sprint gates, and Exit criteria), “Sprint 2 — managed
+Zellij entry and guarded toggle,” “Sprint 3 — explicit pane adoption,” and
+“Later delivery”; `docs/zaphod-workspace-architecture.md` — “User experience,”
+“Managed view and pane adoption,” “Dock,” and “Provider adapters”; and the
+four Sprint 1 packets' “Out of scope.”
 
 ### Actionable staff recommendation
 
@@ -184,3 +203,18 @@ lanes, then native-identity reconciliation. The recommendation is approval
 with concrete reframing so the native CLI, portable registry, and disposable
 Zellij spike converge on one owned interface without falsely shipping managed
 workspace behavior.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Trace the full Sprint 1 critical path, gate order, and safe concurrency against the authoritative roadmap rather than reviewing packets in isolation.
+  Added a source block citing the roadmap's delivery rules, dispatch order, sprint gates, and each lane's prerequisite packet section.
+- DONE: Reconcile the CLI, binding-contract, foreground-profile, and native-feasibility seams; name only material contradictions, missing owners, or unproved claims.
+  Added a per-row source column that cites the relevant foreground, CLI, binding-contract, and feasibility packet sections.
+- DONE: State an honest end-user value and journey at Sprint 1 exit, distinguishing delivered foundation from intentionally unshipped product behavior, then give one actionable staff recommendation.
+  Added explicit roadmap, architecture, and task-boundary citations for the exit journey and the preserve/change/park recommendation.
+
+### Summary
+
+This evidence-only repair makes the existing recommendation auditable against
+the authoritative roadmap, architecture, and four task records. It leaves the
+recommendation, review scope, product files, and task designs unchanged.
