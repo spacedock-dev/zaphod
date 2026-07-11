@@ -255,3 +255,24 @@ This alignment revision makes the native CLI a narrow transport shell over the
 future binding core rather than a second policy owner. It freezes its initial
 wire behavior and lease-scoped artifact ownership while keeping binding and
 driver capabilities unadvertised until independently integrated and proved.
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Repair AC-1 evidence or explicitly defer it to implementation with a cited reason.
+  Design evidence: `docs/roadmap.md:23-25,33-35,47-55,74-82`, `docs/plan-agent-rail.md:37-57`, and `grout/go.mod:1-5` establish the Sprint 1 native-artifact goal, Go/grout boundary, and post-contract implementation lane. The inspected tree has neither `grout/cmd/zaphod` nor `scripts/build-zaphod.sh`; fresh-worktree build, one-line handshake, exact capability set, `go test`, and `go vet` remain implementation-stage proof.
+- DONE: Repair AC-3 evidence or explicitly defer it to implementation with a cited reason.
+  Design evidence: `docs/roadmap.md:47-61` sequences foreground validation before native profile wiring; `docs/docking-approach.md:790-805`, `scripts/zellij-worktree-test-profile.sh:25-73`, and `tests/zellij-install-profile-test.sh:578-639` define the existing disposable-root, cleanup, and hash observables; `docs/agent-rail-dev/.spacedock-state/foreground-attached-client-profile.md:115-121` supplies the upstream ownership contract. These sources do not prove a new lease or candidate binary. That proof remains in the profile-wiring implementation lane: consume an actual `ProfileLeaseV1`, run `$PROFILE_ROOT/bin/zaphod`, observe no extra client, and exercise normal, `INT`, `TERM`, and `HUP` cleanup.
+- DONE: Append a report-only ideation cycle; do not edit product files or redesign scope.
+  Inspected sources are `/tmp/spacedock-dispatch/spacedock-ensign-zaphod-native-cli-skeleton-ideation.md`, this record's AC-1/AC-3 and test-plan sections, and the seven cited repository/state files; this cycle changes only this state record and preserves the approved ownership, protocol-v1, and `ProfileLeaseV1` direction.
+
+### Summary
+
+The report now distinguishes durable design inputs from behavior that only an
+implemented CLI and profile integration can demonstrate. AC-1 and AC-3 retain
+their required executable proofs, deferred to the lanes that can produce them;
+the CLI remains process-only and lease-scoped.
+
+### AC evidence and deferred-proof summary
+
+- AC-1 — Design basis: roadmap, Go-module, and grout-boundary citations above. Deferred proof: fresh-worktree binary build, exact `protocol` JSON/capabilities, `go test ./...`, and `go vet ./...` after the CLI exists.
+- AC-3 — Design basis: roadmap sequencing, existing profile lifecycle observables, and the foreground packet's ownership boundary. Deferred proof: real ready-lease consumption and normal/signal cleanup of the candidate profile after foreground validation.
