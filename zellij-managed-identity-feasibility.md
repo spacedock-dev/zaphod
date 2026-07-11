@@ -11,8 +11,10 @@ worktree:
 issue:
 pr:
 mod-block:
-sprint: 1
-sprint-lane: held-after-7h
+sprint: s1-trusted-test-profile-onramp
+sprint-lane:
+group: contingent-enablement
+sprint-readiness: defer
 ---
 
 ## Problem
