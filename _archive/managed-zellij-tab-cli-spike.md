@@ -1,16 +1,17 @@
 ---
 id: jk0e6wnpqcd5c40yhe9pvegh
 title: Managed Zellij tab CLI entry and guarded toggle spike
-status: validation
+status: done
 source: captain-approved managed-tab option 2, 2026-07-11
 started: 2026-07-11T03:03:02Z
-completed:
-verdict:
+completed: 2026-07-11T03:56:11Z
+verdict: passed
 score: 0.98
 worktree: .worktrees/spacedock-ensign-managed-zellij-tab-cli-spike
 issue:
 pr:
 mod-block:
+archived: 2026-07-11T03:56:11Z
 ---
 
 ## Problem
