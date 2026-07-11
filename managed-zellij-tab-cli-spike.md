@@ -116,6 +116,21 @@ Managed-view convergence and native pane adoption work on Zellij 0.44.3. Option 
 
 The evergreen architecture now makes one managed tab or window the workspace/session binding invariant. A thin Zellij controller owns native key and pane operations, while the portable launcher, hub, dock, and providers retain their independent boundaries; foreign-view retrofit work is no longer on the release path.
 
+## Stage Report: implementation (cycle 2)
+
+- DONE: Mark `docs/docking-approach.md` as historical evidence for the shipped Zellij WASM prototype without removing its retrofit findings.
+  Commit `4d2ca74` adds a prominent supersession notice, links `docs/zaphod-workspace-architecture.md`, and renames stale “adopted architecture” labels to “shipped prototype architecture.”
+- DONE: Remove the stale target-architecture label from `docs/plan-agent-rail.md`.
+  The plan now calls the v3.12 dock container a historical prototype while retaining its target delivery order and evergreen-spec link.
+- DONE: Re-run repository-wide contradiction and formatting checks.
+  `git diff --check` passed; searches found no old dated-spec path, old spec title, approved-design status, `adopted architecture`, or current-tab target claim outside the evergreen non-goal.
+- DONE: Leave the worktree clean without production changes.
+  `git status --short --branch` reported a clean documentation branch after `4d2ca74`; only the two requested docs changed.
+
+### Summary
+
+Readers can now distinguish the shipped current-tab retrofit prototype from the managed-view product architecture at the start of either planning path. The prototype’s live evidence remains available as historical engineering context.
+
 ## Stage Report: validation
 
 - DONE: Validate the implementation at its dispatched raw commit identity without trusting the implementation report.
