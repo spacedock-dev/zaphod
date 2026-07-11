@@ -1,7 +1,7 @@
 ---
 id: qbf5syzpwvpggp2xgnd5asvf
 title: Managed-view binding and shared driver contract
-status: backlog
+status: ideation
 source: managed-view roadmap Sprint 1 binding core; reframed by senior staff review 2026-07-11
 started: 2026-07-11T05:21:43Z
 completed:
