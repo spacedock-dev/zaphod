@@ -1,9 +1,9 @@
 ---
 id: 68mb9yq4v90fnb8gwhe1kjwy
 title: Senior staff review of the managed-view implementation sprint
-status: backlog
+status: ideation
 source: captain-requested full-sprint review of managed-view ideation and dispatch sequence, 2026-07-11
-started:
+started: 2026-07-11T04:31:09Z
 completed:
 verdict:
 score: 1.0
