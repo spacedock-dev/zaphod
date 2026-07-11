@@ -11,6 +11,8 @@ worktree: .worktrees/spacedock-ensign-foreground-attached-client-profile
 issue:
 pr:
 mod-block:
+sprint: 1
+sprint-lane: release-path
 ---
 
 ## Problem
