@@ -223,7 +223,7 @@ recommendation, review scope, product files, and task designs unchanged.
 
 ### Recommendation
 
-**APPROVE.** I independently re-read the current four packets, the roadmap,
+**APPROVE** — I independently re-read the current four packets, the roadmap,
 the architecture, and the earlier staff review. The revised packets now close
 the prior material design seams without promoting an unproved Zellij behavior
 to product scope. The approval is for the Sprint 1 ideation contract and its
