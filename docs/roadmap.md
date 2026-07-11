@@ -124,8 +124,8 @@ current WASM rail and `grout` remain reusable where they serve that journey.
 
 The three delivery tasks may enter ideation now. Implementation and live
 validation wait for `7h` to pass and for the relevant v1 gate/provider
-contracts to be available. The existing **First dependable per-tab attention
-loop** (`e6`) remains deferred as the integration and release-outcome anchor;
+contracts to be available. The existing **Sprint 2 operator-loop release
+gate** (`e6`) remains deferred as the integration and release-outcome anchor;
 it is not a generic implementation task. This does not change Sprint 1's
 scope, order, statuses, or paused lanes. It also creates no automatic
 dispatch: active `7h` and the current `4d` state may already occupy the two
@@ -141,16 +141,16 @@ Those are possible later responses to measured limits, not prerequisites.
 | --- | --- | --- |
 | **Live sessions arrive and lead back to work** | A persistent, profile-scoped subscriber performs initial load, SSE updates, reconnect, and periodic list refresh. It uses authoritative top-level-session filtering, binds sessions to the current tab, focuses one unambiguous pane, and expires stale rows. | Ideation is approved now. Implement and validate only after `7h`; reuse `yb`/`hj` evidence, not their stale dispatches. |
 | **Pending gates appear where the work came from** | The v1 gate skill supplies optional origin context. A valid origin maps to its exact tab; missing or malformed origin uses the global fallback. Reconcile only open gates so provider resolution updates or removes the row. Never infer origin from a path, CWD, or title, and never issue an inline verdict. | Ideation is approved now. Implementation waits for the applicable v1 gate/provider contract. |
-| **One v1 review opens and returns cleanly** | After accepting a delegated request, Zaphod opens one visible reviewer surface in the originating tab. The gate skill retains decision and routing semantics; Zaphod tracks the exact surface lifecycle and cleanup. Direct fallback is allowed only before Zaphod accepts. | Ideation is approved now. Implement after `7h` and the v1 review-surface contract; do not add hidden prewarm in this first slice. |
-| **First dependable per-tab attention loop** (`e6`) | Integrate the three legs into one release outcome: a live session and an open gate appear, the right pane focuses, one reviewer opens, and later provider resolution makes the rail truthful. | Remains prefiled and deferred as the integration/release-outcome anchor until the three delivery tasks supply the smallest proven behavior. |
+| **One v1 review opens and returns cleanly** | After accepting a delegated request, Zaphod opens one visible reviewer surface in the originating/bound tab when available, or in the current tab for an unbound global gate. The gate skill retains decision and routing semantics; Zaphod tracks the exact surface lifecycle and cleanup. Direct fallback is allowed only before Zaphod accepts. | Ideation is approved now. Implement after `7h` and the v1 review-surface contract; do not add hidden prewarm in this first slice. |
+| **Sprint 2 operator-loop release gate** (`e6`) | Integrate the three legs into one release outcome: a live session and an open gate appear, the right pane focuses, one reviewer opens, and later provider resolution makes the rail truthful. | Remains prefiled and deferred as the integration/release-outcome anchor until the three delivery tasks supply the smallest proven behavior. |
 | **Sprint 2 operator-loop gate** | Reproduce the complete live journey in normal Zellij work and prove truthful post-resolution state. | Run after the integrated offline checks. A passing gate proves value; it does not authorize unrelated architecture work. |
 
 ### Explicit deferrals
 
 - `fp` — the managed-tab controller and guarded keybindings — remains deferred
   until a continuity-gate failure requires managed entry.
-- A hub, managed-tab adoption, and explicit pane adoption remain deferred;
-  they need an observed continuity failure, not architectural preference.
+- A hub and managed-tab adoption remain deferred; they need an observed
+  continuity failure, not architectural preference.
 - Hidden reviewer prewarm or pooling remains deferred until the visible,
   accepted-delegation slice proves it is needed.
 - Inline verdicts and rail-owned review routing remain deferred permanently:
