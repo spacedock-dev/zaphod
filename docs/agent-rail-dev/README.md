@@ -14,6 +14,7 @@ stages:
       initial: true
     - name: ideation
       gate: true
+      concurrency: 4
     - name: implementation
       worktree: true
     - name: validation
