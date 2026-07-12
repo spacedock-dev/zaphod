@@ -402,3 +402,29 @@ The bounce fixes only the two refuted observations: the managed toggle baseline
 is now post-grant stable, and foreign-tab visual evidence is asserted. The
 repeated real packet is 10/10 green with exercised failure and TERM cleanup;
 the next remaining acceptance activity is validation's normal-consent drill.
+
+## Stage Report: validation (cycle 3)
+
+- DONE: Independently rerun the repaired entry shell suite, release Rust tests/check, cleanup probes, and at least ten consecutive real tmux/Zellij smokes from the committed candidate; report exact failures rather than trusting implementation evidence.
+  Clean fabfc73d78e5f9ad6cbc96111f0121bf6c61e041: entry shell 8/8, cargo test --release 134/134, cargo check --tests --release, and ten consecutive tests/zellij-tmux-smoke-test.sh runs all passed.
+- DONE: Adversarially verify the repaired observables: the pre-grant baseline is genuinely settled and foreign visible-screen equality is asserted alongside native state; retain the existing fail-closed no-pregrant/cleanup attacks.
+  Every green run required the active tiled 28-column, non-selectable/no-prompt candidate before its literal toggle; a detached audit-only screen sentinel failed exactly at the new foreign-screen assertion, while a deliberately wrong raw-WASM pre-grant failed closed and left no root, named tmux server, or named Zellij process.
+- DONE: AC-O1 — Explicit native entry produces a fresh candidate tab.
+  All ten literal Alt Shift z runs added exactly one active zaphod tab and exposed the selected-worktree WASM URL in native pane state and dump-layout.
+- DONE: AC-O2 — Literal authorized Alt / changes only the settled managed rail.
+  In all ten runs, a literal key moved the candidate 28 → 1 columns only after the non-selectable/no-prompt baseline; normalized identity, process, focus, and URL stayed equal while layout and screen changed.
+- DONE: AC-O3 — Post-route foreign Alt / is visibly and natively inert.
+  All ten runs compared foreign pane/layout snapshots and foreign screens byte-for-byte; the audit-only sentinel was rejected at the screen comparison itself.
+- DONE: AC-O4 — Disposable smoke preserves standing state on success and no-pregrant failure.
+  Ten green trap checks plus the wrong-grant failure confirmed no isolated root, session, tmux server, named Zellij process, or standing-hash change survived.
+- DONE: Prepare a concise captain manual drill that uses scripts/zellij-new-tab.sh in an actual attached Zellij session, ordinary permission consent, literal Alt Shift z/Alt /, and a foreign-tab no-op check—no giant bootstrap or 7h/4d/custom-PTY/lease machinery.
+  gates/zellij-managed-tab-controller-validation.md now gives the direct WORK command, normal-consent Zaphod toggle, Chaplin no-op, optional identity query, and deferred-to-next-restart Alt Shift z check.
+- SKIPPED: AC-I1 normal-consent captain live drill.
+  Offline AC-O1 through AC-O4 are independently green, but only CL can accept the ordinary prompt and report the attached-session journey; no headless pre-grant substitutes for it.
+
+### Summary
+
+The repaired smoke packet is independently reproducible and its two prior
+gaps are disproved without any architecture expansion. Sprint 1 now waits
+only for CL's short normal-consent drill and authoritative gate fold; the
+candidate worktree remains unchanged by validation.

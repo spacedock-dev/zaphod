@@ -2,143 +2,117 @@
 
 Entity: `docs/agent-rail-dev/.spacedock-state/zellij-managed-tab-controller.md`
 Implementation worktree: `.worktrees/zellij-new-tab-entry`
-Raw candidate SHA: `d5137e602dcef91a721852bffa099bb21380102c` (clean before
-validation; no candidate files were changed by this validator).
+Independently tested candidate: `fabfc73d78e5f9ad6cbc96111f0121bf6c61e041`
+(clean before and after validation).
 
 ## Gate recommendation
 
-**REJECTED — return two confined tmux-smoke proof repairs to implementation.**
-The fresh managed-tab journey has successful real runs, but AC-O2 is not
-reproducible yet: an unmodified repeated smoke observed a native rail-state
-change unrelated to the literal toggle between its before and after snapshots.
-AC-O3 also retains but does not assert its visible unrelated-tab safety
-evidence. Do not spend CL's normal-consent drill time until the offline proof
-is stable.
+**Offline acceptance is green. Sprint 1 is ready for CL's short,
+ordinary-consent live drill; it is not done until CL completes that drill.**
 
-## Why the unrelated-tab check belongs in this journey
+The two prior proof gaps are closed without changing product architecture:
 
-The product path is only a **fresh Zaphod-managed tab**. An existing tab is
-never adopted, retrofitted, displayed as managed, or otherwise made part of
-the feature.
+1. The positive-key baseline now waits for the visible, active, tiled,
+   28-column candidate after its pre-granted permission result has settled
+   (`is_selectable: false`, no prompt). Ten consecutive real smokes passed.
+2. The post-route foreign-tab capture is now compared byte-for-byte, in
+   addition to the native pane/layout comparisons. A deliberately changed
+   screen self-test was rejected at that exact assertion.
 
-AC-O3 is the fail-closed negative proof for that promise. Once the fresh tab
-has installed its temporary runtime `Alt /` route, the attached client can
-still switch to an ordinary pre-existing tab. Because Zellij's runtime
-keybinding is in a shared scope, pressing the same keys there must do nothing:
-no pane, focus, layout, process, or visible screen change. This protects
-existing work in the session; it is not a second product flow.
+No 7h/4d code, ProfileLease, controller, custom PTY, or lease work was used.
 
 ## Offline AC verdicts
 
-| AC | Verdict | Independent evidence |
+| AC | Verdict | Fresh independent evidence |
 |---|---|---|
-| AC-O1 | PASS in successful runs | `./tests/zellij-new-tab-test.sh` passed 8/8. Fresh tmux/Zellij runs observed literal `Alt Shift z` add exactly one active `zaphod` tab, with the selected worktree's `file:` WASM URL in native pane state and `dump-layout`. |
-| AC-O2 | **REFUTED** | An unmodified repeated `./tests/zellij-tmux-smoke-test.sh` run failed at `:346-349`: only the candidate rail's `is_selectable` changed `true → false` after literal `Alt /`. That breaks the unchanged pane/process/focus identity proof. A later unmodified 10-run control passed, establishing an intermittent readiness race rather than a deterministic toggle result. |
-| AC-O3 | **REFUTED as visible safety evidence** | Successful runs proved byte-equal native pane/layout state and one candidate rail after literal `Alt /` on an unrelated tab. The harness captures `foreign-before.screen` and `foreign-after.screen` at `:362-365`, but `:366-376` never compares or asserts them. A terminal-visible-only mutation could therefore pass. |
-| AC-O4 | PASS for executed paths | Successful smoke preserved standing hashes and removed tmux/Zellij/root. Independent forced-build failure, TERM after the tmux server was live, and a detached no-pregrant failure all cleaned their root/session/server and preserved standing sentinels. |
+| AC-O1 | PASS | All ten literal-key smokes added exactly one active `zaphod` tab from `Alt Shift z`; native pane inventory and `dump-layout` contained the candidate worktree's canonical WASM URL, not the stale fixture URL. |
+| AC-O2 | PASS | The settled-resident predicate required active tiled/non-suppressed candidate, 28 columns, `is_selectable: false`, no prompt, and a visible rail before literal `Alt /`. All ten runs changed the known rail 28 → 1 columns while normalized identity, command, focus, and URL stayed equal; layout and visible screen changed. |
+| AC-O3 | PASS | After the observed managed route, all ten runs sent literal `Alt /` on the sidebar-less foreign tab. Native pane/layout snapshots and the visible tmux screen were byte-equal, and candidate count stayed one. |
+| AC-O4 | PASS | Each green run's trap verified session, dedicated tmux server, temporary root, and standing config/layout hashes. A no-pregrant failure probe also left no named root, tmux server, or Zellij process. |
+| AC-I1 | HELD FOR CL | The headless disposable pre-grant is intentionally not ordinary consent. The exact attached-session drill below is the remaining acceptance activity. |
 
-Supporting reruns at the raw SHA: `cargo test --release` 134/134;
-`cargo check --tests --release` clean; entry shell 8/8; successful real smoke
-runs covered the four offline paths. A host ENOSPC event aborted one attempted
-repeat before `mktemp`; it is environment noise, not candidate evidence.
+## Fresh command packet
 
-## Reproduced AC-O2 failure
-
-```diff
--    "is_selectable": true,
-+    "is_selectable": false,
-FAIL: managed Alt / replaced a pane, process, focus, or candidate identity
-```
-
-The smoke discovers the candidate at
-`tests/zellij-tmux-smoke-test.sh:310-312`, snapshots it immediately, and
-sends its literal key at :336. The rail requests permission on first render
-(`src/main.rs:630-646`). Its later
-`PermissionRequestResult(Granted)` calls `set_selectable(false)` and
-requests the runtime route (:429-438, :699-720); the key pipe is correctly
-rejected until that grant is present (:610-627, :1075-1087). A pre-grant cache
-prevents human input but does not prove the resident processed that event
-before the baseline.
-
-## Required narrow repair and revalidation
-
-Do not change the managed-tab architecture, revive the optimistic route flag,
-or touch 7h, 4d, custom PTY, or lease code.
-
-1. Before AC-O2's baseline, wait for an observable settled resident: candidate
-   URL, active tiled 28-column shape, no visible permission prompt, and native
-   `is_selectable: false`. Keep the literal-key positive path and unchanged
-   identity comparison.
-2. Assert the retained AC-O3 unrelated-tab screens with a stable comparison or
-   visible invariant that rejects a candidate launch or dock/layout change.
-   Keep the existing native byte-equality checks; neither observation replaces
-   the other.
-3. Rerun `./tests/zellij-new-tab-test.sh`, `cargo test --release`,
-   `cargo check --tests --release`, and at least ten consecutive unmodified
-   `./tests/zellij-tmux-smoke-test.sh` runs. Preserve per-run exit status and
-   a native diff on any failure. Repeat failure/TERM cleanup probes.
-
-## Detached refutation audit
-
-A detached checkout at the same SHA,
-`/tmp/zaphod-fp-refutation-d5137e6`, never touched the implementation
-worktree. It found persistent `Alt /` fail-closed as `NoOp`, a direct
-`MessagePluginId` route to the already-running resident, and pipe guards for
-granted permission, keybind source, tiled state, and active-tab match
-(`src/main.rs:607-627`, :699-720, :1047-1087). No independent unsafe
-unrelated-tab toggle was found. Its no-pregrant attack failed closed and
-cleaned all disposable state while preserving sentinel hashes.
-
-## Captain-live drill
-
-**Held.** AC-I1 remains unrun until the repaired repeated offline packet is
-green. The operator entry point is the existing script—not a gate-specific
-bootstrap:
+From `.worktrees/zellij-new-tab-entry` at the raw SHA above:
 
 ```bash
-env ZELLIJ_CONFIG_DIR="$PROFILE_ROOT/config" ZELLIJ_CONFIG_FILE="$PROFILE_ROOT/config/config.kdl" ZELLIJ_DATA_DIR="$PROFILE_ROOT/data" ZELLIJ_SOCKET_DIR="$PROFILE_ROOT/socket" "$REPO/scripts/zellij-new-tab.sh" --session "$SESSION"
+./tests/zellij-new-tab-test.sh
+cargo test --release
+cargo check --tests --release
+for i in $(seq 1 10); do ./tests/zellij-tmux-smoke-test.sh || exit $?; done
 ```
 
-The script already uses these isolated roots, atomically activates its
-config/layout, and creates exactly one fresh managed tab. It deliberately does
-not adopt or alter an existing ordinary tab.
+Results: entry shell suite 8/8; release Rust tests 134/134; release
+test-check clean; real tmux/Zellij smoke 10/10. `git diff --check` was
+clean and the candidate remained at the raw SHA.
 
-For the normal-consent drill, run that command once to activate the disposable
-root, restart the disposable Zellij server so it loads the native bindings,
-then run the same command again to create the fresh tab CL sees. CL approves
-the ordinary prompt, presses literal `Alt /`, retains native+screen
-before/after evidence, switches to an unrelated tab, and confirms the
-fail-closed no-op there. The hotkey remains covered by AC-O1's literal
-`Alt Shift z` smoke; AC-I1 may choose the stable script path.
+## Refutation audit
 
-### Current minimal drill gap
+The audit used a disposable detached checkout at the same SHA and never
+modified the candidate worktree. Its shared-`target` symlink initially
+failed the pre-grant: the audit's textual symlink path differed from the
+physical raw WASM path that Zellij uses as its permission-cache key. That is
+an **audit-fixture-only** distinction; the candidate's ordinary target path
+has no symlink and all ten candidate smokes passed.
 
-`scripts/zellij-new-tab.sh` safely consumes an existing isolated session; it
-does not create or attach that disposable session. The only existing real-key
-harness, `tests/zellij-tmux-smoke-test.sh`, intentionally pre-grants
-permission and exits after its check. Therefore there is no maintained
-normal-consent disposable-session launcher to hand to CL yet. If a one-command
-captain drill is required, add only that launcher/documented mode: it must
-start an attached temporary config/data/socket root without a permission cache
-and then invoke `zellij-new-tab.sh`; it must not duplicate the entry
-script's config transformation, layout rendering, or native NewTab logic.
+With the detached audit's cache keyed to the physical raw path, it reached the
+foreign check. Appending one sentinel line only to
+`foreign-after.screen` produced:
 
-## Revision response to gate feedback (round 1)
+```text
+FAIL: post-route foreign Alt / visibly changed the tmux client
+```
 
-- The unrelated-tab assertion remains because it proves the fresh managed
-  journey cannot mutate existing work after the shared runtime binding is
-  active. It is a safety boundary, not adoption semantics.
-- The hand-built captain bootstrap was removed. The drill names the existing
-  entry script and its supported isolated-root inputs; the missing
-  normal-consent session launcher is stated explicitly rather than recreated
-  in validation prose.
+and its `/tmp/zs.*` root was removed. A separate deliberately wrong
+no-pregrant key failed closed at the settled-resident wait and left no
+`/tmp/zaphod-fp-no-pregrant-root`, named tmux server, or named Zellij
+process. These are assertion/cleanup probes, not product changes.
+
+## Captain manual drill — actual WORK session
+
+This is the usable end-value path. It creates a fresh tab and never retrofits
+the tab from which it is run.
+
+```bash
+/Users/clkao/git/zaphod/.worktrees/zellij-new-tab-entry/scripts/zellij-new-tab.sh \
+  --session WORK --name Zaphod
+```
+
+1. The command prints `TAB_ID=` and a `WASM_URL=` containing
+   `.worktrees/zellij-new-tab-entry`. A fresh **Zaphod** tab becomes active.
+2. In that tab, approve the ordinary Zellij permission prompt using its
+   visible consent control. Do not inject consent keys. Wait until the rail
+   displays its normal content instead of the prompt.
+3. Press **Alt + /** once. The visible rail collapses from its normal dock to
+   the one-column sliver; press it once more to restore the dock. No pane is
+   created or replaced.
+4. Click the existing **Chaplin** tab. Press **Alt + /** there. Nothing should
+   move, open, focus, or change; in particular no Zaphod rail appears there.
+5. Return to **Zaphod** and press **Alt + /** once more. It should still
+   toggle the existing managed rail.
+
+Optional identity check while Zaphod is active:
+
+```bash
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab |
+  jq -r '.[] | select(.is_plugin and .tab_name == "zaphod") |
+    [.plugin_url, .pane_columns, .is_selectable] | @tsv'
+```
+
+The script-created tab and its `Alt /` behavior work in the running
+session now. The script also writes the native `Alt Shift z` fresh-tab
+binding for this configuration, but Zellij reads persistent keybindings at
+server start. Do **not** restart WORK merely to prove it. At the next
+ordinary restart, press **Alt Shift z** from any tab: it must create another
+fresh Zaphod tab and leave the originating tab unchanged.
 
 ## Subspace review instruction
 
-Re-present this single revised artifact with:
+After CL reports the live drill result, present this one artifact with:
 
 ```bash
-subspace-tui gates/zellij-managed-tab-controller-validation.md --gate-review --log gates/zellij-managed-tab-controller-validation.decisions.jsonl
+subspace-tui gates/zellij-managed-tab-controller-validation.md --gate-review \
+  --log gates/zellij-managed-tab-controller-validation.decisions.jsonl
 ```
 
-The human fold—not chat prose—selects approval, revision, or rejection.
+The emitted fold—not chat prose—selects completion, revision, or rejection.
