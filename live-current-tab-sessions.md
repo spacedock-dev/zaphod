@@ -124,9 +124,17 @@ The target-bound native `zaphod subscribe` sidecar owns one AgentsView
 snapshot/SSE subscription, its local exact-target probe, and the short-lived
 `zellij pipe` children it creates. It maps initial and `data_changed` list
 results through the existing `BuildSessionRow`/`EmitRow` seam into the common
-`agent-event` attention event. The current bridge is session-wide broadcast by
-pipe name, never `--plugin`; the verified rail pane is a lifecycle guard, not
-a claim of per-pane transport routing.
+`agent-event` attention event.
+
+The pipe stays a plain session-wide broadcast: it must never use `--plugin`,
+because Zellij 0.44.3 says that option launches an absent plugin. Each emission
+instead carries `--args recipient-pane-id=<observed RAIL_PANE_ID>`. The rail
+must admit `agent-event` only when that argument parses as its own
+`get_plugin_ids().plugin_id` (Zellij's documented unique plugin-pane ID).
+Missing, malformed, or mismatched recipients return before `apply_agent_event`:
+they create no row, no CWD binding, and no click action. The JSON row protocol
+does not change. This is a receiver-enforced fail-closed rule, not a claim that
+the native pipe itself targets a pane.
 
 Only the successful direct script invocation starts this process. It launches
 the exact-target executable as a normal detached host child with stdin closed
@@ -186,11 +194,20 @@ mismatch and asks for a new decision rather than rebasing by assumption.
 
 ### Riskiest unproven mechanism and smallest spike
 
-The failed native-hotkey spike is decisive evidence, not a proposed path:
-literal `Alt Shift z` with `NewTab` plus `Run` created the expected tab but
-also a visible, focused floating helper pane. The implementation must not try
-to hide or tolerate that pane. The first remaining invalidating joint is the
-direct-script post-create handoff: after a fake native `new-tab` returns
+The state-owned `spikes/bb-hotkey-helper-pane` run is decisive evidence, not a
+proposed path: literal `Alt Shift z` with `NewTab` plus `Run` created the
+expected tab and one visible, focused floating helper pane. The implementation
+must not try to hide or tolerate that pane. Before the direct-script handoff,
+the remaining invalidating joint is recipient admission: two rails in one
+isolated Zellij session must share a terminal CWD; a broadcast addressed to
+one native rail-pane ID must make the target render and bind the row while the
+other rail renders no row, binds nothing, and has `ClickAction::None`. The
+probe must also show the bystander tab stays active. `--plugin` is expressly
+out because an absent target would launch a plugin; a missing or malformed
+recipient must be inert for both rails.
+
+Only after that proof may the direct-script post-create handoff run: after a
+fake native `new-tab` returns
 `TAB_ID=73` and a canonical WASM URL, a fake `list-panes --json` sequence must
 move from not-ready to exactly one matching resident plugin record. Only then
 may the fake native `zaphod subscribe` process receive the observed pane ID
@@ -224,22 +241,27 @@ record whose verified `tab_id`, URL, and pane `id` match. Only then does the
 fake native `zaphod subscribe` receive the explicit Zellij profile/session/tab/
 pane/URL tuple. Against its loopback SSE endpoint and fake AgentsView list
 (empty → one fixture session after `data_changed`), it emits exactly one
-existing-format `agent-event` session row. The expected ID, CWD, state, and
+existing-format `agent-event` JSON payload with
+`recipient-pane-id=<observed RAIL_PANE_ID>`. The expected ID, CWD, state, and
 summary come from the source fixture, not from the adapter.
 
 Verified by: a black-box direct-script test with fake build/new-tab/list-panes/
 native-sidecar recorders plus a Go loopback-SSE/fake-AgentsView/Zellij-payload
-test. They assert start ordering, the exact target argv, emitted JSON, no
-title/CWD/URL-only target discovery, and no new Zellij helper pane.
+test. They assert start ordering, the exact target argv, recipient argument,
+emitted JSON, no title/CWD/URL-only target discovery, and no new Zellij helper
+pane.
 
 **AC-O2** — The projected row leads back only to its originating managed-tab
 pane. Feeding AC-O1's row to a rail fixture with one selectable terminal at
 the same exact CWD yields `FocusPane(that pane)` on click. A missing CWD or
-two matching terminal panes yields an unbound row and `ClickAction::None`.
+two matching terminal panes yields an unbound row and `ClickAction::None`. A
+second same-CWD rail with a different native pane ID drops the event before
+projection, so it has no row, binding, or focus action.
 
 Verified by: Rust tests around `apply_agent_event`, `rows_for_own_tab`,
-`bind_session`, and `decide_rail_click`, using the CWD and pane ID fixture as
-the external expected value. No global or cross-tab association is asserted.
+`bind_session`, and `decide_rail_click`, plus an isolated two-rail native
+smoke using the CWD and pane IDs as external expected values. No global or
+cross-tab association is asserted.
 
 **AC-O3** — bb directly owns the small native artifact/build/direct-script
 invocation addition without a Sprint 1 branch rebase or separate prerequisite.
@@ -290,35 +312,40 @@ custom PTY result.
 
 ## Test plan
 
-1. **Keep the native-hotkey refutation and prove the direct-script handoff
-   first.** Preserve the isolated tmux spike showing that a literal `Alt Shift
-   z` `NewTab` + `Run` binding creates a visible helper pane. Extend the fake
-   fresh-tab script test so native `new-tab` returns `TAB_ID=73`, the first
+1. **Keep the native-hotkey refutation and prove recipient isolation before
+   the handoff.** Re-run `spikes/bb-hotkey-helper-pane/run.sh`, which records
+   the visible helper-pane incompatibility. Add a tmux-hosted two-rail fixture
+   with one Zellij session and one CWD. Broadcast a row with
+   `recipient-pane-id=<target rail id>` and prove native target/bystander
+   screens plus active-tab state: target row/binding only; bystander no row,
+   no binding, and `ClickAction::None`. Repeat with missing and malformed
+   recipient arguments; neither rail may change. Do not use `--plugin`.
+2. Extend the fake fresh-tab script test so native `new-tab` returns `TAB_ID=73`, the first
    list-panes snapshots are not ready, and a later snapshot has exactly one
    resident plugin record with matching verified tab ID and canonical WASM URL.
    Assert that the checkout-local native sidecar is spawned exactly once
    afterward with its observed pane ID and inherited Zellij profile; no
    title/CWD/URL-only fallback or extra Zellij pane is accepted.
-2. Cover every failed-start boundary: malformed raw tab ID, zero/duplicate
+3. Cover every failed-start boundary: malformed raw tab ID, zero/duplicate
    candidates, wrong tab, wrong URL, floating/non-resident plugin, and bounded
    wait exhaustion. Each exits visibly as `sidecar-target-unready`, starts no
    sidecar, and leaves the freshly created tab alone.
-3. Add pure Go sidecar tests for snapshot/event dispatch and a loopback
+4. Add pure Go sidecar tests for snapshot/event dispatch and a loopback
    AgentsView fixture (empty → one exact-CWD session). Its one SSE connection
    must emit the existing `agent-event` payload after `data_changed`; EOF/error
    is a visible terminal failure, not reconnect logic.
-4. Add target-lifecycle fakes around `zaphod subscribe`: session/tab/plugin
+5. Add target-lifecycle fakes around `zaphod subscribe`: session/tab/plugin
    loss, original rail instance absent, URL/identity mismatch, and same-URL
    replacement at a new instance ID. Each cancels SSE/owned child work and
    reports `target-lost`, with no later pipe, retarget, restart, or external
    cleanup command.
-5. Add Rust row-projection tests for the one managed-tab terminal, zero match,
+6. Add Rust row-projection tests for the one managed-tab terminal, zero match,
    and duplicate CWD cases. Reuse the current `agent-event` protocol and click
    decider; do not add global/tab association state.
-6. Run the native-artifact build test, focused Go suite under `GOPROXY=off`,
+7. Run the native-artifact build test, focused Go suite under `GOPROXY=off`,
    relevant Rust tests, `cargo check --tests`, and `git diff --check` from
    current main. Re-run the ancestor/path/lease audit before integration.
-7. After the managed-tab smoke accepts, run AC-I1's direct-script drill. A
+8. After the managed-tab smoke accepts, run AC-I1's direct-script drill. A
    missing managed tab is a held integration gate, not a reason to rebase,
    revive 7h, or broaden the task.
 
@@ -771,3 +798,21 @@ bb now has one truthful walking skeleton: direct script → exact resident
 observation → private sidecar → session row → focus the fresh-tab terminal.
 The focused current-main Go seam still passes; `feature/zellij-new-tab-entry`
 is an ancestor of main at `fabfc73d`.
+
+## Stage Report: ideation (cycle 8)
+
+- DONE: Persist a repeatable isolated hotkey spike outside the entity prose.
+  `spikes/bb-hotkey-helper-pane/run.sh` passed against Zellij 0.44.3; its committed raw fixture, command, pane/tab inventories, screen, and result show `NewTab` plus floating `Run` creates one visible, focused `bb-helper` pane in the candidate tab.
+- DONE: Identify the smallest no-launch recipient rule from actual Zellij capability evidence.
+  `zellij pipe --help` on 0.44.3 exposes `--args` and says `--plugin` launches an absent plugin; `zellij-tile` documents `get_plugin_ids().plugin_id` as the unique plugin pane ID. bb therefore specifies broadcast `agent-event` plus `recipient-pane-id=<observed rail pane id>`, admitted only by the matching receiver.
+- FAILED: Define and prove recipient isolation or fail-closed cross-tab delivery.
+  The required isolated two-rail, same-CWD live probe did not complete before this cycle was stopped. The entity now makes that probe the first implementation blocker and records the exact expected target/bystander screen and active-tab assertions; no recipient-isolation result is claimed.
+- DONE: Repair ACs and test plan without inventing a sidecar transport.
+  AC-O1/O2 and test-plan item 1 use native pane IDs and broadcast `--args`, preserve direct `scripts/zellij-new-tab.sh` as the sole user entry, and exclude `--plugin`, `Run`, leases, controllers, and public grout commands.
+
+### Summary
+
+The native hotkey path is decisively refuted and reproducible. The selected
+recipient rule is fail-closed and avoids Zellij's plugin-launch behavior, but
+the two-rail live proof remains an explicit failed ideation obligation; bb is
+not ready to implement until that narrow test is executed.

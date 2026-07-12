@@ -1,0 +1,5 @@
+zellij=/opt/homebrew/bin/zellij
+zellij_version=zellij 0.44.3
+tmux=/opt/homebrew/bin/tmux
+layout=/tmp/bb-hotkey.I0Iuyc/candidate.kdl
+key=Alt Shift z (bytes: ESC Z)

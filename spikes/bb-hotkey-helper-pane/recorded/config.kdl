@@ -1,0 +1,11 @@
+keybinds clear-defaults=true {
+    shared {
+        bind "Alt Shift z" {
+            NewTab { layout "/tmp/bb-hotkey.I0Iuyc/candidate.kdl"; }
+            Run "sh" "-c" "sleep 30" {
+                floating true
+                name "bb-helper"
+            }
+        }
+    }
+}
