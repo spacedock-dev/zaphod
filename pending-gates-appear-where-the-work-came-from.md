@@ -4,9 +4,9 @@ status: ideation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
-sprint-readiness: ready
-blocked-on:
-blocked-reason:
+sprint-readiness: defer
+blocked-on: gate-skill-publisher-contract-and-bb-sidecar
+blocked-reason: Implementation waits for an accepted external gate-skill publisher contract and bb’s accepted fresh-tab sidecar handoff; neither is invented locally.
 score: 0.97
 started: 2026-07-12T00:03:20Z
 completed:
