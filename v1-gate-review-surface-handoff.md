@@ -1,6 +1,6 @@
 ---
 title: One v1 review opens and returns cleanly
-status: ideation
+status: backlog
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
@@ -10,7 +10,7 @@ blocked-reason: Ideation is captain-approved now. Implementation needs the gate 
 score: 0.95
 started: 2026-07-12T00:14:07Z
 completed:
-verdict:
+verdict: REJECTED
 worktree:
 issue:
 pr:
