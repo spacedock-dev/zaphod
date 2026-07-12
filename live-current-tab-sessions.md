@@ -911,3 +911,44 @@ direct-script walking skeleton. bb is now a tab-bound sidecar: CWD decides
 focus only after the current rail has accepted an event for its fresh, derived
 stable tab ID. The native `Alt Shift z` helper-pane limitation remains intact,
 and a future tab-termination subscription is explicitly deferred.
+
+## Staff Review: stable-tab recipient routing (2026-07-13)
+
+### Verdict: APPROVE_TO_IMPLEMENTATION
+
+The recorded native failure is decisive: the one named broadcast with
+`recipient-pane-id=2` rendered `BB_RECIPIENT_MARKER` in both the target and
+the same-CWD bystander. It disproves pane-ID admission, not the direct-script
+journey. The replacement uses the server tab identity already returned by
+`new-tab` and verified by native pane state; in that record, `new-tab` returned
+stable ID `1`, while the two resident rails reported stable tab IDs `0` and
+`1` at display positions `0` and `1`.
+
+The stable-tab guard matches Zellij 0.44.3's real model: `PaneManifest` is
+keyed by display position, `TabInfo.tab_id` is the stable identity, and
+`PipeMessage.args` carries the named-pipe arguments. The server's ordinary
+session-state report sends `PaneUpdate` before `TabUpdate`, so deriving the
+position-to-stable-ID mapping only after the new manifest is the smallest
+fail-closed bridge. Current Zaphod already subscribes to both events and
+records the same mapping in `tab_states`; its current `agent-event` handler
+still applies every broadcast unconditionally, so the proposed guard must sit
+before parsing and `apply_agent_event`.
+
+The slice remains a walking skeleton: the direct script alone creates and
+observes the managed tab, then starts one private sidecar; `Alt Shift z` stays
+a tab-only shortcut and no helper pane, lease, controller, or public command
+is introduced. A different gate delivery scope remains separate from this
+tab-bound session route, as this record already states.
+
+### Binding acceptance notes
+
+- Treat stable tab ID `0` as valid. The decisive native record uses it for the
+  original target, so the pure parser/guard packet must cover `0` explicitly
+  and must distinguish it from an unavailable/default mapping.
+- Keep the later native two-rail smoke. The pure guard proves the receiver
+  logic; only the live smoke proves that a real `recipient-tab-id` broadcast
+  reaches the target and leaves the same-CWD bystander inert.
+- The frontmatter's current `blocked-reason` says the interrupted spike
+  produced no result. That is stale: cycle 10 recorded a conclusive failure.
+  Update the workflow metadata when this review is applied; this review does
+  not mutate task state itself.
