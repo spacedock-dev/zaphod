@@ -1,7 +1,7 @@
 ---
 id: fp8pn84km859qges2s2ffp5h
 title: Safe managed-tab entry and guarded keybindings
-status: ideation
+status: implementation
 source: outcome-first roadmap Sprint 1 safe managed-tab onramp; captain correction 2026-07-12
 started: 2026-07-12T06:45:43Z
 completed:
