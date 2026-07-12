@@ -1,13 +1,13 @@
 ---
 id: 7hm8rw9kzp9m2chdmbe721qr
 title: Foreground attached-client disposable Zellij profile
-status: implementation
+status: backlog
 source: managed-view roadmap Sprint 1 entry gate, senior staff review 2026-07-11
 started: 2026-07-11T05:09:21Z
 completed:
 verdict: REJECTED
 score: 1.0
-worktree: .worktrees/spacedock-ensign-foreground-attached-client-profile
+worktree:
 issue:
 pr:
 mod-block:
@@ -15,6 +15,8 @@ sprint: s1-trusted-test-profile-onramp
 sprint-lane:
 group: walking-skeleton
 sprint-readiness: ready
+reopened: 2026-07-12
+reopened-reason: Captain requested a new ideation pass after rejected validation; preserve cycle-1 findings and validated boundaries.
 ---
 
 ## Problem
@@ -373,3 +375,7 @@ validator; no captain-live drill was run.
    immutable-lease, cleanup, no-TTY, and global-isolation behavior intact while
    repairing the readiness path; re-run the full offline packet before asking
    the same validation reviewer to recheck it.
+
+**Captain reroute (2026-07-12) — reopen to ideation.** The captain requested a
+new design pass before another implementation attempt. Cycle 1's three findings
+remain binding, and the passing isolation and cleanup boundaries are preserved.
