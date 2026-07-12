@@ -20,17 +20,195 @@ id: bb3sedraaa53wa7wjp8xf0p7
 
 ## Problem
 
-A normal Zellij tab does not continuously turn live top-level agent sessions into trustworthy, focusable current-tab attention.
+After Sprint 1 opens a safe managed Zaphod tab, an operator still has to run a
+one-shot helper or hunt for the pane where an agent session is working. The
+shipped rail already accepts `agent-event` session rows and can focus an
+unambiguous CWD-bound pane, but current `grout` fetches one supplied session
+and exits.
 
 ## Required outcome
 
-The current-tab rail continuously shows genuine top-level sessions for that tab, focuses an unambiguous bound pane on click, and removes departed sessions without manual one-shot commands or tab hunting.
+**Trigger:** a real AgentsView session changes while one initialized managed
+Zaphod tab is open. **Visible result:** its row appears in that tab's rail;
+clicking the row returns focus to its unique originating terminal pane.
+**Reproducible proof:** a source event, session-list response, recorded
+`agent-event` pipe, and rail focus decision form one offline journey; after
+Sprint 1 accepts its managed-tab smoke, one captain drill repeats that journey
+against a real managed tab.
 
 ## Ideation boundary
 
-Design one profile-scoped subscriber path: initial, SSE data_changed, reconnect, and periodic list refresh; authoritative top-level-session filtering; current-tab binding; stale expiry; and bounded failure behavior. Use yb and hj as evidence, not as unchanged dispatches. Do not add gates, pane adoption, managed tabs, or review controls.
+Build only the first actual subscriber/projection: initial list, one
+`data_changed` subscription, session row emission, and exact-CWD focus inside
+one managed tab. Sprint 1 supplies only the managed-tab integration contract;
+it is not a branch, lease, PTY, or rebase prerequisite. Reconnect hardening,
+row expiry, global-versus-tab gate association, pooling, adoption, and
+multi-client refinements remain deferred.
 
 ## Proposed approach
+
+### One walking-skeleton path
+
+Add a small `grout subscribe --server <url> --zellij-session <name>` mode on
+current main. It performs one `agentsview session list --server <url> --json
+--include-one-shot` snapshot, opens `/api/v1/events`, and re-lists when it
+receives `data_changed`; the event carries scope rather than session content.
+For each returned session, it reuses `BuildSessionRow` and `EmitRow` to send
+the existing `agent-event` JSON to the supplied Zellij session. The only
+session needed to prove the slice is a real current session whose recorded CWD
+equals the managed tab's origin terminal CWD.
+
+The rail stays the projection and action owner. It reuses `apply_agent_event`,
+`rows_for_own_tab`, `bind_session`, and `decide_rail_click`: a single exact
+CWD match in the managed tab makes the row actionable; zero or multiple
+matches render it unbound and decide no focus. The subscriber never assigns a
+tab, infers an origin from a title or path prefix, or opens a pane. This slice
+supports one initialized managed tab only; it does not define global or
+cross-tab association rules.
+
+The first slice deliberately stops rather than heals. A malformed source
+record is reported and skipped; an SSE EOF or source failure reports a visible
+subscriber error and exits for an operator restart. It does not auto-start
+AgentsView, reconnect, retry forever, expire departed rows, or pool a process.
+Those are later reliability work only if the completed operator loop exposes a
+measured need.
+
+### Managed-tab integration contract
+
+At integration time, Sprint 1 need supply only an accepted fresh managed tab:
+the selected checkout's resident rail, one selectable terminal pane, ordinary
+Zellij `RunCommands` permission, and the session name passed to `grout`. The
+subscriber does not consume a `ProfileLeaseV1`, a second client, a custom PTY,
+or a managed-tab implementation API. It simply emits the existing pipe
+protocol into that Zellij session; the resident rail projects the row locally.
+
+Implementation may begin from current `main` while Sprint 1 validation
+continues. The managed-tab smoke remains the integration and captain-live
+gate: no real managed-tab drill or Sprint 2 completion claim occurs before it
+is accepted.
+
+### No-rebase decision and current-main spike
+
+No source-level dependency requires rebasing or consuming
+`feature/zellij-new-tab-entry`. Its merge base is current `main`
+(`2e0810b`), and `git diff main...feature/zellij-new-tab-entry` changes entry,
+toggle, smoke, and `src/main.rs` files but no `grout/` path. The focused
+`src/main.rs` diff has no change to `AgentEvent`, `SessionEvent`,
+`apply_agent_event`, `bind_session`, `decide_rail_click`, or
+`rows_for_own_tab`; current-main source has no `ProfileLease`/
+`PROFILE_LEASE` reference outside documentation.
+
+The current-main spike is green: `cd grout && GOPROXY=off go test -count=1
+-run 'TestEmitEndToEnd|TestSessionRowFromFixture' ./...` passed in a fresh run.
+It proves the existing source-fixture → `SessionRow` → bounded named-pipe
+seam without a lease or Sprint 1 branch. The planned subscriber extends that
+seam; it does not import an unpublished branch API. If implementation later
+finds a concrete source API mismatch, it records that mismatch and asks for a
+new decision rather than rebasing by assumption.
+
+### Riskiest unproven mechanism and smallest spike
+
+The unproven joint is the narrow live arrival path, not a profile handoff: one
+SSE `data_changed` must cause a new source session to reach the resident rail
+as a bound, focusable row. The first invalidating check is hermetic and runs
+on current main: a loopback SSE server changes its list fixture from empty to
+one session whose CWD equals the fixture's only managed-tab terminal; a fake
+Zellij recorder must receive one `agent-event` session row after the event.
+The test fails if the subscriber needs a lease, branch API, manual one-shot
+command, or a second tab.
+
+After the Sprint 1 smoke passes, the smallest captain-live drill creates one
+real session in the managed tab's terminal CWD, observes its row after one
+source event/list cycle, and clicks it back to that terminal. It does not
+exercise a gate, foreign tab, reconnect, pooling, adoption, or second client.
+
+## Acceptance criteria
+
+### Offline (agent-reproducible)
+
+**AC-O1** — A real source arrival becomes a rail row without a manual
+one-shot command. Against a loopback SSE endpoint and a fake AgentsView list
+that changes from no sessions to one fixture session after `data_changed`,
+`grout subscribe` emits exactly one existing-format `agent-event` session row
+to the supplied Zellij session. The expected ID, CWD, state, and summary come
+from the source fixture, not from grout.
+
+Verified by: a Go test with a loopback SSE server, a fake AgentsView binary,
+and a fake Zellij argv/payload recorder; it asserts the emitted JSON and the
+named pipe target after the event.
+
+**AC-O2** — The projected row leads back only to its originating managed-tab
+pane. Feeding AC-O1's row to a rail fixture with one selectable terminal at
+the same exact CWD yields `FocusPane(that pane)` on click. A missing CWD or
+two matching terminal panes yields an unbound row and `ClickAction::None`.
+
+Verified by: Rust tests around `apply_agent_event`, `rows_for_own_tab`,
+`bind_session`, and `decide_rail_click`, using the CWD and pane ID fixture as
+the external expected value. No global or cross-tab association is asserted.
+
+**AC-O3** — The implementation starts from current main without a Sprint 1
+branch rebase or rejected lease machinery. The current-main source fixture
+still builds and emits a session row, and the branch-diff audit finds no
+subscriber/payload/binding API change to consume from
+`feature/zellij-new-tab-entry`.
+
+Verified by: the recorded merge-base/diff/lease audit above plus the fresh
+current-main Go spike (`TestEmitEndToEnd|TestSessionRowFromFixture`). A branch
+or lease reference introduced by the implementation fails this boundary.
+
+### Captain-live (only after AC-O1 through AC-O3 and Sprint 1 smoke pass)
+
+**AC-I1** — An operator sees one real current session in the initialized
+managed tab and returns to its pane. In the Sprint 1 managed-tab smoke
+environment, one real source session under the terminal's CWD appears in the
+resident rail within one source event/list cycle. Clicking it focuses that
+same terminal, with no manual grout one-shot command or tab hunt.
+
+Verified by: a captain drill retaining the source event/list observation,
+before/after native pane snapshots, and visible rail click. It runs only after
+the accepted Sprint 1 smoke; it is not substituted with 7h, a lease, or a
+custom PTY result.
+
+## Test plan
+
+1. **Run the current-main arrival spike first.** Add the loopback SSE/list
+   fixture (empty → one exact-CWD session), fake Zellij recorder, and one
+   `data_changed` frame. It must produce the row through current main without
+   a lease, rebase, or manual session-get invocation.
+2. Add pure Go tests for snapshot/event dispatch and source error exit. Keep
+   one connection only; EOF/error is visible failure, not reconnect logic.
+3. Add Rust row-projection tests for the one managed-tab terminal, zero match,
+   and duplicate CWD cases. Reuse the current `agent-event` protocol and
+   click decider; do not add global/tab association state.
+4. Run the focused Go suite under `GOPROXY=off`, relevant Rust tests,
+   `cargo check --tests`, and `git diff --check` from current main. Re-run the
+   branch-diff/lease audit before any integration work.
+5. After Sprint 1 accepts its managed-tab smoke, run AC-I1's one-session
+   drill. A missing managed tab is a held integration gate, not a reason to
+   rebase, revive 7h, or broaden the task.
+
+## Documentation change
+
+Update the README agent-row guidance with the small `grout subscribe` command,
+its explicit AgentsView URL and Zellij session target, and the supported
+promise: in one initialized managed tab a new source session becomes a row
+that returns to its uniquely CWD-bound pane. State that source restart,
+departure cleanup, multi-tab association, and review behavior are not part of
+this first slice.
+
+## Out of scope
+
+- `7h`, `4d`, ProfileLeaseV1, custom PTYs, foreground process groups, lease
+  publication, branch rebases, and consumption of Sprint 1 branch code;
+- global-versus-tab gate association, gates or review controls, pooling,
+  reconnect/backoff hardening, stale-row expiry, automatic source startup, or
+  source-owned multi-session policy;
+- pane adoption, a hub, controller/CLI protocol, a second managed tab,
+  cross-tab focus, or multi-client delivery refinements; and
+- any standing Zellij configuration mutation outside Sprint 1's accepted
+  managed-tab smoke.
+
+## Rejected ProfileLeaseV1/watch-loop proposal (historical)
 
 ### Chosen boundary
 
@@ -180,7 +358,7 @@ isolated profile and exact target values; it grants no controller, pane
 adoption, daemon, or cleanup authority. This task does not change 7h and has
 no dependency on paused bc, qb, or 6v work.
 
-## Acceptance criteria
+## Rejected acceptance criteria (historical)
 
 ### Offline (agent-reproducible)
 
@@ -256,7 +434,7 @@ Verified by: the smallest live-profile spike above, including saved
 metadata-only list output, profile-targeted argv, before/after pane snapshots,
 and a captain observation of the row click.
 
-## Test plan
+## Rejected test plan (historical)
 
 1. **Run the smallest live-profile spike first, but only after 7h passes.**
    It invalidates an unsafe lease target or unsupported root/child metadata
@@ -287,7 +465,7 @@ and a captain observation of the row click.
    pass, run AC-I1's disposable-profile drill. A missing profile or source
    prerequisite is a visible failed drill, never a skipped green result.
 
-## Documentation change
+## Rejected documentation change (historical)
 
 Update the README agent-row description and add a `grout watch` section. Say
 that a watcher is explicitly bound to a disposable profile lease; it shows
@@ -297,7 +475,7 @@ row stale before the configured expiry. Document that the watcher neither
 uses standing Zellij configuration nor starts or stops a shared source
 daemon.
 
-## Out of scope
+## Rejected out-of-scope boundary (historical)
 
 - Gate discovery, review rows, provider actions, or inline verdicts.
 - Cross-tab binding, tab switching, pane adoption, managed tabs, a hub,
@@ -364,3 +542,20 @@ is unique across every selectable terminal pane in the profile and belongs to
 that rail; same-CWD panes in two tabs remain visible but inert in both rails.
 The exact pure-fixture proof is specified for later implementation, while the
 held 7h live-profile drill remains untouched.
+
+## Stage Report: ideation (cycle 4)
+
+- DONE: Replace the obsolete ProfileLeaseV1/7h watch-loop design with the smallest real session-arrives → visible row → focus-originating-pane outcome for one managed tab.
+  AC-O1 now specifies one initial-list/SSE `data_changed` subscriber and recorded `agent-event` row; AC-O2 reuses the current exact-CWD click seam; AC-I1 holds the one-session managed-tab drill until Sprint 1 accepts. The earlier lease proposal is labeled rejected historical material.
+- DONE: State and spike-test whether implementation can start from current main without a Sprint 1 branch rebase; treat Sprint 1 only as a managed-tab integration contract unless a concrete code API proves otherwise.
+  AC-O3 records merge base `2e0810b`, no `grout/` branch diff or session-seam diff, no current-main lease reference, and the fresh current-main Go spike `TestEmitEndToEnd|TestSessionRowFromFixture` PASS. Implementation starts on main; Sprint 1 gates only integration/live proof.
+- DONE: Revise the bb entity's ACs, test plan, out-of-scope boundary, and ideation report with exact evidence; do not write product code or revive 7h/4d/lease/custom-PTY scope.
+  AC-O1 through AC-I1 cite the loopback arrival fixture, current rail pure seams, no-rebase audit, and held managed-tab drill. No product code, 7h/4d record, lease, custom PTY, branch rebase, gate association, pooling, reconnect hardening, adoption, or multi-client refinement changed.
+
+### Summary
+
+Cycle 4 resets bb to one operator journey: an AgentsView change reaches the
+managed rail and returns the operator to one uniquely CWD-bound pane. Current
+main already contains the row/payload seam, and the managed-tab branch adds no
+subscriber API, so implementation need not rebase. Sprint 1 remains the
+accepted managed-tab integration gate, not a lease dependency.
