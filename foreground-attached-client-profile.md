@@ -390,3 +390,20 @@ The final packet passed `./tests/zellij-install-profile-test.sh all`, three
 fresh focused lifecycles, target-free cold build/lifecycle, 7 Python driver
 tests, 132 Rust tests plus `cargo check --tests`, and `go test ./...` with
 `go vet ./...`. No captain-live drill was run.
+
+## Stage Report: validation (cycle 2)
+
+- FAILED: Independently reproduce every offline acceptance criterion from implementation commit b847a3b, including raw-PTY retry behavior, cold-build/lifecycle separation, cleanup, and standing-file isolation.
+  `b847a3b` was clean, and focused/cold runs passed, but all three independent `./tests/zellij-install-profile-test.sh all` attempts failed in readiness paths: lease-observation ordering, early lifecycle exit, and a no-active-session raw loop.
+- DONE: Run the required refutation audit in a throwaway target-free checkout; name attack scenarios and report surviving or refuted findings with concrete evidence.
+  The detached clean-build clone passed, while the audit refuted deterministic lease-order and live-session readiness; early-lease, source-drift, bounded-query, and successful-path cleanup defenses survived.
+- DONE: Write a per-AC validation report and gate artifact with reproducible commands/results; do not run or claim the captain-live drill.
+  Wrote `gates/foreground-attached-client-profile-validation-cycle-2.md`; AC-I1 was not run and the gate recommendation is REJECTED.
+
+### Summary
+
+Cycle 2 repaired enough of the original canary/cold-build path to produce
+successful isolated and target-free evidence, but it did not make the required
+complete offline packet deterministic. The validator observed a publisher versus
+driver readiness-order race and a separate private-session disappearance before
+raw input; return this to implementation before spending captain time on AC-I1.
