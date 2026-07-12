@@ -5,12 +5,12 @@ source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
 sprint-readiness: ready
-blocked-on: 7h-validation-gate-before-implementation
-blocked-reason: Ideation is captain-approved now. Implementation and the live drill require the passed disposable-profile gate.
+blocked-on:
+blocked-reason:
 score: 1.0
 started: 2026-07-12T00:02:21Z
 completed:
-verdict: REJECTED
+verdict:
 worktree:
 issue:
 pr:
