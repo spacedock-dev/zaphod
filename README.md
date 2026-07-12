@@ -135,10 +135,11 @@ When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail requests a temporary runtime `Alt /` route to its own already-running
 plugin; the persistent binding remains `NoOp`. `reconfigure()` has no
 acknowledgement, so only a received literal keybind pipe at the active tiled
-rail is allowed to toggle the docked/sliver layout. A foreign tab safely does
-nothing and never creates a pane. Sprint 1 proves this journey for one
-attached client; second-client delivery within the same managed tab is a
-named follow-up, not an entry requirement.
+rail is allowed to toggle the docked/sliver layout. Sprint 1 proves this
+ordinary journey for one attached client; second-client delivery is a named
+follow-up. The separately tracked `v3` hardening task must still prove that a
+tiled sidebar-shaped unmanaged resident cannot qualify for that route; visual
+shape or a URL substring is not managed ownership.
 
 Use `ZELLIJ_CONFIG_DIR`, `ZELLIJ_CONFIG_FILE`, and `ZELLIJ_DATA_DIR` to run it
 against an isolated profile. The current invocation creates its tab at once;

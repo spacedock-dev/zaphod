@@ -5,13 +5,15 @@
 ## Current Sprint 1 boundary
 
 This document describes the later workspace product, not a prerequisite for
-the first operator journey. Sprint 1 ships the narrow safe onramp in the
-existing Zellij plugin: `scripts/zellij-new-tab.sh --session <name>` creates a
-fresh layout-owned tab from the selected checkout; activated `Alt Shift z`
-does the same native fresh-tab action; and `Alt /` changes only that initialized
-tab's docked/sliver layout. Foreign tabs remain inert. There is no controller,
-stable binding record, create-or-focus behavior, adoption, hub, or portable CLI
-in this slice.
+the first operator journey. Sprint 1 has a usable narrow onramp in the existing
+Zellij plugin: `scripts/zellij-new-tab.sh --session <name>` creates a fresh
+layout-owned tab from the selected checkout, and activated `Alt Shift z` does
+the same native fresh-tab action. The ordinary `Alt /` path changes that tab's
+docked/sliver layout. Task `v3` is closing the remaining adversarial proof that
+a tiled sidebar-shaped unmanaged resident cannot qualify for the route; no
+future architecture may treat visual shape or a URL substring as ownership.
+There is no controller, stable binding record, create-or-focus behavior,
+adoption, hub, or portable CLI in this slice.
 
 The tmux-hosted isolated smoke proves the real keys, candidate WASM identity,
 managed transition, post-route foreign no-op, and cleanup. A future driver may

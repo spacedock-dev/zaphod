@@ -39,7 +39,7 @@ stale-data handling, focus behavior, and provider-owned resolution. Their
 implementation boundaries are not product architecture. In particular, the
 rail must not inherit `pz`'s rail-issued `approve` action.
 
-## Sprint 1 — safe managed-tab onramp (shipped)
+## Sprint 1 — safe managed-tab onramp (baseline shipped; hardening active)
 
 ### Operator journey
 
@@ -47,16 +47,18 @@ rail must not inherit `pz`'s rail-issued `approve` action.
 runs the fresh-tab entry command.
 
 **Visible result:** Zellij opens one fresh managed Zaphod tab built from that
-checkout's WASM. `Alt /` toggles only the shared rail in an initialized managed
-tab; it is inert in foreign, unmanaged, floating, absent, or unpermitted
-contexts. Clients viewing the same initialized managed tab operate that tab's
-shared rail.
+checkout's WASM. In the ordinary entry-created path, `Alt /` toggles that
+tab's shared rail and does not create or retrofit a foreign tab. The baseline
+does not yet prove the stronger managed-only claim against an active tiled,
+sidebar-shaped unmanaged resident; task `v3` closes that adversarial gap.
+Second-client delivery within one managed tab remains a follow-up, not a
+shipped claim.
 
 **Reproducible proof:** The tmux-hosted smoke uses isolated, short Zellij
 config/data/socket roots; sends literal keys; verifies the candidate WASM in
-native pane and layout state; proves `Alt /` changes only the initialized
-managed tab's known rail state; proves foreign-tab `Alt /` is a no-op; and
-checks cleanup plus standing-root hashes.
+native pane and layout state; proves the ordinary managed-tab transition and
+sidebar-less foreign no-op; and checks cleanup plus standing-root hashes.
+Task `v3` extends that proof to the tiled/sidebar-bearing adversary.
 
 ### Scope
 
@@ -75,15 +77,19 @@ it as a Sprint 1 prerequisite. `bc`, `qb`, and `6v` remain deferred and do not
 auto-dispatch.
 
 `fp` passed the isolated smoke packet and the captain's ordinary-consent drill.
-The supported upgrade path is a fresh tab through `scripts/zellij-new-tab.sh`;
-an already-running rail is not hot-reloaded in place.
+It is the usable entry baseline, not final managed-only authorization closure.
+`v3` tracks route authorization hardening; `fq` tracks replacement of the
+fail-closed-but-fragile AWK activation transformer. The supported upgrade path
+is a fresh tab through `scripts/zellij-new-tab.sh`; an already-running rail is
+not hot-reloaded in place.
 
 ## Sprint 2 — one dependable attention loop
 
 ### Entry gate
 
-Sprint 1's managed-tab smoke and captain drill have passed. Sprint 2 may start
-its approved walking-skeleton work; it does not wait for `7h`.
+Sprint 1's ordinary managed-tab smoke and captain drill have passed. Sprint 2
+may start its approved walking-skeleton work; it does not wait for `7h`, `v3`,
+or `fq`. Those follow-ups remain independently tracked safety hardening.
 
 ### Operator journey
 
