@@ -36,8 +36,7 @@ absolute rendered layout, persistent `Alt /` `NoOp`, and a tmux-hosted
 fixture—but is not accepted as-is. In particular, it treats a fire-and-forget
 `reconfigure()` call and a local `toggle_route_installed` flag as authorization
 for a route that has not actually been observed. It has not proved a literal,
-authorized positive `Alt /` path or the desired second-client behavior in the
-same managed tab.
+authorized positive `Alt /` path in the managed tab.
 
 ## Required end value
 
@@ -54,13 +53,15 @@ the WASM, and does not change layout, focus, geometry, process, or tab state.
 one attached terminal. Two clients viewing the same initialized managed tab
 are both allowed to toggle that shared rail. A client-local runtime binding may
 be required by Zellij as delivery plumbing, but it must never become a
-client-private authorization scheme or require a client token.
+client-private authorization scheme or require a client token. Delivering and
+proving that behavior across attached clients is a named follow-up, not this
+Sprint 1 gate.
 
 **Reproducible proof:** A real Zellij client inside an isolated tmux server
 sends literal `Alt Shift z` and `Alt /` bytes, captures the visible screen, and
 uses native Zellij pane/layout state to prove the positive managed-tab path,
-same-tab second-client path, and foreign-tab no-op. It cleans up the isolated
-roots and proves standing Zellij config/layout hashes did not change.
+post-route foreign-tab no-op, and disposable cleanup. It proves standing
+Zellij config/layout hashes did not change.
 
 ## Proposed approach
 
@@ -95,15 +96,7 @@ feature/zellij-new-tab-entry @ c34436f
    plus the native state transition—not the successful return of
    `reconfigure()` or a local boolean—establishes that a route was usable.
 
-4. **Two clients, one tab.** The implementation may install or refresh a
-   delivery route for each attached client if Zellij requires it, but each
-   route targets the existing shared resident and has identical tab-scoped
-   semantics. Once client B is looking at the initialized managed tab and has
-   completed the normal permission path, B's literal `Alt /` must toggle the
-   same rail. No per-client token, lease, active-client guess, or hidden
-   controller is introduced.
-
-5. **Real, narrow harness.** Extend the tmux-hosted smoke in the same
+4. **Real, narrow harness.** Extend the tmux-hosted smoke in the same
    worktree. It owns a short-lived tmux server and temporary Zellij
    config/data/socket roots; it sends keys with `tmux send-keys`, captures
    panes with `tmux capture-pane`, and queries Zellij with native actions.
@@ -117,19 +110,16 @@ feature/zellij-new-tab-entry @ c34436f
   a later unobserved route safe or prove that it reached the intended client.
 - Add a literal, permission-authorized managed-tab `Alt /` proof. The current
   smoke proves entry and foreign inertness but not the positive key path.
-- Add the two-client same-tab proof. The current branch describes a
-  second-client route as inert; that is the rejected client-private behavior.
 - Retain the current-checkout identity proof through script, native binding,
   live pane inventory, and dumped layout. A stale global `zaphod.kdl` or WASM
   URL is a failure.
 
 ## Riskiest unproven mechanism
 
-**A runtime `MessagePluginId` route can support a literal `Alt /` from two
-attached clients viewing the same initialized tab, while a literal `Alt /`
-from a foreign tab remains inert.** Unit tests can prove decision guards but
-not Zellij's actual runtime delivery. This needs a narrow tmux-hosted spike
-before further polish.
+**A runtime `MessagePluginId` route can support a literal authorized `Alt /`
+from the initialized managed tab while a literal `Alt /` from a foreign tab
+remains inert.** Unit tests can prove decision guards but not Zellij's actual
+runtime delivery. This needs a narrow tmux-hosted spike before further polish.
 
 If Zellij cannot provide that behavior with the existing resident layout and
 runtime route, stop at the observed limitation and return it for a captain
@@ -169,24 +159,11 @@ identity and all existing pane identities remain equal. Capture the visible
 tmux pane for the same transition. A helper call or direct plugin method does
 not satisfy this criterion.
 
-**AC-O3 — A second attached client may toggle the same managed tab.** Attach
-clients A and B to the same isolated Zellij session and put both on the
-initialized managed tab. After the ordinary permission path is available to
-both, literal `Alt /` from A changes the shared swap state and literal `Alt /`
-from B changes it back. Neither press creates a new sidebar/plugin pane or
-rewrites the persistent config.
-
-Verified by: use two tmux panes attached to the same Zellij session; record
-the managed tab's native state and candidate plugin/pane count before A, after
-A, and after B; capture both client screens; and compare the isolated
-`config.kdl` hash before and after the two presses. The expected two opposite
-state changes derive from `layouts/zaphod.kdl`'s docked/undocked swaps.
-
-**AC-O4 — Foreign-tab `Alt /` is a real no-op even after runtime routing.**
-After AC-O2 or AC-O3 has established a usable managed route, switch an attached
-client to a sidebar-less foreign tab and send literal `Alt /`. The foreign tab
-does not create or focus a candidate pane and its pane inventory, PID,
-geometry, focus, active-tab selection, and dumped layout are unchanged.
+**AC-O3 — Foreign-tab `Alt /` is a real no-op even after runtime routing.**
+After AC-O2 has established a usable managed route, switch the attached client
+to a sidebar-less foreign tab and send literal `Alt /`. The foreign tab does
+not create or focus a candidate pane and its pane inventory, PID, geometry,
+focus, active-tab selection, and dumped layout are unchanged.
 
 Verified by: normalized native `list-panes --json --all --command --geometry
 --state --tab` and `dump-layout` snapshots before/after the key must be byte
@@ -194,7 +171,7 @@ equal for the foreign tab; the tmux capture must show no Zaphod launch or
 layout transition; and candidate plugin count must remain unchanged. This is
 run after—not before—the positive route so it catches a leaked runtime route.
 
-**AC-O5 — The smoke is disposable and preserves standing state.** Every smoke
+**AC-O4 — The smoke is disposable and preserves standing state.** Every smoke
 outcome, including permission refusal, a failed candidate build, and
 interruption, removes its Zellij session, dedicated tmux server, and temporary
 root. It leaves the operator's standing config and `layouts/zaphod.kdl` hashes
@@ -211,24 +188,21 @@ sentinel standing root to prove cleanup rather than only a happy-path log.
 hunting.** In an attached disposable session, CL invokes the selected
 checkout's entry script or presses `Alt Shift z`, approves the ordinary
 permission prompt, sees the selected candidate rail, toggles it with `Alt /`,
-and confirms `Alt /` is inert from a foreign tab. A second client on the same
-managed tab can also toggle it.
+and confirms `Alt /` is inert from a foreign tab.
 
 Verified by: CL's live drill follows the printed tmux-harness commands, with
 native pane/layout snapshots retained beside the captured screen. The drill
-records the candidate checkout, both client/tab positions, the managed swap
-transitions, and the unchanged foreign baseline. It is not settled by unit
-tests or configuration inspection.
+records the candidate checkout, managed swap transition, and unchanged foreign
+baseline. It is not settled by unit tests or configuration inspection.
 
 ## Test plan
 
 1. **Run the smallest real delivery spike first.** In the existing worktree,
    start Zellij in an isolated tmux server, activate the selected layout,
-   attach two clients, complete the normal permission path, and drive literal
-   `Alt Shift z` and `Alt /`. Prove AC-O2 through AC-O4 before refactoring any
-   remaining branch code. If client B cannot toggle the shared tab, report the
-   actual Zellij route behavior; do not add a controller, CLI protocol, lease,
-   or custom PTY workaround.
+   complete the normal permission path, and drive literal `Alt Shift z` and
+   `Alt /`. Prove AC-O2 and AC-O3 before refactoring any remaining branch
+   code. Do not add a controller, CLI protocol, lease, or custom PTY
+   workaround.
 2. Add failing tests for the narrow code decisions: a persistent `NoOp` route;
    a native absolute-path `NewTab` route; no optimistic local authorization;
    direct-pipe handling only by an active tiled resident; and foreign/floating/
@@ -238,15 +212,11 @@ tests or configuration inspection.
 3. Complete `scripts/zellij-new-tab.sh` and its config transformer with
    current-checkout artifact identity, atomic write/rollback, conflicting
    non-Zaphod binding refusal, and isolated-root fixture coverage.
-4. Make the tmux smoke automate AC-O1, AC-O2, AC-O4, and cleanup. It may use a
+4. Make the tmux smoke automate AC-O1, AC-O2, AC-O3, and cleanup. It may use a
    deliberately pre-authorized permission fixture for headless coverage, but
    it must never fake consent with injected permission keystrokes. Retain the
    normal consent flow for AC-I1.
-5. Extend the smoke to attach client B and automate AC-O3 if Zellij's
-   permission fixture permits it; otherwise leave a short, exact manual
-   two-client command sequence and run it for AC-I1. Do not call an unrun
-   manual drill a passed automated gate.
-6. Run the focused shell suites, Rust tests, `cargo check --tests`, the
+5. Run the focused shell suites, Rust tests, `cargo check --tests`, the
    tmux-hosted smoke, and `git diff --check`. Review the actual Zellij/tmux
    state before presenting the captain-live drill.
 
@@ -260,8 +230,8 @@ tests or configuration inspection.
   identity expectation. It removes instructions that recommend first-toggle
   retrofit of an ordinary tab.
 - `docs/zellij-tmux-smoke-harness.md` records literal key delivery, positive
-  managed toggle, same-tab two-client behavior, foreign no-op, and disposable
-  cleanup. It explicitly excludes custom PTY/lease machinery.
+  managed toggle, post-route foreign no-op, and disposable cleanup. It
+  explicitly excludes custom PTY/lease machinery.
 - `docs/zaphod-workspace-architecture.md` replaces the stale controller/CLI
   account with this Sprint 1 onramp. The broad future launcher/driver remains
   architectural direction, not a prerequisite to the first operator journey.
@@ -276,6 +246,10 @@ tests or configuration inspection.
   driver, provider ingestion, gate pooling, or review resolution;
 - retrofitting a foreign tab, spawning a rail from `Alt /`, or changing a
   foreign layout; and
+- **Follow-up — same-tab multi-client runtime-route delivery:** prove that a
+  second client can use the same initialized managed rail without changing the
+  tab-scoped semantics. Do not file or dispatch it until this Sprint 1 journey
+  exposes a need; it is not an AC, smoke requirement, or captain drill here;
 - rewriting the existing entry worktree into a new branch or worktree.
 
 ## Stage Report: ideation
@@ -287,7 +261,7 @@ tests or configuration inspection.
   authority. Implementation continues in
   `.worktrees/zellij-new-tab-entry` on `feature/zellij-new-tab-entry` at
   `c34436f`; the exact gaps are optimistic route authorization, literal
-  positive toggle, same-tab second-client behavior, and identity proof.
+  positive toggle, and identity proof.
 - DONE: Made foreign-tab immutability and current-checkout WASM identity
   end-value criteria rather than helper mechanics. The required tmux proof
   uses real key bytes, visible capture, native state, and disposable cleanup.
@@ -302,25 +276,25 @@ tests or configuration inspection.
   AC-O2 → *Tab-scoped runtime toggle*, `layouts/zaphod.kdl`'s named swaps, and
   test-plan steps 1, 2, and 4: literal tmux key bytes and native layout/pane
   snapshots settle the positive transition rather than a helper call.
-  AC-O3 → *Two clients, one tab*, *Riskiest unproven mechanism*, and test-plan
-  steps 1 and 5: the two attached tmux clients and their opposite native swap
-  transitions are the planned proof; it remains unrun until implementation.
-  AC-O4 → *Persistent fail-closed bindings*, `docs/zellij-tmux-smoke-harness.md`,
+  AC-O3 → *Persistent fail-closed bindings*, `docs/zellij-tmux-smoke-harness.md`,
   and test-plan steps 1 and 4: a post-route foreign snapshot is compared with
   its independent baseline, so a leaked runtime route cannot pass by merely
   leaving the initial foreign test inert.
-  AC-O5 → *Real, narrow harness* and test-plan step 4: pre/post standing-file
+  AC-O4 → *Real, narrow harness* and test-plan step 4: pre/post standing-file
   hashes plus tmux/session/root teardown are the independent cleanup oracle.
-  AC-I1 → *Required end value* and test-plan steps 4–6: CL's normal-consent,
-  two-client disposable drill remains the explicit live acceptance, not a
+  AC-I1 → *Required end value* and test-plan steps 4–5: CL's normal-consent
+  single-client disposable drill remains the explicit live acceptance, not a
   substitute for offline evidence.
 - DONE: Re-ran the ideation AC scan after adding those mappings. The task body
   and report are its sole design record; no separate implementation plan was
   written.
+- DONE: Captain-directed scope correction: preserve tab-scoped semantics, but
+  remove executable same-tab two-client delivery from Sprint 1's acceptance
+  gate. It is now the named, unfiled follow-up in `Out of scope`; no code,
+  frontmatter, 7h, or 4d state changed.
 
 ### Summary
 
 `fp` is now the Sprint 1 safe-door task, not a controller prerequisite. It
 owns only the path an operator can actually use: fresh native tab entry,
-managed-tab-only `Alt /`, and proof that another client on that same tab can
-use the shared rail while foreign tabs remain unchanged.
+managed-tab-only `Alt /`, and proof that foreign tabs remain unchanged.
