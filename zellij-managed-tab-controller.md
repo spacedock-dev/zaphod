@@ -1,6 +1,6 @@
 ---
 id: fp8pn84km859qges2s2ffp5h
-title: Zellij managed-tab controller and guarded keybindings
+title: Safe managed-tab entry and guarded keybindings
 status: ideation
 source: managed-view roadmap Sprint 2 controller delivery; ideation evidence preserved 2026-07-11
 started: 2026-07-12T06:45:43Z
@@ -11,6 +11,9 @@ worktree:
 issue:
 pr:
 mod-block:
+sprint: s1-safe-managed-tab-onramp
+group: walking-skeleton
+sprint-readiness: ready
 ---
 
 ## Problem
