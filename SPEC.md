@@ -17,7 +17,8 @@ agents run side by side.
 
 The rail also renders agent-session and pending-gate rows fed over the
 `agent-event` pipe by grout — protocol and binding rules in
-`docs/plan-agent-rail.md` (decisions 1-3): two typed JSON kinds, cwd binding
+`docs/archive/plan-agent-rail-prototype-2026-07-07.md` (decisions 1-3): two
+typed JSON kinds, cwd binding
 in the plugin via `get_pane_cwd`, unbound rendered as unbound, never guessed.
 
 ### Validated UX (what the prototype proved out with real use)

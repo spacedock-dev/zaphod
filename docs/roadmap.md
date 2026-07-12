@@ -1,179 +1,121 @@
 # Zaphod roadmap
 
-This roadmap orders product work by the operator outcome it delivers. The
-current per-tab WASM rail is a supported baseline: it already helps an
-operator see what is happening in the current tab and act on it. The
-[workspace architecture](zaphod-workspace-architecture.md) remains the
-long-term design; it does not authorize replacing working behavior without a
-demonstrated operator benefit.
+This file is authoritative for product delivery order. Every sprint starts with
+an operator trigger, a visible result, and reproducible proof. No sprint puts
+its first real action behind a controller, hub, driver, or other component
+chain.
 
-`docs/plan-agent-rail.md`, the root prototype documents, and their old sprint
-numbers are historical build records. They remain useful evidence, but this
-file controls delivery order.
+The [workspace architecture](zaphod-workspace-architecture.md) remains the
+long-term design. It does not authorize replacing useful behavior before an
+operator journey proves the replacement better.
+
+The [archived agent-rail prototype plan](archive/plan-agent-rail-prototype-2026-07-07.md),
+root prototype documents, and their old sprint numbers are evidence only. They
+do not control delivery order or dispatch.
 
 ## Delivery rules
 
-- Start each product sprint from one complete operator journey, not from a
-  component list.
-- Preserve reliable behavior until a replacement proves equal or better value
-  in the same operator journey.
+- Start with one complete operator journey. State its trigger, visible result,
+  and repeatable proof before naming components.
+- Preserve working behavior until a replacement proves equal or better value in
+  that same journey.
 - Name the operator failure before replacing a working surface. Architectural
   neatness alone is not a failure.
-- Keep review truth and review resolution in the provider. Zaphod may surface
-  a review and open the provider UI; it does not render a provider form or
-  issue a verdict.
+- Keep review truth and review resolution in the provider. Zaphod may surface a
+  review and open provider UI; it does not render a provider form or issue a
+  verdict.
 - Run live captain drills only after reproducible offline checks pass.
 - Never mutate standing Zellij or tmux configuration during development tests.
 
-## Current product baseline
+## Product baseline and evidence
 
-The shipped rail is reliable for its current tab. It lists terminal panes and
-agent state, and its companion process can surface session and review rows.
-Session actions focus a bound pane. Review actions open the provider's review
-surface. This is the behavior later work must preserve or improve.
+The shipped rail lists terminal panes and agent state for its current tab.
+Grout can surface session and review rows. Session actions focus a bound pane,
+and review actions open the provider's UI. Later work must preserve or improve
+that behavior.
 
-The legacy `grout` and rail tasks contain valuable evidence:
+The old `yb`, `7v`, and `pz` work remains useful evidence: session ingestion,
+stale-data handling, focus behavior, and provider-owned resolution. Their
+implementation boundaries are not product architecture. In particular, the
+rail must not inherit `pz`'s rail-issued `approve` action.
 
-- `yb` and `7v` show session ingestion, stale-data handling, and the current
-  rail's focus behavior.
-- `pz` proves that a provider-owned gate server, rather than a direct log
-  append, owns durable resolution and waiter wake-up.
+## Sprint 1 — safe managed-tab onramp (shipped)
 
-Their implementation boundaries do not become mandatory product architecture.
-In particular, do not carry forward `pz`'s rail-issued `approve` action: it
-violates the provider-owned review boundary.
+### Operator journey
 
-## Sprint 1 — trusted test-profile onramp (in flight)
+**Trigger:** In the selected checkout, the operator presses `Alt Shift z` or
+runs the fresh-tab entry command.
 
-### End value
+**Visible result:** Zellij opens one fresh managed Zaphod tab built from that
+checkout's WASM. `Alt /` toggles only the shared rail in an initialized managed
+tab; it is inert in foreign, unmanaged, floating, absent, or unpermitted
+contexts. Clients viewing the same initialized managed tab operate that tab's
+shared rail.
 
-An operator can exercise real keys in an isolated Zellij profile and trust
-that exit, signals, and cleanup leave standing configuration untouched. This
-is an enabling exception to the walking-skeleton rule: it makes later product
-drills trustworthy without claiming to ship a new attention surface.
-
-### Locked scope and sequence
-
-Sprint 1 has completed staff review. Do not add to or reshape its task bodies,
-statuses, worktrees, or order. The First Officer may maintain its delivery
-metadata in frontmatter.
-
-Its membership is the query `sprint=s1-trusted-test-profile-onramp`. The
-`group` and `sprint-readiness` fields make the release lane visible without
-duplicating a mutable task list in this document.
-
-1. **`foreground-attached-client-profile` (`7h`)** is the sole active Sprint 1
-   release-path lane. It must pass its foreground-PTY, raw-input, cleanup, and
-   global-isolation gate.
-2. **`zaphod-native-cli-skeleton` (`bc`)**, **`managed-view-driver-contract`
-   (`qb`)**, and **`zellij-managed-identity-feasibility` (`6v`)** remain
-   captain-approved but paused after `7h`. They are neither canceled nor
-   automatically dispatched.
-3. No Sprint 2 product task depends on those paused lanes unless the
-   continuity gate below identifies an operator failure that needs the
-   managed-workspace path.
-
-### Gate
-
-The `7h` validation gate is Sprint 1's stop point. Passing it authorizes
-safe, repeatable live drills; it does not automatically start `bc`, `qb`, or
-`6v`.
-
-## Continuity gate — keep, evolve, or replace the per-tab rail
-
-Run this gate after `7h` passes and before dispatching paused foundation work
-or a replacement architecture.
-
-### Question
-
-Can the current per-tab rail complete the operator's attention loop in normal
-Zellij work, or is there a concrete failure that it cannot correct without a
-different boundary?
-
-### Drill
-
-In one real working tab, the operator must be able to:
-
-1. see a live session that needs attention;
-2. focus that session's bound pane from the rail;
-3. see one pending review;
-4. open the provider-owned review UI from the rail;
-5. make the decision in that provider; and
-6. see the resulting provider state reflected without tab hunting.
-
-Record every missed item, stale state, wrong focus target, foreign-tab change,
-or review-launch failure. A successful drill keeps the per-tab rail as the
-product baseline. A replacement path requires a named failure and an
-equal-or-better cutover drill for this journey.
-
-## Sprint 2 — dependable per-tab attention loop
-
-### End value
-
-From normal Zellij work, an operator sees live session and pending-review
-attention in the current tab, focuses the right session, or opens the review
-in its provider-owned UI. After the provider resolves the review, the rail
-shows truthful updated state. The operator no longer hunts through tabs to
-find the next interruption.
+**Reproducible proof:** The tmux-hosted smoke uses isolated, short Zellij
+config/data/socket roots; sends literal keys; verifies the candidate WASM in
+native pane and layout state; proves `Alt /` changes only the initialized
+managed tab's known rail state; proves foreign-tab `Alt /` is a no-op; and
+checks cleanup plus standing-root hashes.
 
 ### Scope
 
-Sprint 2 is three outcome-owned delivery tasks plus one operator-loop release
-gate. They describe the legs of one journey, not a component sequence. The
-current WASM rail and `grout` remain reusable where they serve that journey.
+- `Alt Shift z` stays a native `NewTab` action using the selected checkout's
+  absolute rendered layout path.
+- Persistent `Alt /` stays `NoOp`; the managed tab owns any safe runtime
+  behavior. No key path creates, retrofits, or restructures a foreign tab.
+- The entry script and native action must use the invoking checkout's artifact,
+  never a stale global layout.
 
-The three delivery tasks may enter ideation now. Implementation and live
-validation wait for `7h` to pass and for the relevant v1 gate/provider
-contracts to be available. The existing **Sprint 2 operator-loop release
-gate** (`e6`) remains deferred as the integration and release-outcome anchor;
-it is not a generic implementation task. This does not change Sprint 1's
-scope, order, statuses, or paused lanes. It also creates no automatic
-dispatch: active `7h` and the current `4d` state may already occupy the two
-implementation slots.
+### Evidence and deferrals
 
-The sprint does not require a hub, a managed tab, a native launcher, a generic
-provider framework, tmux support, pane adoption, or inline review controls.
-Those are possible later responses to measured limits, not prerequisites.
+The `7h` foreground-PTY/lease experiment is rejected release-path evidence. Its
+task record remains untouched; this roadmap neither changes its status nor uses
+it as a Sprint 1 prerequisite. `bc`, `qb`, and `6v` remain deferred and do not
+auto-dispatch.
 
-### Outcome-owned delivery tasks and release gate
+`fp` passed the isolated smoke packet and the captain's ordinary-consent drill.
+The supported upgrade path is a fresh tab through `scripts/zellij-new-tab.sh`;
+an already-running rail is not hot-reloaded in place.
 
-| Item | Purpose | Dispatch rule |
-| --- | --- | --- |
-| **Live sessions arrive and lead back to work** | A persistent, profile-scoped subscriber performs initial load, SSE updates, reconnect, and periodic list refresh. It uses authoritative top-level-session filtering, binds sessions to the current tab, focuses one unambiguous pane, and expires stale rows. | Ideation is approved now. Implement and validate only after `7h`; reuse `yb`/`hj` evidence, not their stale dispatches. |
-| **Pending gates appear where the work came from** | The v1 gate skill supplies optional origin context. A valid origin maps to its exact tab; missing or malformed origin uses the global fallback. Reconcile only open gates so provider resolution updates or removes the row. Never infer origin from a path, CWD, or title, and never issue an inline verdict. | Ideation is approved now. Implementation waits for the applicable v1 gate/provider contract. |
-| **One v1 review opens and returns cleanly** | After accepting a delegated request, Zaphod opens one visible reviewer surface in the originating/bound tab when available, or in the current tab for an unbound global gate. The gate skill retains decision and routing semantics; Zaphod tracks the exact surface lifecycle and cleanup. Direct fallback is allowed only before Zaphod accepts. | Ideation is approved now. Implement after `7h` and the v1 review-surface contract; do not add hidden prewarm in this first slice. |
-| **Sprint 2 operator-loop release gate** (`e6`) | Integrate the three legs into one release outcome: a live session and an open gate appear, the right pane focuses, one reviewer opens, and later provider resolution makes the rail truthful. | Remains prefiled and deferred as the integration/release-outcome anchor until the three delivery tasks supply the smallest proven behavior. |
-| **Sprint 2 operator-loop gate** | Reproduce the complete live journey in normal Zellij work and prove truthful post-resolution state. | Run after the integrated offline checks. A passing gate proves value; it does not authorize unrelated architecture work. |
+## Sprint 2 — one dependable attention loop
 
-### Explicit deferrals
+### Entry gate
 
-- `fp` — the managed-tab controller and guarded keybindings — remains deferred
-  until a continuity-gate failure requires managed entry.
-- A hub and managed-tab adoption remain deferred; they need an observed
-  continuity failure, not architectural preference.
-- Hidden reviewer prewarm or pooling remains deferred until the visible,
-  accepted-delegation slice proves it is needed.
-- Inline verdicts and rail-owned review routing remain deferred permanently:
-  those semantics belong to the provider/gate skill.
-- `1s` — explicit pane adoption — is an optional later capability, pending an
-  explicit product decision.
-- `bc`, `qb`, and `6v` remain paused as described in Sprint 1.
-- `j5`, `eh`, `fw`, `4d`, and `m1` remain foreign-tab retrofit or upstream
-  research, outside this release path.
-- `s6`, `n5`, `hj`, `yb`, `7v`, and `pz` remain evidence or narrowly scoped
-  repair candidates until the attention-loop task selects a proven need.
+Sprint 1's managed-tab smoke and captain drill have passed. Sprint 2 may start
+its approved walking-skeleton work; it does not wait for `7h`.
 
-## Sprint 3 — evidence-led expansion
+### Operator journey
 
-Sprint 3 is not preallocated to a component. Its goal follows the first
-failure that remains after Sprint 2's operator gate: for example, reliable
-reconnection and stale-state recovery, a second supported tab/workspace, or a
-managed-workspace migration that passes the continuity cutover test. Write its
-task only after Sprint 2 records that evidence.
+**Trigger:** During normal Zellij work, a live session needs attention and a
+pending gate exists.
 
-## Operational note
+**Visible result:** The session appears in the rail and focuses its bound pane;
+the gate appears and opens its provider UI; after provider resolution, the rail
+reflects the new provider state without tab hunting.
 
-The workflow currently has no dispatchable tasks because its two implementation
-slots are occupied by active `7h` and stale `4d` state. This roadmap recommends
-deferral of `4d` because it is outside the release path; it does not mutate its
-state. A captain decision is required before changing that record.
+**Reproducible proof:** One end-to-end drill proves session appearance and
+focus, gate appearance and provider UI opening, and truthful post-resolution
+state. Offline checks precede the live drill.
+
+### Scope and deferrals
+
+Sprint 2 delivers the whole attention loop, not a sequence of component
+allocations. The re-scoped `fp` walking skeleton owns Sprint 1's narrow entry
+bridge; it does not promote a broad managed-tab controller. A hub and pane
+adoption remain deferred until the completed loop exposes a measured failure
+that requires them. Inline verdicts and rail-owned review routing stay out of
+scope because the provider owns those semantics.
+
+## Sprint 3 — evidence-led walking skeleton
+
+Sprint 3 starts only after Sprint 2 records a remaining operator failure. Its
+first task must again state a trigger, visible result, and reproducible proof
+for one complete journey—for example, recovery after a proven stale-state
+failure or a second supported workspace. Do not preallocate Sprint 3 to a
+controller, hub, adoption mechanism, or other component.
+
+## Operational boundary
+
+This roadmap does not mutate task records, `7h`, `4d`, or workflow state. Any
+prefiled deferred work still needs an explicit captain decision before dispatch.

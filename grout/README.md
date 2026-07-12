@@ -2,7 +2,8 @@
 
 Grout binds agent state to the rail: it turns agentsview session data and
 subspace decision logs into typed rail rows and pipes them into the zellij
-session (plan decisions 1–4, `docs/plan-agent-rail.md`). The plugin never
+session (prototype decisions 1–4,
+`docs/archive/plan-agent-rail-prototype-2026-07-07.md`). The plugin never
 learns about agentsview; grout never learns about zellij beyond invoking
 `zellij pipe`. This is the sprint-0 skeleton: one one-shot run — fetch one
 session, read one gate log, emit two rows, exit.

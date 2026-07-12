@@ -74,7 +74,7 @@
 - Modify: `README.md`
 - Modify: `docs/docking-approach.md`
 - Modify: `docs/agent-rail-dev/README.md`
-- Modify: `docs/plan-agent-rail.md`
+- Modify: `docs/archive/plan-agent-rail-prototype-2026-07-07.md`
 
 **Interfaces:**
 - Consumes: executable commands and verified delivery dependency audit from the approved entity.
