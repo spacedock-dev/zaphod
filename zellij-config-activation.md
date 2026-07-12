@@ -1,12 +1,12 @@
 ---
 id: fqjswvmd93vek5y12zemf1k2
 title: Activation preserves valid Zellij KDL
-status: backlog
+status: ideation
 source: staff review of fp merge 2026-07-12; captain direction
 sprint: s1-managed-tab-safety
 group: hardening
 sprint-readiness: ready
-started:
+started: 2026-07-12T14:33:06Z
 completed:
 verdict:
 score: 0.98
