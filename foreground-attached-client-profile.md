@@ -336,3 +336,23 @@ remain the foreground lane's proof; no captain-live drill was run or claimed.
 ### Summary
 
 The foreground launcher now owns one direct Zellij client, a private disposable profile, and an immutable test-only lease published only after the independent PTY observation and raw-terminal proof. Full shell, Rust, and Go verification passed (`132` Rust tests); README guidance makes the real-key path and isolation boundary explicit. No captain-live drill was run or claimed.
+
+## Stage Report: validation
+
+- DONE: Independently re-run every offline AC from the final commit, including raw PTY, PGID, lease, cleanup, and isolation evidence.
+  Clean SHA `4320b2f9fadb27d500097b31dc85c76a083918fa`: focused lifecycle, no-TTY, forced-cleanup, PGID validation, and a missing-standing-root normal-cleanup probe exercised the packet.
+- FAILED: AC-O1 — real keys reach the disposable terminal (end value).
+  Repeated live probes produced both `expected exactly one terminal, found 0` and a raw nonce absent from 243 completed `dump-screen` calls; a second focused run timed out awaiting `PROFILE_PTY_READY`.
+- DONE: Attack the packet in a throwaway checkout: early or mutable lease, false client identity, cleanup leaks, and global-state regression.
+  Early file/line, false-client, mutable-lease, cleanup, and isolation attacks survived; the apparent lease bookkeeping race was checked and withdrawn because its write followed the independent OS observation.
+- DONE: Produce per-AC evidence, the captain-live demo script, and the required gate brief and decision log without self-driving the live demo.
+  Wrote `gates/foreground-attached-client-profile-validation.md`, its subspace brief, and its decision log; AC-I1 remains unrun for CL after offline stabilization.
+
+### Summary
+
+Validation rejects the gate pending a deterministic raw-PTY readiness proof. The
+profile's foreground ownership, lease shape, cleanup, and isolation evidence
+passed when the lifecycle reached readiness, but AC-O1 cannot be claimed after
+the observed zero-terminal and absent-canary failures. A target-free clone also
+failed to emit profile metadata within the committed readiness window on this
+validator; no captain-live drill was run.
