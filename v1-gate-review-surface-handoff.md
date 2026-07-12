@@ -307,3 +307,20 @@ float path or treat it as a fallback after acceptance.
 ### Summary
 
 The v1 path is a narrow surface handoff, not a new review controller. Zaphod owns one visible, receiver-local pane and its exact runtime cleanup; the gate skill owns launch authority, result validation, and every workflow decision. The host spike confirms placement and close mechanics but exposes native duplicate launch behavior, so an idempotent accepted-handoff registry is mandatory before implementation.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Retain the approved v1 handoff design and add explicit Stage Report evidence mappings for every acceptance criterion, especially AC-O2 through AC-O4.
+  AC-O1 → *One receiver, one explicit acceptance*, the native pre-spike, and test-plan steps 1–4: the external offer fixture, fake Zellij sink, and observed two-launch baseline establish one accepted receipt, one launch, and zero foreign launches.
+  AC-O2 → *Zaphod owns only runtime surface lifecycle* and test-plan steps 1 and 3: the `CommandPaneExited`/`PaneClosed` context-match rule extends the existing capture-ID-then-close seam recorded in `gate-click-subspace-tui-pane-never-closes.md:21-88`; recorded event fixtures drive exact close calls.
+  AC-O3 → *The gate skill owns result validation and routing* and test-plan step 4: the versioned opaque-result fixture and one-shot capability reach the fake gate-skill endpoint, while its Zaphod boundary recorder proves zero verdict, routing, decision-log, and provider-state calls.
+  AC-O4 → *One receiver, one explicit acceptance* and test-plan steps 3–4: the protocol trace fixture covers explicit decline, accepted replay, lost reply, exit, and direct-launch count; only explicit decline permits the fallback.
+  AC-C1 → *Riskiest unproven mechanism* and test-plan steps 1, 5, and 6: the planned CL drill uses the passed disposable-profile handoff in `foreground-attached-client-profile.md:148-230`, the existing two-tab host pre-spike, and gate-skill receipts. It remains a planned live proof, not a claimed run.
+- DONE: Re-run the ideation AC scan and leave no unevidenced acceptance criterion.
+  `spacedock status --read v1-gate-review-surface-handoff --stage ideation --ac-scan --json` is the gate-facing verifier; this cycle cites AC-O1, AC-O2, AC-O3, AC-O4, and AC-C1 inside checklist evidence rather than only in summary prose.
+- DONE: Keep this as evidence repair only: no implementation, no scope growth, and no additional live harness or 7h work without captain authorization.
+  This append changes only report evidence. The approved body, ACs, deferrals, native pre-spike, and held CL drill remain unchanged; no code, profile, 7h, or 4d file was touched.
+
+### Summary
+
+This cycle makes every acceptance criterion auditable from the ideation report. The approved handoff stays intact: Zaphod owns only one receiver-local surface and its lifecycle, and the gate skill retains result validation and routing. The only live evidence remains the existing isolated host pre-spike; the contract-dependent CL proof stays pending.
