@@ -132,10 +132,13 @@ the named `layout "zaphod"` form from its standing default config root, even
 when the session was launched with an isolated config root.
 
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
-The rail then installs a temporary, current-client `Alt /` route to its own
-already-running plugin. `Alt /` toggles that rail only. In a foreign tab—or in
-a newly attached client before its rail has initialized—it safely does nothing
-and never creates a pane.
+The rail requests a temporary runtime `Alt /` route to its own already-running
+plugin; the persistent binding remains `NoOp`. `reconfigure()` has no
+acknowledgement, so only a received literal keybind pipe at the active tiled
+rail is allowed to toggle the docked/sliver layout. A foreign tab safely does
+nothing and never creates a pane. Sprint 1 proves this journey for one
+attached client; second-client delivery within the same managed tab is a
+named follow-up, not an entry requirement.
 
 Use `ZELLIJ_CONFIG_DIR`, `ZELLIJ_CONFIG_FILE`, and `ZELLIJ_DATA_DIR` to run it
 against an isolated profile. The current invocation creates its tab at once;
@@ -158,11 +161,13 @@ real-key candidate check.
 
 ### Permissions
 
-On first launch in each disposable profile, the pane shows a permission prompt
+On first normal launch, the pane shows a permission prompt
 (`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`,
-`Reconfigure`, `RunCommands`) — focus it and approve once; Zellij caches the
-grant only inside that profile's data root. `Reconfigure` changes only the
-current client's runtime keybinds; Zaphod does not save that route to disk.
+`Reconfigure`, `RunCommands`) — focus it and approve once. Zellij's grant
+cache is keyed by the raw WASM path; the smoke harness redirects `HOME` to a
+temporary root and uses a deliberately pre-granted fixture, so it never
+writes the operator's cache or fakes consent with keystrokes. `Reconfigure`
+changes only runtime keybinds; Zaphod does not save that route to disk.
 `RunCommands` is required only when a gate row floats `subspace-tui`.
 
 ## Status

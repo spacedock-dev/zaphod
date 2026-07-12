@@ -33,6 +33,8 @@ CONFIG_DIR=""
 CONFIG_FILE=""
 DATA_DIR=""
 SOCKET_DIR=""
+HOME_DIR=""
+PERMISSION_CACHE=""
 SESSION_NAME=""
 TMUX_SERVER=""
 TMUX_SESSION="zaphod-smoke"
@@ -60,12 +62,25 @@ cleanup() {
     set +e
     if [ -n "$SESSION_NAME" ]; then
         zellij_control delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
+        if zellij_control --session "$SESSION_NAME" action list-panes --json --all \
+            >/dev/null 2>&1; then
+            echo "isolated Zellij session survived cleanup: $SESSION_NAME" >&2
+            cleanup_status=1
+        fi
     fi
     if [ -n "$TMUX_SERVER" ]; then
         tmux -L "$TMUX_SERVER" kill-server >/dev/null 2>&1 || true
+        if tmux -L "$TMUX_SERVER" has-session -t "$TMUX_SESSION" >/dev/null 2>&1; then
+            echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
+            cleanup_status=1
+        fi
     fi
     if [ -n "$ROOT" ] && [ -d "$ROOT" ]; then
         rm -rf "$ROOT" || cleanup_status=1
+        if [ -e "$ROOT" ]; then
+            echo "isolated smoke root survived cleanup: $ROOT" >&2
+            cleanup_status=1
+        fi
     fi
     if [ "$(file_state "$STANDING_CONFIG")" != "$STANDING_CONFIG_BEFORE" ]; then
         echo "standing Zellij config changed during tmux smoke: $STANDING_CONFIG" >&2
@@ -104,12 +119,34 @@ mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$SOCKET_DIR" "$ROOT/tmp"
 cp "$SCRIPT_DIR/fixtures/zellij-tmux-smoke-config.kdl" "$CONFIG_FILE"
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
-WASM_URL=""
+"$REPO_ROOT/build.sh" >/dev/null
+WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
+    fail "could not derive the candidate WASM URL"
+
+# This is a deliberately pre-authorized, disposable permission fixture. The
+# server starts with HOME under ROOT, so the real prompt remains available for
+# AC-I1 while this headless smoke never writes the operator's cache or fakes
+# consent with injected keys.
+HOME_DIR="$ROOT/home"
+PERMISSION_CACHE="$HOME_DIR/Library/Caches/org.Zellij-Contributors.Zellij/permissions.kdl"
+mkdir -p "$(dirname "$PERMISSION_CACHE")"
+{
+    # Zellij's permission cache is keyed by the local plugin path, not by the
+    # file: URL that appears in the layout and pane inventory.
+    printf '"%s" {\n' "$WASM_PATH"
+    printf '%s\n' \
+        '    ReadApplicationState' \
+        '    ChangeApplicationState' \
+        '    ReadPaneContents' \
+        '    Reconfigure' \
+        '    RunCommands'
+    printf '%s\n' '}'
+} > "$PERMISSION_CACHE"
 
 start_tmux_zellij() {
     local command
-    printf -v command 'env ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
-        "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
+    printf -v command 'env HOME=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
+        "$HOME_DIR" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
     tmux_command new-session -d -x 160 -y 45 -s "$TMUX_SESSION" "$command"
 }
 
@@ -140,6 +177,74 @@ capture_state() {
     jq -S . "$json" > "$json.sorted"
     zellij_session action dump-layout > "$layout"
     tmux_command capture-pane -p -t "$TMUX_PANE" > "$screen"
+}
+
+capture_tabs() {
+    local tabs="$1"
+    zellij_session action list-tabs --json --all --state --layout > "$tabs"
+    jq -S . "$tabs" > "$tabs.sorted"
+}
+
+without_geometry() {
+    local source="$1"
+    local normalized="$2"
+    jq -S 'map(del(
+        .pane_x,
+        .pane_content_x,
+        .pane_y,
+        .pane_content_y,
+        .pane_rows,
+        .pane_content_rows,
+        .pane_columns,
+        .pane_content_columns
+    ))' "$source" > "$normalized"
+}
+
+candidate_width() {
+    local panes="$1"
+    jq -er --arg wasm_url "$WASM_URL" \
+        '[.[] | select(.is_plugin and .plugin_url == $wasm_url) | .pane_columns]
+         | if length == 1 then .[0] else error("expected one candidate rail") end' \
+        "$panes"
+}
+
+candidate_geometry() {
+    local panes="$1"
+    local geometry="$2"
+    jq -S --arg wasm_url "$WASM_URL" \
+        '[.[] | select(.is_plugin and .plugin_url == $wasm_url)
+          | {id, pane_x, pane_y, pane_columns, pane_rows, tab_id, tab_position, tab_name}]' \
+        "$panes" > "$geometry"
+}
+
+wait_for_candidate_width() {
+    local output="$1"
+    local expected_width="$2"
+    local attempt actual
+    for attempt in $(seq 1 80); do
+        zellij_session action list-panes --json --all --command --geometry --state --tab \
+            > "$output" 2>"$ROOT/toggle-panes.err" || true
+        actual="$(candidate_width "$output" 2>/dev/null || true)"
+        if [ "$actual" = "$expected_width" ]; then
+            return
+        fi
+        sleep 0.05
+    done
+    cat "$ROOT/toggle-panes.err" >&2 || true
+    fail "literal Alt / did not move the candidate rail to width $expected_width (last width: ${actual:-missing})"
+}
+
+wait_for_foreign_active_tab() {
+    local tabs="$1"
+    local attempt
+    for attempt in $(seq 1 80); do
+        capture_tabs "$tabs"
+        if jq -e 'any(.[]; .active and .name != "zaphod")' "$tabs" >/dev/null 2>&1; then
+            return
+        fi
+        sleep 0.05
+    done
+    fail "native previous-tab action did not return the tmux client to the foreign tab"
 }
 
 dismiss_startup_tip() {
@@ -180,8 +285,6 @@ env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
     ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
     "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod smoke bootstrap' \
     > "$ROOT/entry.out"
-WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
-    fail "entry script did not build the candidate WASM"
 grep -F 'TAB_ID=' "$ROOT/entry.out" >/dev/null || fail "entry script did not create its bootstrap tab"
 grep -Fx "WASM_URL=$WASM_URL" "$ROOT/entry.out" >/dev/null ||
     fail "entry script did not report the candidate WASM URL"
@@ -196,39 +299,85 @@ start_tmux_zellij
 wait_for_nonempty_panes "$ROOT/foreign-ready.json"
 dismiss_startup_tip
 
-# In the sidebar-less foreign tab, literal Alt / must be a persistent NoOp.
-capture_state "$ROOT/foreign-before.json" "$ROOT/foreign-before.kdl" "$ROOT/foreign-before.screen"
+# The fresh native entry key must create exactly one tab whose visible and
+# native state both identify this checkout's candidate WASM.
+capture_tabs "$ROOT/foreign-tabs-before.json"
+TAB_COUNT_BEFORE="$(jq -er 'length' "$ROOT/foreign-tabs-before.json")"
+capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreign-ready.screen"
 jq -e --arg wasm_url "$WASM_URL" \
-    'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-before.json" >/dev/null ||
+    'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
     fail "fresh server unexpectedly started on a candidate Zaphod tab"
+send_literal "$(printf '\033Z')"
+wait_for_candidate "$ROOT/candidate.json"
+capture_state "$ROOT/candidate-before.json" "$ROOT/candidate-before.kdl" "$ROOT/candidate-before.screen"
+capture_tabs "$ROOT/candidate-tabs-before.json"
+TAB_COUNT_AFTER="$(jq -er 'length' "$ROOT/candidate-tabs-before.json")"
+[ "$TAB_COUNT_AFTER" -eq "$((TAB_COUNT_BEFORE + 1))" ] ||
+    fail "literal Alt Shift z changed tab count from $TAB_COUNT_BEFORE to $TAB_COUNT_AFTER (expected one fresh tab)"
+jq -e --arg wasm_url "$WASM_URL" \
+    'any(.[]; .is_plugin and .plugin_url == $wasm_url and .tab_name == "zaphod")' \
+    "$ROOT/candidate-before.json" >/dev/null || fail "candidate pane did not appear in the native Zellij state"
+jq -e 'any(.[]; .active and .name == "zaphod")' "$ROOT/candidate-tabs-before.json" >/dev/null ||
+    fail "literal Alt Shift z did not activate the candidate tab"
+grep -F "plugin location=\"$WASM_URL\"" "$ROOT/candidate-before.kdl" >/dev/null ||
+    fail "candidate URL did not appear in the native Zellij layout dump"
+grep -F 'asks permission to:' "$ROOT/candidate-before.screen" >/dev/null &&
+    fail "candidate rail unexpectedly prompted instead of using the disposable pre-grant"
+grep -F 'PANES' "$ROOT/candidate-before.screen" >/dev/null ||
+    fail "candidate Zaphod rail was not visibly rendered in the tmux client"
+
+# A pre-authorized rail requests its runtime MessagePluginId route, but the
+# request's return value is not authorization. One literal key must be
+# received by the active tiled resident and change only the known dock shape.
+[ "$(candidate_width "$ROOT/candidate-before.json")" = "28" ] ||
+    fail "candidate did not begin in the known docked 28-column shape"
+without_geometry "$ROOT/candidate-before.json" "$ROOT/candidate-before.identity.json"
+candidate_geometry "$ROOT/candidate-before.json" "$ROOT/candidate-before.geometry.json"
+send_literal "$(printf '\033/')"
+wait_for_candidate_width "$ROOT/candidate-after.json" 1
+# `wait_for_candidate_width` already captured the valid post-key native pane
+# inventory. Do not issue a second list-panes call in the swap transition;
+# v0.44 can briefly return an empty successful response while it redraws.
+jq -S . "$ROOT/candidate-after.json" > "$ROOT/candidate-after.json.sorted"
+zellij_session action dump-layout > "$ROOT/candidate-after.kdl"
+tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/candidate-after.screen"
+without_geometry "$ROOT/candidate-after.json" "$ROOT/candidate-after.identity.json"
+candidate_geometry "$ROOT/candidate-after.json" "$ROOT/candidate-after.geometry.json"
+cmp -s "$ROOT/candidate-before.identity.json" "$ROOT/candidate-after.identity.json" || {
+    diff -u "$ROOT/candidate-before.identity.json" "$ROOT/candidate-after.identity.json" >&2 || true
+    fail "managed Alt / replaced a pane, process, focus, or candidate identity"
+}
+cmp -s "$ROOT/candidate-before.geometry.json" "$ROOT/candidate-after.geometry.json" &&
+    fail "managed Alt / did not change the candidate rail geometry"
+cmp -s "$ROOT/candidate-before.kdl" "$ROOT/candidate-after.kdl" &&
+    fail "managed Alt / did not change the native managed layout shape"
+cmp -s "$ROOT/candidate-before.screen" "$ROOT/candidate-after.screen" &&
+    fail "managed Alt / did not visibly change the tmux client"
+
+# AC-O3 must run after the usable managed route has been observed. Return the
+# same tmux client to its sidebar-less tab with a native Zellij action, then
+# send literal Alt / and require byte-identical foreign state.
+zellij_session action go-to-previous-tab
+wait_for_foreign_active_tab "$ROOT/foreign-tabs-after-route.json"
+capture_state "$ROOT/foreign-before.json" "$ROOT/foreign-before.kdl" "$ROOT/foreign-before.screen"
 send_literal "$(printf '\033/')"
 sleep 0.10
 capture_state "$ROOT/foreign-after.json" "$ROOT/foreign-after.kdl" "$ROOT/foreign-after.screen"
 cmp -s "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" || {
     diff -u "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" >&2 || true
-    fail "foreign-tab Alt / changed native pane, focus, tab, or process state"
+    fail "post-route foreign Alt / changed native pane, focus, tab, or process state"
 }
 cmp -s "$ROOT/foreign-before.kdl" "$ROOT/foreign-after.kdl" || {
     diff -u "$ROOT/foreign-before.kdl" "$ROOT/foreign-after.kdl" >&2 || true
-    fail "foreign-tab Alt / changed the native layout"
+    fail "post-route foreign Alt / changed the native layout"
 }
-
-# The fresh native entry key must create a tab whose visible and native state
-# both identify this checkout's candidate WASM.
-send_literal "$(printf '\033Z')"
-wait_for_candidate "$ROOT/candidate.json"
-capture_state "$ROOT/candidate.json" "$ROOT/candidate.kdl" "$ROOT/candidate.screen"
 jq -e --arg wasm_url "$WASM_URL" \
-    'any(.[]; .is_plugin and .plugin_url == $wasm_url and .tab_name == "zaphod")' \
-    "$ROOT/candidate.json" >/dev/null || fail "candidate pane did not appear in the native Zellij state"
-grep -F "plugin location=\"$WASM_URL\"" "$ROOT/candidate.kdl" >/dev/null ||
-    fail "candidate URL did not appear in the native Zellij layout dump"
-grep -F 'asks permission to:' "$ROOT/candidate.screen" >/dev/null ||
-    fail "candidate Zaphod pane was not visibly rendered in the tmux client"
+    '([.[] | select(.is_plugin and .plugin_url == $wasm_url)] | length) == 1' \
+    "$ROOT/foreign-after.json" >/dev/null || fail "foreign Alt / created or removed a candidate rail"
 
 [ "$(file_state "$STANDING_CONFIG")" = "$STANDING_CONFIG_BEFORE" ] ||
     fail "standing Zellij config changed during tmux smoke: $STANDING_CONFIG"
 [ "$(file_state "$STANDING_LAYOUT")" = "$STANDING_LAYOUT_BEFORE" ] ||
     fail "standing Zellij layout changed during tmux smoke: $STANDING_LAYOUT"
 
-printf '%s\n' 'PASS: tmux-hosted Zellij smoke created the candidate tab and left foreign Alt / inert'
+printf '%s\n' 'PASS: tmux-hosted Zellij smoke proved fresh entry, managed Alt /, post-route foreign inertness, and disposable cleanup'
