@@ -28,9 +28,10 @@ and exits.
 
 ## Required outcome
 
-**Trigger:** a real AgentsView session changes while one initialized managed
-Zaphod tab is open. **Visible result:** its row appears in that tab's rail;
-clicking the row returns focus to its unique originating terminal pane.
+**Trigger:** the operator runs this checkout's fresh-tab script, then a real
+AgentsView session launched in that fresh tab's terminal changes. **Visible
+result:** its row appears in that tab's rail; clicking the row returns focus
+to that same terminal pane.
 **Reproducible proof:** a source event, session-list response, recorded
 `agent-event` pipe, and rail focus decision form one offline journey; after
 Sprint 1 accepts its managed-tab smoke, one captain drill repeats that journey
@@ -38,30 +39,42 @@ against a real managed tab.
 
 ## Ideation boundary
 
-Build one end-user attention loop only: the established `Alt Shift z` →
-`scripts/zellij-new-tab.sh` entry creates a fresh managed tab, discovers that
-tab's one resident rail natively, and starts one target-bound native sidecar.
-That sidecar performs initial list, one `data_changed` subscription, common
+Build one end-user attention loop only: direct
+`scripts/zellij-new-tab.sh` creates a fresh managed tab, discovers that tab's
+one resident rail natively, and starts one target-bound native sidecar. That
+sidecar performs initial list, one `data_changed` subscription, common
 attention-event emission through the existing Zellij/WASM bridge, and
-exact-CWD focus inside that one tab. Sprint 1 supplies the successful
-managed-tab creation surface; it is not a branch, lease, PTY, binding-core, or
-rebase prerequisite. Reconnect hardening, row expiry, global-versus-tab gate
-association, pooling, adoption, and multi-client refinements remain deferred.
+exact-CWD focus inside that one tab. `Alt Shift z` remains Sprint 1's native
+fresh-tab shortcut only: it does not start the sidecar in this slice. Sprint 1
+supplies the successful managed-tab creation surface; it is not a branch,
+lease, PTY, binding-core, or rebase prerequisite. Reconnect hardening, row
+expiry, global-versus-tab gate association, pooling, adoption, and multi-client
+refinements remain deferred.
 
 ## Proposed approach
 
 ### One end-user path
 
-Keep `Alt Shift z` → `scripts/zellij-new-tab.sh` as the only user-facing
-entry. The user never runs `grout subscribe`, `zaphod subscribe`, or a new
-`zaphod workspace start` command. After the script has successfully created a
-fresh managed tab, bb extends that same entry with one target-discovery and
-sidecar-start step. The sidecar then turns real AgentsView changes into the
-existing common attention event and delivers it through the Zellij/WASM rail
-bridge. The rail remains the projection and action owner: it reuses
-`apply_agent_event`, `rows_for_own_tab`, `bind_session`, and
-`decide_rail_click`; one exact CWD match focuses its origin pane, while zero
-or multiple matches stay unbound with no focus.
+The complete Sprint 2 entry is direct
+`scripts/zellij-new-tab.sh --session <name>`. The operator never runs
+`grout subscribe`, `zaphod subscribe`, or a new `zaphod workspace start`
+command. After the script creates a fresh managed tab, bb extends that same
+script with target discovery and private-sidecar start. The sidecar then turns
+real AgentsView changes into the existing common attention event and delivers
+it through the Zellij/WASM rail bridge. The rail remains the projection and
+action owner: it reuses `apply_agent_event`, `rows_for_own_tab`,
+`bind_session`, and `decide_rail_click`; one exact CWD match in that fresh tab
+focuses that terminal, while zero or multiple matches stay unbound with no
+focus.
+
+`Alt Shift z` deliberately remains a smaller Sprint 1 shortcut: it creates a
+managed tab but does not run the script or create a subscriber. An isolated
+0.44.3 tmux spike sent one literal key to a combined `NewTab` + floating
+`Run` binding. It produced one candidate tab *and* one visible, focused,
+floating helper pane (`HELPER_PANE_COUNT=1`, `is_floating=true`,
+`is_suppressed=false`). Zellij documents `Run` as a new-pane action and says
+multiple keybind actions have no sequential guarantee. Therefore bb must not
+claim that native hotkey as an exact-target, no-helper sidecar handoff.
 
 ### Native artifact and post-create handoff
 
@@ -101,9 +114,9 @@ complete target and the same Zellij profile, conceptually:
 ```
 
 This is bb's direct artifact, build, and invocation boundary. Successful
-fresh-tab creation in the same entry is its only runtime condition; bb does
-not create a separate prerequisite or revive bc, a binding core, a lease, or
-a controller lane.
+fresh-tab creation by the script is its only runtime condition; bb does not
+create a separate prerequisite or revive bc, a binding core, a lease, or a
+controller lane. The native hotkey is not an alternate subscription entry.
 
 ### Sidecar lifecycle ownership
 
@@ -114,6 +127,14 @@ results through the existing `BuildSessionRow`/`EmitRow` seam into the common
 `agent-event` attention event. The current bridge is session-wide broadcast by
 pipe name, never `--plugin`; the verified rail pane is a lifecycle guard, not
 a claim of per-pane transport routing.
+
+Only the successful direct script invocation starts this process. It launches
+the exact-target executable as a normal detached host child with stdin closed
+and a private log; it does not use Zellij `Run`, `new-pane`, a layout command
+pane, plugin launch, or any helper pane. A failed exec reports
+`sidecar-start-failed` to the invoking terminal and leaves the fresh tab
+intact. The script does not retain a lease, PID registry, or supervisor after
+the child starts; the child is responsible for its own terminal exit.
 
 The sidecar rechecks its exact `{Zellij profile, session, verified tab ID,
 rail pane/instance ID, canonical WASM URL}` target for its lifetime, including
@@ -165,34 +186,39 @@ mismatch and asks for a new decision rather than rebasing by assumption.
 
 ### Riskiest unproven mechanism and smallest spike
 
-The first invalidating joint is the post-create handoff, not a lease: after a
-fake native `new-tab` returns `TAB_ID=73` and a canonical WASM URL, a fake
-`list-panes --json` sequence must move from not-ready to exactly one matching
-resident plugin record. Only then may the fake native `zaphod subscribe`
-process receive the observed pane ID and profile/session tuple. The hermetic
-test fails if it uses a tab name, title, CWD, URL-only candidate, raw new-tab
-output as a pane ID, a manual public grout command, or ambient target
-discovery.
+The failed native-hotkey spike is decisive evidence, not a proposed path:
+literal `Alt Shift z` with `NewTab` plus `Run` created the expected tab but
+also a visible, focused floating helper pane. The implementation must not try
+to hide or tolerate that pane. The first remaining invalidating joint is the
+direct-script post-create handoff: after a fake native `new-tab` returns
+`TAB_ID=73` and a canonical WASM URL, a fake `list-panes --json` sequence must
+move from not-ready to exactly one matching resident plugin record. Only then
+may the fake native `zaphod subscribe` process receive the observed pane ID
+and profile/session tuple, with the Zellij pane inventory unchanged except for
+the expected fresh-tab layout. The hermetic test fails if it uses a tab name,
+title, CWD, URL-only candidate, raw new-tab output as a pane ID, a manual
+public grout command, ambient target discovery, or any helper pane.
 
 The next check is the narrow live arrival path: a loopback SSE server changes
-its list fixture from empty to one session whose CWD equals the fixture's only
+its list fixture from empty to one session launched in the fixture's fresh
 managed-tab terminal; the started sidecar must emit one existing-format
 `agent-event` session row after `data_changed`. The test fails if the sidecar
-needs a lease, branch API, a second tab, or a new user entry.
+needs a lease, branch API, a second tab, a native-hotkey handoff, or a new user
+entry.
 
-After the managed-tab smoke passes, the smallest captain-live drill uses the
-same `Alt Shift z` entry, observes its native target handoff and one real
-source session in the fresh terminal's CWD, then clicks the resulting row back
-to that terminal. It does not exercise a gate, foreign tab, reconnect,
-pooling, adoption, or second client.
+After the managed-tab smoke passes, the smallest captain-live drill runs the
+direct script, observes its native target handoff and one real source session
+in the fresh terminal's CWD, then clicks the resulting row back to that
+terminal. It does not exercise a gate, foreign tab, reconnect, pooling,
+adoption, or second client.
 
 ## Acceptance criteria
 
 ### Offline (agent-reproducible)
 
-**AC-O1** — The established fresh-tab entry starts one internal sidecar only
-after exact native target discovery, and a real source arrival becomes a rail
-row without a manual command. A fake `new-tab` yields `TAB_ID=73` and a
+**AC-O1** — Direct `scripts/zellij-new-tab.sh` starts one internal sidecar
+only after exact native target discovery, and a real source arrival becomes a
+rail row without a manual subscription command. A fake `new-tab` yields `TAB_ID=73` and a
 canonical WASM URL; a fake native `list-panes` wait becomes one resident plugin
 record whose verified `tab_id`, URL, and pane `id` match. Only then does the
 fake native `zaphod subscribe` receive the explicit Zellij profile/session/tab/
@@ -201,10 +227,10 @@ pane/URL tuple. Against its loopback SSE endpoint and fake AgentsView list
 existing-format `agent-event` session row. The expected ID, CWD, state, and
 summary come from the source fixture, not from the adapter.
 
-Verified by: a black-box entry test with fake build/new-tab/list-panes/native
-sidecar recorders plus a Go loopback-SSE/fake-AgentsView/Zellij-payload test.
-They assert start ordering, the exact target argv, emitted JSON, and no
-title/CWD/URL-only target discovery.
+Verified by: a black-box direct-script test with fake build/new-tab/list-panes/
+native-sidecar recorders plus a Go loopback-SSE/fake-AgentsView/Zellij-payload
+test. They assert start ordering, the exact target argv, emitted JSON, no
+title/CWD/URL-only target discovery, and no new Zellij helper pane.
 
 **AC-O2** — The projected row leads back only to its originating managed-tab
 pane. Feeding AC-O1's row to a rail fixture with one selectable terminal at
@@ -215,9 +241,9 @@ Verified by: Rust tests around `apply_agent_event`, `rows_for_own_tab`,
 `bind_session`, and `decide_rail_click`, using the CWD and pane ID fixture as
 the external expected value. No global or cross-tab association is asserted.
 
-**AC-O3** — bb directly owns the small native artifact/build/invocation
-addition without a Sprint 1 branch rebase, separate prerequisite, or new user
-entry. From current main, the build produces the existing canonical WASM and
+**AC-O3** — bb directly owns the small native artifact/build/direct-script
+invocation addition without a Sprint 1 branch rebase or separate prerequisite.
+From current main, the build produces the existing canonical WASM and
 one checkout-local native `zaphod` executable; its private `subscribe`
 subcommand reuses internal `grout` seams rather than publishing `grout`.
 Current main already contains the entry script, while
@@ -250,11 +276,12 @@ reason, and cleanup only of sidecar-owned work.
 
 **AC-I1** — An operator sees one real current session in the initialized
 managed tab and returns to its pane. In the managed-tab smoke environment,
-`Alt Shift z` runs the established entry, which creates the tab, observes its
-exact resident rail, and starts the internal sidecar. One real source session
-under the terminal's CWD then appears in the resident rail within one source
+direct `scripts/zellij-new-tab.sh` creates the tab, observes its exact resident
+rail, and starts the internal sidecar. One real source session launched in the
+fresh terminal's CWD then appears in the resident rail within one source
 event/list cycle. Clicking it focuses that same terminal, with no manual
-grout/zaphod command, tab hunt, or second user entry.
+grout/zaphod command or tab hunt. `Alt Shift z` is not exercised as a sidecar
+entry.
 
 Verified by: a captain drill retaining the source event/list observation,
 before/after native pane snapshots, and visible rail click. It runs only after
@@ -263,12 +290,15 @@ custom PTY result.
 
 ## Test plan
 
-1. **Prove the entry handoff first.** Extend the fake fresh-tab test so native
-   `new-tab` returns `TAB_ID=73`, the first list-panes snapshots are not ready,
-   and a later snapshot has exactly one resident plugin record with matching
-   verified tab ID and canonical WASM URL. Assert that the checkout-local
-   native sidecar is spawned exactly once afterward with its observed pane ID
-   and inherited Zellij profile; no title/CWD/URL-only fallback is accepted.
+1. **Keep the native-hotkey refutation and prove the direct-script handoff
+   first.** Preserve the isolated tmux spike showing that a literal `Alt Shift
+   z` `NewTab` + `Run` binding creates a visible helper pane. Extend the fake
+   fresh-tab script test so native `new-tab` returns `TAB_ID=73`, the first
+   list-panes snapshots are not ready, and a later snapshot has exactly one
+   resident plugin record with matching verified tab ID and canonical WASM URL.
+   Assert that the checkout-local native sidecar is spawned exactly once
+   afterward with its observed pane ID and inherited Zellij profile; no
+   title/CWD/URL-only fallback or extra Zellij pane is accepted.
 2. Cover every failed-start boundary: malformed raw tab ID, zero/duplicate
    candidates, wrong tab, wrong URL, floating/non-resident plugin, and bounded
    wait exhaustion. Each exits visibly as `sidecar-target-unready`, starts no
@@ -288,20 +318,22 @@ custom PTY result.
 6. Run the native-artifact build test, focused Go suite under `GOPROXY=off`,
    relevant Rust tests, `cargo check --tests`, and `git diff --check` from
    current main. Re-run the ancestor/path/lease audit before integration.
-7. After the managed-tab smoke accepts, run AC-I1's one-entry drill. A missing
-   managed tab is a held integration gate, not a reason to rebase, revive 7h,
-   or broaden the task.
+7. After the managed-tab smoke accepts, run AC-I1's direct-script drill. A
+   missing managed tab is a held integration gate, not a reason to rebase,
+   revive 7h, or broaden the task.
 
 ## Documentation change
 
-Update README agent-row guidance around the single `Alt Shift z` /
+Update README agent-row guidance around the direct
 `scripts/zellij-new-tab.sh` journey. Document that it builds the checkout's
 WASM plus native sidecar, waits for exact native rail identity after new-tab,
 then starts the internal `zaphod subscribe` sidecar; `grout` is not a user
-command. State that target loss, Ctrl-C, or source failure ends the sidecar
-without daemon, session, tab, pane, or plugin cleanup. Source restart,
-departure cleanup, replacement retargeting, multi-tab association, and review
-behavior are not part of this first slice.
+command. State plainly that `Alt Shift z` creates only the managed tab in this
+release; it does not start the subscriber because a Zellij `Run` keybind would
+materialize a helper pane. State that target loss, Ctrl-C, or source failure
+ends the sidecar without daemon, session, tab, pane, or plugin cleanup. Source
+restart, departure cleanup, replacement retargeting, multi-tab association,
+and review behavior are not part of this first slice.
 
 ## Out of scope
 
@@ -316,6 +348,8 @@ behavior are not part of this first slice.
 - a public `grout subscribe` workflow, `zaphod workspace start`, a second
   launcher, a hub/controller protocol, a second managed tab, cross-tab focus,
   or multi-client delivery refinements; and
+- a `Run`, layout-command-pane, plugin, or other helper-pane implementation
+  behind `Alt Shift z`; and
 - any standing Zellij configuration mutation outside Sprint 1's accepted
   managed-tab smoke.
 
@@ -703,3 +737,37 @@ Cycle 6 supersedes cycle 5's direct `grout subscribe` proposal. The stable
 entry creates and observes the tab; the private native sidecar owns the live
 AgentsView-to-`agent-event` bridge and exits on loss of that exact target. The
 bb ideation fold is ready for captain re-presentation.
+
+## Stage Report: ideation (cycle 7)
+
+- DONE: Prove the actual Alt Shift z handoff before asserting one user entry.
+  An isolated tmux/Zellij 0.44.3 literal-key spike made one candidate tab and
+  one visible, focused floating `Run` helper pane (`HELPER_PANE_COUNT=1`,
+  `PANE=2`, `is_suppressed=false`), so the native hotkey cannot honestly
+  launch a no-pane subscriber.
+- DONE: Choose one exact-target sidecar lifecycle that creates no helper pane.
+  The direct `scripts/zellij-new-tab.sh` path observes `{tab ID, resident rail
+  pane ID, canonical WASM URL}` before spawning the detached private `zaphod
+  subscribe` host child; it uses no `Run`, command pane, plugin launch, lease,
+  or supervisor.
+- DONE: Make the tmux proof match the claimed hotkey journey.
+  The claimed complete journey is now direct-script-only; test plan item 1
+  retains the native-hotkey refutation and requires the direct-script handoff
+  to leave no extra Zellij pane. `Alt Shift z` is tested only as Sprint 1's
+  fresh-tab shortcut.
+- DONE: Re-map every current acceptance criterion to an external check.
+  AC-O1: the direct-script fake handoff, loopback SSE, recorded payload, and
+  no-helper inventory; AC-O2: Rust exact-CWD fixture and click decision;
+  AC-O3: `fabfc73d` ancestry, artifact test, and focused Go seam; AC-O4:
+  controllable target/SSE/process fakes; AC-I1: the post-offline direct-script
+  tmux captain drill. `GOPROXY=off go test -count=1 -run
+  'TestEmitEndToEnd|TestSessionRowFromFixture' ./...` passed on current main.
+
+### Summary
+
+The binding review found a real mismatch, and the isolated spike decisively
+refuted the tempting `NewTab` + `Run` repair without touching product code.
+bb now has one truthful walking skeleton: direct script → exact resident
+observation → private sidecar → session row → focus the fresh-tab terminal.
+The focused current-main Go seam still passes; `feature/zellij-new-tab-entry`
+is an ancestor of main at `fabfc73d`.
