@@ -1,6 +1,6 @@
 ---
 title: Live sessions arrive and lead back to work
-status: implementation
+status: ideation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
@@ -11,7 +11,7 @@ score: 1.0
 started: 2026-07-12T00:02:21Z
 completed:
 verdict:
-worktree: .worktrees/spacedock-ensign-live-current-tab-sessions
+worktree:
 issue:
 pr:
 mod-block:
