@@ -305,3 +305,23 @@ idea while correcting their gaps: relationship metadata, not ID syntax,
 defines top-level sessions, and the rail now owns bounded stale expiry. The
 first real drill waits for 7h's foreground profile handoff and rejects any
 wrong target, child leak, or non-local focus before wider implementation.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Retain the approved subscriber design and add explicit Stage Report evidence mappings for every acceptance criterion, especially AC-O2 through AC-O4.
+  AC-O1 → `Subscriber lifecycle` and test-plan steps 3–4: loopback SSE, fake AgentsView snapshots, a fake profile-targeted Zellij binary, and yb's recorded `data_changed`/heartbeat/list evidence (`grout-sse-daemon.md:38-66,97-125`).
+  AC-O2 → `Authoritative top-level filter` and test-plan step 2: captured root/Claude-child/Codex-child metadata fixture plus fake list argv; the Codex false-negative and source `relationship_type`/`parent_session_id` oracle are recorded in `gates/grout-sse-daemon-validation.md:351-418`.
+  AC-O3 → `Current-tab projection and focus` and test-plan step 5: a real one-line `list-panes --json -a -g -t` capture drives the own-tab/foreign/ambiguous cases; existing `rows_for_own_tab`, `bind_session`, and `decide_rail_click` are the cited pure seams in `src/main.rs:272-290,1349-1370,2003-2029`.
+  AC-O4 → `Freshness, expiry, and failure truth` and test-plan steps 4–5: injected-clock 90/120-second cases, single-flight/reconnect/wedge fakes, yb's fresh-`ts`/stop-refresh seam (`grout-sse-daemon.md:112-125`), and hj's expiry seed (`rail-row-lifecycle.md:11-20`).
+  AC-I1 → `Riskiest unproven mechanism and smallest live-profile spike` and test-plan steps 1 and 6: the post-7h lease-to-row drill captures source metadata, target argv, and before/after pane state; `foreground-attached-client-profile.md:40-57,112-125` supplies the held profile handoff. This is a planned live proof, not a claimed live result.
+- DONE: Re-run the ideation AC scan and leave no unevidenced acceptance criterion.
+  `spacedock status --read live-current-tab-sessions --stage ideation --ac-scan --json` is the gate-facing verifier; this cycle cites AC-O1, AC-O2, AC-O3, AC-O4, and AC-I1 inside checklist evidence rather than only in summary prose.
+- DONE: Keep this as evidence repair only: no implementation, no scope growth, and no live profile work before the held 7h gate passes.
+  This append changes only report evidence. The approved body, ACs, boundaries, 7h dependency, and deferred work remain intact; the AC-I1 drill stays explicitly held.
+
+### Summary
+
+Cycle 2 makes the ideation evidence auditable without changing the design.
+Each AC now points to a concrete fixture, pure seam, source record, test-plan
+step, or deliberately held live-profile proof. No code, profile, 7h, or 4d
+state changed.
