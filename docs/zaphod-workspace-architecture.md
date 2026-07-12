@@ -2,6 +2,22 @@
 
 **Status:** Evergreen architecture
 
+## Current Sprint 1 boundary
+
+This document describes the later workspace product, not a prerequisite for
+the first operator journey. Sprint 1 ships the narrow safe onramp in the
+existing Zellij plugin: `scripts/zellij-new-tab.sh --session <name>` creates a
+fresh layout-owned tab from the selected checkout; activated `Alt Shift z`
+does the same native fresh-tab action; and `Alt /` changes only that initialized
+tab's docked/sliver layout. Foreign tabs remain inert. There is no controller,
+stable binding record, create-or-focus behavior, adoption, hub, or portable CLI
+in this slice.
+
+The tmux-hosted isolated smoke proves the real keys, candidate WASM identity,
+managed transition, post-route foreign no-op, and cleanup. A future driver may
+replace this seam only after it delivers the same operator journey with a
+measured additional benefit.
+
 ## Outcome
 
 Zaphod becomes a simple workspace launcher with a portable dock for Zellij and
@@ -94,10 +110,11 @@ starts or reuses the workspace hub, and creates or focuses the binding's
 managed tab or window. It leaves the invoking foreign view unchanged and never
 starts a nested multiplexer.
 
-Inside Zellij, `Alt Shift z` performs the same idempotent create-or-focus
-operation. Zaphod records the managed tab's stable ID. `Alt /` changes the
-managed tab's swap layout only when the invoking pane belongs to that recorded
-tab; it has no layout effect in a foreign tab.
+Inside Zellij, the current Sprint 1 entry is intentionally simpler: after
+activation, `Alt Shift z` creates a fresh layout-owned tab, and `Alt /` works
+only in that initialized tab. It does not create-or-focus, adopt the invoking
+tab, or record a stable binding. The future driver described below may add
+idempotent create-or-focus only when an observed operator failure requires it.
 
 #### Attach to an existing session
 
@@ -111,11 +128,12 @@ native session-switch or adoption operation instead of nesting another client.
 An existing binding identifies the driver. An unbound session name requires
 `--mux zellij|tmux` when both multiplexers are available.
 
-Every path is idempotent. Repeated entry reuses the hub and repairs or focuses
-one managed view without duplicating panes or tabs. One canonical root may
-have only one active session binding, and one session may bind only one root.
-Zaphod reports either conflict and requires `--rebind`; it never guesses which
-binding to replace.
+The future launcher paths are idempotent: repeated entry reuses the hub and
+repairs or focuses one managed view without duplicating panes or tabs. One
+canonical root may have only one active session binding, and one session may
+bind only one root. Zaphod reports either conflict and requires `--rebind`; it
+never guesses which binding to replace. That convergence behavior is expressly
+deferred from the current fresh-tab onramp.
 
 ### Managed view and pane adoption
 
@@ -279,6 +297,11 @@ The drivers translate these operations into native commands and layouts. A
 provider never calls Zellij or tmux; the dock never calls either multiplexer.
 
 #### Zellij controller boundary
+
+This is a future driver boundary, not a Sprint 1 implementation dependency.
+Sprint 1 deliberately avoids a controller, `Run` pane, stable managed-tab
+record, and portable key-request CLI: its real entry is the layout-owned tab
+and guarded `MessagePluginId` route described above.
 
 The option-2 spike used CLI helpers launched through Zellij's `Run` action to
 prove create-or-focus and guarded toggle behavior. That harness is not the

@@ -73,11 +73,10 @@ struct Sidebar {
     // The tab whose deferred steer last fired, and when: repeat presses for
     // it inside TOGGLE_COOLDOWN are swallowed as bounce.
     toggle_cooldown: Option<(usize, Instant)>,
-    // A toggle pipe that reached this instance before any manifest named it
-    // (the keybind's launch-if-missing pipes the just-launched instance
-    // immediately): the press waits for the first PaneUpdate that fills
-    // own_url/own_tab and fires exactly once.
-    pending_bootstrap_toggle: bool,
+    // We requested this client's temporary Alt / route while the rail was
+    // visible. Reconfigure has no acknowledgement, so this only prevents
+    // duplicate requests; it never authorizes a later pipe.
+    toggle_route_requested: bool,
     // The last render width, used to gate status polling: an undocked sliver
     // has no room to show status, so it skips the poll.
     last_cols: usize,
@@ -388,7 +387,6 @@ enum ToggleAction {
     // Rebuild the tab's swap set around its current pane arrangement, then
     // steer to the target state.
     RegenerateSwaps { target: DockState },
-    Retrofit,
     Ignore,
 }
 
@@ -417,6 +415,7 @@ impl ZellijPlugin for Sidebar {
             EventType::Mouse,
             EventType::Key,
             EventType::Timer,
+            EventType::Visible,
             EventType::PermissionRequestResult,
         ]);
         // Permissions are requested on first render, not here: a request made
@@ -435,7 +434,16 @@ impl ZellijPlugin for Sidebar {
                 if status == PermissionStatus::Granted && !self.nav_mode {
                     set_selectable(false);
                 }
+                self.route_toggle_to_self_if_active();
                 true
+            }
+            Event::Visible(visible) => {
+                if !visible {
+                    self.toggle_route_requested = false;
+                } else {
+                    self.route_toggle_to_self_if_active();
+                }
+                false
             }
             Event::Key(key) if self.nav_mode => {
                 if key.has_no_modifiers() {
@@ -505,6 +513,7 @@ impl ZellijPlugin for Sidebar {
                         SteerDisposition::Keep => {}
                     }
                 }
+                self.route_toggle_to_self_if_active();
                 false
             }
             Event::PaneUpdate(manifest) => {
@@ -530,9 +539,8 @@ impl ZellijPlugin for Sidebar {
                         focus_previous_pane();
                     }
                 }
-                // A retrofit that installed a tiled rail leaves this
-                // floating bootstrap instance behind as an invisible
-                // pipe-eating zombie; it closes itself (fire-and-forget,
+                // A stale floating instance left behind by a previous layout
+                // transition closes itself (fire-and-forget,
                 // no permission gate on CloseSelf). close_self does not
                 // remove the pane from the very next manifest snapshot, so
                 // the flag makes the call one-shot rather than re-firing on
@@ -543,22 +551,7 @@ impl ZellijPlugin for Sidebar {
                     close_self();
                     return false;
                 }
-                if should_fire_bootstrap_toggle(
-                    self.pending_bootstrap_toggle,
-                    &self.own_url,
-                    self.own_tab,
-                    self.active_tab,
-                ) {
-                    // Consumed exactly once; perform_toggle never re-arms it.
-                    self.pending_bootstrap_toggle = false;
-                    trace!(
-                        self,
-                        "bootstrap toggle firing own_tab={:?} active_tab={:?}",
-                        self.own_tab,
-                        self.active_tab
-                    );
-                    self.perform_toggle();
-                }
+                self.route_toggle_to_self_if_active();
                 // PaneUpdate fires constantly in agent-heavy tabs; re-rendering
                 // a pinned overlay on every one makes the underlying panes
                 // flicker. Only render when the derived view changed.
@@ -614,13 +607,19 @@ impl ZellijPlugin for Sidebar {
         if pipe_message.name != "toggle" {
             return false;
         }
-        // The keybind's launch-if-missing races its own pipe: the toggle
-        // that launched this instance can arrive before the first PaneUpdate
-        // names it, when every decision input is still unknown. Park the
-        // press; the manifest fires it.
-        if !own_pane_known(&self.own_url, self.own_tab) {
-            self.pending_bootstrap_toggle = true;
-            trace!(self, "pipe toggle parked as bootstrap (own pane unknown)");
+        // `reconfigure()` has no acknowledgement. Receipt of this direct
+        // keybind pipe is the evidence that a runtime route reached us; only
+        // the active tiled resident may consume it. Any other delivery is
+        // inert and must not turn into deferred entry work.
+        let active_tab = self.current_active_tab();
+        if !should_accept_observed_toggle_pipe(
+            self.permissions_granted,
+            &pipe_message.source,
+            self.own_floating,
+            self.own_tab,
+            active_tab,
+        ) {
+            trace!(self, "pipe toggle ignored: not an observed active tiled keybind route");
             return false;
         }
         trace!(self, "pipe toggle acting");
@@ -637,6 +636,10 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ReadApplicationState,
                 PermissionType::ChangeApplicationState,
                 PermissionType::ReadPaneContents,
+                // The rail installs a current-client-only MessagePluginId
+                // route after it is visibly initialized; it never saves it
+                // to the user's config file.
+                PermissionType::Reconfigure,
                 // OpenCommandPaneFloating — the gate row's subspace-tui
                 // float — sits behind the RunCommands grant.
                 PermissionType::RunCommands,
@@ -694,6 +697,28 @@ impl ZellijPlugin for Sidebar {
 }
 
 impl Sidebar {
+    fn route_toggle_to_self_if_active(&mut self) {
+        if !should_route_toggle_to_self(
+            self.toggle_route_requested,
+            self.permissions_granted,
+            self.own_floating,
+            self.own_tab,
+            self.active_tab,
+        ) {
+            return;
+        }
+        trace!(
+            self,
+            "installing current-client Alt / route for active tiled rail tab={:?}",
+            self.own_tab
+        );
+        // `MessagePlugin` launches a pane when no matching instance exists.
+        // This runtime-only `MessagePluginId` route names this already-loaded
+        // pane directly, so a foreign tab can never bootstrap another one.
+        reconfigure(runtime_toggle_keybind_kdl(self.plugin_id), false);
+        self.toggle_route_requested = true;
+    }
+
     fn current_active_tab(&mut self) -> Option<usize> {
         // get_focused_pane_info blocks on a response the host only writes
         // once ReadApplicationState is granted; pre-grant it panics inside
@@ -732,7 +757,15 @@ impl Sidebar {
 
     fn handle_click(&mut self, line: isize) {
         match decide_rail_click(line, &self.rows, &self.sessions, &self.gates, &self.pane_cwds) {
-            ClickAction::ToggleDock => self.perform_toggle(),
+            ClickAction::ToggleDock => {
+                // A local click is not a route acknowledgement. It remains a
+                // rail-local convenience after the same visible resident has
+                // requested its route; observed keybind pipes use the stricter
+                // receipt-based gate above.
+                if self.permissions_granted && self.toggle_route_requested {
+                    self.perform_toggle();
+                }
+            }
             ClickAction::FocusPane(id) => {
                 // A click-through during nav mode must also leave nav:
                 // focus moves to the clicked pane, and a latched nav_mode
@@ -782,6 +815,10 @@ impl Sidebar {
     }
 
     fn perform_toggle(&mut self) {
+        // Callers establish authorization before arriving here. In particular,
+        // a literal Alt / pipe is admitted only after we observe a keybind
+        // delivery to this active tiled resident; a local request flag never
+        // substitutes for that evidence.
         let active_tab = self.current_active_tab();
         trace!(
             self,
@@ -832,10 +869,6 @@ impl Sidebar {
                 trace!(self, "action regenerate_swaps target={:?}", target);
                 self.regenerate_swaps(target);
             }
-            ToggleAction::Retrofit => {
-                trace!(self, "action retrofit tab={:?}", active_tab);
-                self.retrofit(active_tab);
-            }
             ToggleAction::Ignore => trace!(self, "action ignore"),
         }
     }
@@ -854,44 +887,14 @@ impl Sidebar {
         }
     }
 
-    // Docks the sidebar into the active tab, which has none: rebuild the
-    // tab's swap set around its dumped arrangement — the override's base
-    // spawns the rail — and steer to docked once the override reports in, so
-    // the tab arrives with its splits intact. When this instance cannot do
-    // that proper rebuild (permissions not yet granted or tab_states too
-    // stale to resolve the tab id → no rebuild target, or the dump/transform
-    // fails), it DEFERS: the relaxed election has every perceiving instance
-    // retrofit, so a capable one docks the tab. Blind-stacking here instead
-    // would re-absorb a tab another instance already docked and destroy the
-    // user's splits.
-    fn retrofit(&mut self, active_tab: Option<usize>) {
-        let Some((tab, tab_id)) =
-            rebuild_target(self.permissions_granted, active_tab, &self.tab_states)
-        else {
-            trace!(
-                self,
-                "retrofit deferred tab={:?}: no rebuild target (no grant or stale tab_states)",
-                active_tab
-            );
-            return;
-        };
-        if self
-            .install_split_preserving_swaps(tab, tab_id, DockState::Docked)
-            .is_none()
-        {
-            trace!(self, "retrofit deferred tab={}: split-preserving rebuild failed", tab);
-        }
-    }
-
-    // The shared dump → transform → override machinery behind regenerate
-    // and retrofit: rebuild the tab's swap set around its dumped
+    // The shared dump → transform → override machinery behind regeneration:
+    // rebuild the tab's
     // arrangement and record the steer that completes the toggle once
     // TabUpdate reports the new set installed. Some means the tab is
     // handled — either the swap set was installed, or the rebuild was
-    // abandoned because the dump already carries another instance's sidebar
-    // (a lagged election re-firing on an already-retrofitted tab, which a
-    // second override would corrupt by re-absorbing its panes). None means
-    // the rebuild could not run and the caller degrades.
+    // abandoned because the dump already carries another instance's sidebar.
+    // A second override would corrupt the tab by re-absorbing its panes.
+    // None means the rebuild could not run and the caller degrades.
     fn install_split_preserving_swaps(
         &mut self,
         tab: usize,
@@ -1041,19 +1044,56 @@ impl Sidebar {
     }
 }
 
-// The pipe broadcasts to every config-matched instance; exactly one may act.
+// The persistent configuration binds Alt / to NoOp. Once a tiled rail is
+// actually visible, that rail upgrades only its current client's runtime
+// binding to its existing plugin id. Zellij's MessagePluginId action routes
+// directly and therefore has no launch-if-missing behavior.
+fn runtime_toggle_keybind_kdl(plugin_id: u32) -> String {
+    format!(
+        "keybinds {{\n    shared {{\n        bind \"Alt /\" {{\n            MessagePluginId {plugin_id} {{\n                name \"toggle\"\n            }}\n        }}\n    }}\n}}\n"
+    )
+}
+
+fn should_route_toggle_to_self(
+    route_requested: bool,
+    permissions_granted: bool,
+    own_floating: bool,
+    own_tab: Option<usize>,
+    active_tab: Option<usize>,
+) -> bool {
+    !route_requested
+        && permissions_granted
+        && !own_floating
+        && own_tab.is_some()
+        && own_tab == active_tab
+}
+
+// A runtime route has no acknowledgement. For a literal Alt /, the first
+// trustworthy evidence is the keybind pipe itself. It is still safe only when
+// the recipient is the active tab's tiled rail; a CLI/plugin pipe, floating
+// rail, unknown tab, or stale active-tab view must remain inert.
+fn should_accept_observed_toggle_pipe(
+    permissions_granted: bool,
+    source: &PipeSource,
+    own_floating: bool,
+    own_tab: Option<usize>,
+    active_tab: Option<usize>,
+) -> bool {
+    permissions_granted
+        && matches!(source, PipeSource::Keybind)
+        && !own_floating
+        && own_tab.is_some()
+        && own_tab == active_tab
+}
+
+// A routed pipe reaches one already-running sidebar instance. Only the
+// active tab's tiled resident may act.
 // - The active tab's tiled resident steers the tab's swap layout one step
 //   toward the other dock state, by name — never by blind cycling, whose
 //   position semantics around BASE and the list end are unreliable.
 // - When the tab is damaged (manual split/resize), a swap step would
 //   snap-fold the user's arrangement into a stale template; the resident
 //   instead rebuilds the swap set around the current arrangement.
-// - A floating resident (keybind bootstrap) has no swap set to cycle: it
-//   retrofits its own tab, docking itself and installing the swap set.
-// - A tab with no sidebar gets an override_layout retrofit from any instance
-//   that observes it active — the lowest-pane-id election was dropped because
-//   instances disagree on the active tab under load. The dump abort dedupes
-//   concurrent retrofits and a redundant rail closes itself.
 fn decide_toggle(
     own_tab: Option<usize>,
     own_floating: bool,
@@ -1061,8 +1101,8 @@ fn decide_toggle(
     active_swap_name: Option<&str>,
     active_swap_dirty: bool,
     active_floating_visible: bool,
-    own_pane_id: u32,
-    instances: &[SidebarInstance],
+    _own_pane_id: u32,
+    _instances: &[SidebarInstance],
 ) -> ToggleAction {
     let Some(active) = active_tab else {
         return ToggleAction::Ignore;
@@ -1101,40 +1141,10 @@ fn decide_toggle(
                 backwards: active_swap_name != Some("docked"),
             }
         }
-    } else if instances.iter().any(|i| i.tab == active && !i.floating) {
-        // The tab's tiled sidebar owns the toggle; a floating instance there
-        // (e.g. left behind by a retrofit) must not fire another retrofit.
-        ToggleAction::Ignore
-    } else if own_tab == Some(active) {
-        // Own pane is floating here; the lowest-id floating resident is the
-        // single retrofit actor.
-        if instances
-            .iter()
-            .filter(|i| i.tab == active)
-            .all(|i| i.pane_id >= own_pane_id)
-        {
-            ToggleAction::Retrofit
-        } else {
-            ToggleAction::Ignore
-        }
-    } else if instances.iter().any(|i| i.tab == active) {
-        ToggleAction::Ignore
     } else {
-        // No sidebar sits in the active tab, per this instance's manifest
-        // view. Any instance that observes this retrofits it — the
-        // lowest-pane-id session election was dropped because pipe-flood
-        // staleness makes instances disagree on which tab is active, so the
-        // single permitted actor often cannot see the tab that needs docking
-        // while the instances that do see it defer (a deadlock). Concurrent
-        // retrofits are deduped by the dump abort in
-        // install_split_preserving_swaps — a loser's fresh dump sees the
-        // winner's rail — and a redundant tiled rail closes itself. Always
-        // retrofit, never a remote swap step: the dump abort covers a tab
-        // that already carries our set (the case the old steer branch
-        // guarded), and next/previous_swap_layout act on the client's active
-        // tab, so several instances steering the same reported tab would
-        // overshoot.
-        ToggleAction::Retrofit
+        // A floating rail, a remote rail, or no rail at all is not a toggle
+        // target. The entry command owns initialization; Alt / never does.
+        ToggleAction::Ignore
     }
 }
 
@@ -1270,25 +1280,6 @@ fn steer_completes_locally(own_tab: Option<usize>, rebuilt_tab: usize) -> bool {
     own_tab == Some(rebuilt_tab)
 }
 
-// Whether any manifest has named this instance yet: pre-manifest, own_url
-// and own_tab are unknown and no toggle decision can be made.
-fn own_pane_known(own_url: &Option<String>, own_tab: Option<usize>) -> bool {
-    own_url.is_some() && own_tab.is_some()
-}
-
-// A parked bootstrap press fires on the first manifest that names this
-// instance — but only once the active tab is also known, since
-// decide_toggle ignores a press without one and the parked press would die
-// the same way the piped one did. The caller consumes the press on fire.
-fn should_fire_bootstrap_toggle(
-    parked: bool,
-    own_url: &Option<String>,
-    own_tab: Option<usize>,
-    active_tab: Option<usize>,
-) -> bool {
-    parked && own_pane_known(own_url, own_tab) && active_tab.is_some()
-}
-
 // A toggle press bounces when it repeats into the same tab's JIT window:
 // the pipeline (dump → override → deferred steer) makes its collapse
 // visible only a beat after the press, so a quick second press reads the
@@ -1373,11 +1364,10 @@ fn decide_rail_click(
     }
 }
 
-// A floating bootstrap instance is superseded once its own tab holds a
-// tiled sidebar (a retrofit installed the rail without seating the
-// floater): it would linger as an invisible config-matched zombie that
-// keeps receiving pipes. Both facts come from the same manifest snapshot,
-// so a transient mid-retrofit state cannot half-match.
+// A floating instance is superseded once its own tab holds a tiled sidebar:
+// it would linger as an invisible config-matched zombie that keeps receiving
+// pipes. Both facts come from the same manifest snapshot, so a transient
+// layout change cannot half-match.
 fn is_stray_floating_bootstrap(
     own_floating: bool,
     own_tab: Option<usize>,
@@ -1389,12 +1379,10 @@ fn is_stray_floating_bootstrap(
     own_floating && instances.iter().any(|i| i.tab == tab && !i.floating)
 }
 
-// The relaxed retrofit election can let two instances both dock a rail into
-// the same tab in one flood window (the dump abort dedupes only once a rail
-// has landed). When a tab ends up with two tiled sidebars, the higher-id one
-// is redundant and closes itself, leaving the single lowest-id resident.
-// Both read the same manifest snapshot, so the choice is deterministic. A
-// floating sidebar takes the stray-bootstrap path instead.
+// If a malformed or legacy layout leaves two tiled sidebars in one tab, the
+// higher-id one is redundant and closes itself, leaving the single lowest-id
+// resident. Both read the same manifest snapshot, so the choice is
+// deterministic. A floating sidebar takes the stray-instance path instead.
 fn is_redundant_tiled_sidebar(
     own_pane_id: u32,
     own_tab: Option<usize>,
@@ -1414,7 +1402,7 @@ fn is_redundant_tiled_sidebar(
 // show the closing shape on the PaneUpdate right after the call, since the
 // host has not yet dropped the pane, and a second close_self would fire on
 // every such snapshot until it does. An instance closes when it is a stray
-// floating bootstrap superseded by a tiled rail, or a redundant tiled rail
+// floating instance superseded by a tiled rail, or a redundant tiled rail
 // behind a lower-id sibling.
 fn should_close_self(
     already_requested: bool,
@@ -1533,9 +1521,8 @@ fn split_preserving_layout_kdl(
 // — a resident another instance installed. The server strips only the
 // requesting plugin's own pane from a dump
 // (populate_session_layout_metadata), so any sidebar pane surviving here
-// belongs to a different instance: the tab is already retrofitted and its
-// resident owns it. The floating layer is skipped — a transient bootstrap
-// floater does not own the tab's tiled arrangement.
+// belongs to a different instance: its resident owns the tab. The floating
+// layer is skipped — a transient floater does not own the tiled arrangement.
 fn dump_contains_sidebar(dump: &str, own_url: &str) -> bool {
     let Ok(body) = extract_tab_body(dump) else {
         return false;
@@ -2868,6 +2855,95 @@ mod tests {
     }
 
     #[test]
+    fn runtime_toggle_route_targets_the_resident_plugin_without_launching() {
+        assert_eq!(
+            runtime_toggle_keybind_kdl(42),
+            "keybinds {\n    shared {\n        bind \"Alt /\" {\n            MessagePluginId 42 {\n                name \"toggle\"\n            }\n        }\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn observed_active_tiled_keybind_pipe_is_authorized_without_a_route_flag() {
+        // `reconfigure()` has no acknowledgement. The actual keybind pipe is
+        // the authorization evidence: once it arrives, the active tiled rail
+        // may toggle even if no local "route installed" flag was set.
+        assert!(should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Keybind,
+            false,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Cli("not-a-keybind".to_owned()),
+            false,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Keybind,
+            true,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Keybind,
+            false,
+            Some(3),
+            Some(4)
+        ));
+    }
+
+    #[test]
+    fn only_an_active_tiled_rail_can_install_the_runtime_toggle_route() {
+        assert!(should_route_toggle_to_self(
+            false,
+            true,
+            false,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_route_toggle_to_self(
+            true,
+            true,
+            false,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_route_toggle_to_self(
+            false,
+            false,
+            false,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_route_toggle_to_self(
+            false,
+            true,
+            true,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_route_toggle_to_self(
+            false,
+            true,
+            false,
+            Some(3),
+            Some(4)
+        ));
+        assert!(!should_route_toggle_to_self(
+            false,
+            true,
+            false,
+            None,
+            None
+        ));
+    }
+
+    #[test]
     fn foreign_swap_set_is_replaced_not_cycled() {
         // A clean tab can carry a swap set that is not ours — a builtin or
         // user-captured one ("vertical", "stacked"). Steering would cycle
@@ -2947,37 +3023,26 @@ mod tests {
     }
 
     #[test]
-    fn any_instance_retrofits_a_sidebar_less_active_tab_it_observes() {
-        // The lowest-id session election was dropped: pipe-flood staleness
-        // makes instances disagree on the active tab, so gating retrofit on a
-        // single lowest-id actor deadlocks a fresh tab when that actor's
-        // active_tab perception is stale (drill 11). Now every instance that
-        // observes a sidebar-less active tab retrofits it, regardless of pane
-        // id; concurrent retrofits are deduped by the dump abort and a
-        // redundant rail closes itself.
+    fn sidebarless_foreign_active_tab_is_inert() {
+        // Alt / is not an entry or retrofit operation. A resident that sees a
+        // foreign, sidebar-less active tab must leave it completely alone.
         let instances = [inst(7, 1, false), inst(9, 2, false)];
         assert_eq!(
             decide_toggle(Some(1), false, Some(5), None, false, false, 7, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), None, false, false, 9, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
     }
 
     #[test]
-    fn perception_divergence_no_longer_deadlocks_a_fresh_tab() {
-        // Drill 11: on a press for a brand-new sidebar-less tab (6), the
-        // lowest-id instance saw a STALE active tab and retrofitted the wrong
-        // one, while the instances that correctly saw tab 6 were barred by
-        // the lowest-id gate → deadlock. With the gate gone, an instance that
-        // perceives tab 6 as the sidebar-less active tab retrofits it even
-        // when a lower-id instance lives elsewhere.
+    fn stale_active_tab_view_never_initializes_a_foreign_tab() {
         let instances = [inst(14, 2, false), inst(16, 5, false)];
         assert_eq!(
             decide_toggle(Some(5), false, Some(6), None, false, false, 16, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
     }
 
@@ -2999,22 +3064,18 @@ mod tests {
     }
 
     #[test]
-    fn floating_resident_in_active_tab_retrofits_its_own_tab() {
-        // Keybind launch-if-missing bootstraps a floating sidebar into the
-        // active tab; that tab has no swap set to cycle, so the floating
-        // resident retrofits its own tab instead of dead-cycling.
+    fn floating_sidebar_cannot_initialize_an_active_tab() {
         let instances = [inst(7, 1, true)];
         assert_eq!(
             decide_toggle(Some(1), true, Some(1), None, false, false, 7, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
     }
 
     #[test]
     fn floating_resident_defers_to_the_tabs_tiled_sidebar() {
-        // If a retrofit docks a fresh rail instead of seating the floating
-        // actor, the tab holds both; only the tiled one may act, otherwise
-        // every toggle would fire another retrofit.
+        // If a legacy layout leaves both a floating and tiled rail in a tab,
+        // only the tiled one may act.
         let instances = [inst(7, 1, true), inst(9, 1, false)];
         assert_eq!(
             decide_toggle(Some(1), true, Some(1), None, false, false, 7, &instances),
@@ -3027,13 +3088,11 @@ mod tests {
     }
 
     #[test]
-    fn lowest_id_floating_resident_is_the_single_retrofit_actor() {
-        // Two floating sidebars in one tab (stray pipe launches) must not
-        // both fire the override.
+    fn floating_sidebars_never_become_toggle_actors() {
         let instances = [inst(7, 1, true), inst(9, 1, true)];
         assert_eq!(
             decide_toggle(Some(1), true, Some(1), None, false, false, 7, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
         assert_eq!(
             decide_toggle(Some(1), true, Some(1), None, false, false, 9, &instances),
@@ -3043,8 +3102,7 @@ mod tests {
 
     #[test]
     fn floating_bystander_defers_to_any_active_tab_resident() {
-        // Floating bootstrap instance parked in tab 2; the active tab's own
-        // resident acts, whether tiled or floating.
+        // A floating bystander in tab 2 never acts on another tab.
         let instances = [inst(7, 2, true), inst(9, 1, false)];
         assert_eq!(
             decide_toggle(Some(2), true, Some(1), None, false, false, 7, &instances),
@@ -3058,41 +3116,30 @@ mod tests {
     }
 
     #[test]
-    fn floating_bystander_retrofits_a_sidebarless_tab_too() {
-        // No sidebar in the active tab: any instance retrofits it, floating
-        // or not, regardless of pane id.
+    fn floating_bystander_leaves_a_sidebarless_tab_unchanged() {
         let instances = [inst(7, 2, true), inst(9, 3, false)];
         assert_eq!(
             decide_toggle(Some(2), true, Some(5), None, false, false, 7, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
         assert_eq!(
             decide_toggle(Some(3), false, Some(5), None, false, false, 9, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
     }
 
     #[test]
-    fn remote_election_retrofits_even_when_the_swap_name_looks_ours() {
-        // Manifest lag: TabUpdate can report a tab's swap name (docked or
-        // undocked) before PaneUpdate shows an instance living there again
-        // (or after one crashed there). The old election steered such a tab
-        // to dodge a corrupting fresh override. That guard is now redundant:
-        // install_split_preserving_swaps dumps the tab and aborts when the
-        // dump already carries a sidebar, so a remote instance safely
-        // retrofits — the dump catches the "already ours" case at runtime and
-        // the tab's own resident owns the steer. A remote swap step would be
-        // wrong regardless: next/previous_swap_layout act on the client's
-        // active tab, so several instances steering the same reported tab
-        // would overshoot. So every swap-name reads Retrofit now.
+    fn remote_instance_never_toggles_even_when_the_swap_name_looks_ours() {
+        // A manifest can name a swap state before a resident is observed, but
+        // a remote sidebar is still not permission to touch that tab.
         let instances = [inst(7, 2, false)];
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), Some("docked"), false, false, 7, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), Some("undocked"), false, false, 7, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
         assert_eq!(
             decide_toggle(
@@ -3105,11 +3152,11 @@ mod tests {
                 7,
                 &instances
             ),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
         assert_eq!(
             decide_toggle(Some(2), false, Some(5), None, false, false, 7, &instances),
-            ToggleAction::Retrofit
+            ToggleAction::Ignore
         );
     }
 
@@ -3422,13 +3469,9 @@ mod tests {
     }
 
     #[test]
-    fn retrofit_defers_instead_of_stacking_when_it_cannot_rebuild() {
-        // Under the relaxed election every perceiving instance retrofits, so
-        // an instance that cannot do a proper split-preserving retrofit (here
-        // permissions are not yet granted, so rebuild_target is None) must
-        // defer to a capable instance rather than blind absorb-stack the tab
-        // and destroy its splits. Deferring issues no override and arms no
-        // cooldown; a capable instance docks the tab, or a later press does.
+    fn floating_instance_toggle_does_not_rebuild_or_arm_a_cooldown() {
+        // Only a tiled resident may act. A floating instance records neither
+        // a rebuild nor a cooldown, even if it has a complete manifest.
         let mut sidebar = Sidebar::default();
         sidebar.plugin_id = 7;
         sidebar.active_tab = Some(1);
@@ -3442,27 +3485,22 @@ mod tests {
     }
 
     #[test]
-    fn repeat_press_keeps_the_in_flight_steer_armed() {
-        let mut sidebar = Sidebar::default();
-        sidebar.active_tab = Some(1);
+    fn repeat_press_is_swallowed_only_for_its_in_flight_tab() {
         let steer = PendingSteer {
             tab: 1,
             target: DockState::Undocked,
         };
-        sidebar.pending_steer = Some(steer);
-        sidebar.perform_toggle();
-        assert_eq!(sidebar.pending_steer, Some(steer));
-        // A press for another tab supersedes the parked steer.
-        sidebar.active_tab = Some(2);
-        sidebar.perform_toggle();
-        assert!(sidebar.pending_steer.is_none());
+        let now = Instant::now();
+        assert!(should_swallow_toggle(Some(1), Some(steer), None, now));
+        // A press for another tab is not the parked steer's bounce and the
+        // caller will supersede it before choosing its next action.
+        assert!(!should_swallow_toggle(Some(2), Some(steer), None, now));
     }
 
     #[test]
     fn floating_instance_closes_once_its_tab_holds_a_tiled_sidebar() {
-        // After a retrofit installs a tiled rail, the floating bootstrap
-        // actor lingers as an invisible config-matched zombie that keeps
-        // receiving pipes; it yields to the tab's tiled sidebar.
+        // A floating actor beside a tiled rail lingers as an invisible
+        // config-matched zombie unless it yields to the tiled sidebar.
         assert!(is_stray_floating_bootstrap(
             true,
             Some(1),
@@ -3480,7 +3518,7 @@ mod tests {
             Some(1),
             &[inst(9, 1, false)]
         ));
-        // Only floating siblings around: the retrofit has not landed.
+        // Only floating siblings around: no tiled rail has landed.
         assert!(!is_stray_floating_bootstrap(
             true,
             Some(1),
@@ -3726,68 +3764,56 @@ mod tests {
         }
     }
 
+    fn sidebar_with_pending_foreign_steer() -> (Sidebar, PendingSteer) {
+        let pending = PendingSteer {
+            tab: 1,
+            target: DockState::Undocked,
+        };
+        let sidebar = Sidebar {
+            active_tab: Some(2),
+            own_tab: Some(2),
+            pending_steer: Some(pending),
+            ..Default::default()
+        };
+        (sidebar, pending)
+    }
+
     #[test]
-    fn toggle_pipe_before_the_first_manifest_parks_the_press() {
-        // Keybind launch-if-missing: the toggle pipe that launched this
-        // instance arrives before any PaneUpdate has named it, so every
-        // decision input is unknown and an immediate perform_toggle dies.
+    fn pregrant_toggle_pipe_is_inert_even_with_a_requested_route() {
+        // A runtime route leaked from another client must not let an
+        // unapproved client consume or mutate toggle work.
+        let (mut sidebar, pending) = sidebar_with_pending_foreign_steer();
+        sidebar.permissions_granted = false;
+        sidebar.toggle_route_requested = true;
+
+        sidebar.pipe(toggle());
+
+        assert_eq!(sidebar.pending_steer, Some(pending));
+    }
+
+    #[test]
+    fn unrouted_header_click_is_inert_even_after_permission() {
+        // The visible header follows the same fail-closed route ownership as
+        // Alt /; permission alone cannot make it a layout mutator.
+        let (mut sidebar, pending) = sidebar_with_pending_foreign_steer();
+        sidebar.permissions_granted = true;
+        sidebar.toggle_route_requested = false;
+
+        sidebar.handle_click(1); // header line
+
+        assert_eq!(sidebar.pending_steer, Some(pending));
+    }
+
+    #[test]
+    fn toggle_pipe_before_the_first_manifest_is_inert() {
+        // A persisted Alt / keybind is fail-closed until a resident rail has
+        // installed its current-client MessagePluginId route. A pipe that
+        // reaches an unnamed instance must not become deferred entry work.
         let mut sidebar = Sidebar::default();
         sidebar.active_tab = Some(0);
-        assert!(!sidebar.pending_bootstrap_toggle);
         sidebar.pipe(toggle());
-        assert!(sidebar.pending_bootstrap_toggle);
-        // Nothing acted yet.
         assert!(sidebar.pending_steer.is_none());
-    }
-
-    #[test]
-    fn bootstrap_press_fires_only_when_manifest_and_tab_are_known() {
-        let url = Some("file:/x.wasm".to_owned());
-        assert!(should_fire_bootstrap_toggle(true, &url, Some(1), Some(1)));
-        // No parked press: nothing to fire.
-        assert!(!should_fire_bootstrap_toggle(false, &url, Some(1), Some(1)));
-        // The manifest has not named us yet.
-        assert!(!should_fire_bootstrap_toggle(true, &None, Some(1), Some(1)));
-        assert!(!should_fire_bootstrap_toggle(true, &url, None, Some(1)));
-        // Without an active tab decide_toggle ignores the press; keep it
-        // parked instead of wasting it.
-        assert!(!should_fire_bootstrap_toggle(true, &url, Some(1), None));
-    }
-
-    #[test]
-    fn first_manifest_consumes_the_parked_press_exactly_once() {
-        let mut sidebar = Sidebar::default();
-        sidebar.plugin_id = 7;
-        sidebar.update(Event::TabUpdate(vec![tab_info(1, 4, true, None, false)]));
-        sidebar.pipe(toggle());
-        assert!(sidebar.pending_bootstrap_toggle);
-        // First manifest names the instance (floating, in the active tab):
-        // the parked press fires through perform_toggle — its own state is
-        // clean, so the debounce gate passes it — and is consumed.
-        let m = manifest(vec![(
-            1,
-            vec![sidebar_pane(7, true), pane(3, false, "shell", 2, false)],
-        )]);
-        sidebar.update(Event::PaneUpdate(m.clone()));
-        assert!(!sidebar.pending_bootstrap_toggle);
-        // Later manifests never re-fire it.
-        sidebar.update(Event::PaneUpdate(m));
-        assert!(!sidebar.pending_bootstrap_toggle);
-    }
-
-    #[test]
-    fn parked_press_dies_with_a_superseded_floater() {
-        // The manifest that would fire the parked press can simultaneously
-        // show this floating instance superseded by a tiled rail; the
-        // instance is closing, so the press must not retrofit from it.
-        let mut sidebar = Sidebar::default();
-        sidebar.plugin_id = 7;
-        sidebar.update(Event::TabUpdate(vec![tab_info(1, 4, true, None, false)]));
-        sidebar.pipe(toggle());
-        let m = manifest(vec![(1, vec![sidebar_pane(7, true), sidebar_pane(9, false)])]);
-        sidebar.update(Event::PaneUpdate(m));
-        assert!(sidebar.close_requested);
-        assert!(sidebar.pending_bootstrap_toggle);
+        assert!(sidebar.toggle_cooldown.is_none());
     }
 
     #[test]

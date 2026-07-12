@@ -1,0 +1,37 @@
+// Minimal starting config for the real Zellij/tmux smoke test.
+// zellij-new-tab.sh owns the transformation to a persistent NoOp toggle and
+// native Alt Shift z layout binding in these two Zaphod-owning scopes.
+keybinds {
+    locked {
+        bind "Alt /" {
+            MessagePlugin "file:/placeholder/zellij-sidebar.wasm" {
+                name "toggle"
+                floating true
+                rail "1"
+            }
+        }
+        bind "Alt ." {
+            MessagePlugin "file:/placeholder/zellij-sidebar.wasm" {
+                name "navigate"
+                floating true
+                rail "1"
+            }
+        }
+    }
+    shared_except "locked" {
+        bind "Alt /" {
+            MessagePlugin "file:/placeholder/zellij-sidebar.wasm" {
+                name "toggle"
+                floating true
+                rail "1"
+            }
+        }
+        bind "Alt ." {
+            MessagePlugin "file:/placeholder/zellij-sidebar.wasm" {
+                name "navigate"
+                floating true
+                rail "1"
+            }
+        }
+    }
+}
