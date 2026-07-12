@@ -18,231 +18,243 @@ mod-block:
 id: s92rm4v2pz0m23memjg9xha2
 ---
 
-## Captain-directed re-ideation
+## Captain-directed re-ideation (cycle 3)
 
-This cycle supersedes the prior tab-origin design. It made Sprint 2 wait for a
-canonical Zellij tab-identity authority and a Review & Gate extension that do
-not exist. The first useful outcome is smaller: a pending gate published by
-one configured gate skill appears truthfully in every receiving rail, and a
-later complete provider snapshot removes it after the provider resolves it.
+The global-first outcome remains right, but the prior body invented a
+`GateSnapshotV1` contract inside Zaphod. It described a publisher, open-set
+semantics, revisions, and fixtures that no gate skill has supplied. That is
+not a design shortcut: it would make Zaphod the authority for gate truth.
 
-Tab-bound placement remains desirable later, but no path, CWD, title, pane ID,
-tab ID, session name, or active client may stand in for origin while the
-provider has not supplied one.
+This task is therefore not implementation-ready until two named dependencies
+exist. It records the exact consumer work Zaphod will do afterward, without
+claiming the missing provider contract already exists.
 
 ## Problem
 
-An operator can finish reviewing a gate while the work is still invisible in
-the rail, or keep seeing a gate that the provider has already resolved. The
-operator then has to hunt for the gate and cannot tell whether a row is current.
+An operator needs one current list of pending gates in the rail and needs a
+gate to disappear only after the gate system has really resolved it. Today the
+rail receives one legacy log-derived row at a time. It has no provider-owned
+open-set boundary, so it cannot distinguish a resolved gate from a publisher
+that merely stopped reporting.
 
 ## Required outcome
 
-**Trigger:** the configured gate skill reports its complete set of open gates
-while a Zaphod rail is running. **Visible result:** each receiving rail shows
-those pending gates globally; after the provider reports a later complete set
-without a resolved gate, that row disappears. **Reproducible proof:** an
-isolated tmux-hosted Zellij run sends two real provider snapshots through the
-private subscription path and observes a distinctive row appear and disappear
-in the built rail.
+**Trigger:** a registered gate skill publishes a later valid complete view of
+its open gates while the bb sidecar is serving a managed rail. **Visible
+result:** every rail that receives that publication displays the same global
+pending gates; a gate disappears only when the gate skill's later valid view
+omits it after its own resolution. **Reproducible proof:** a real gate-skill
+fixture opens and resolves one gate through its own workflow, and the built
+sidecar and rail visibly add then remove that gate in an isolated tmux-hosted
+Zellij run.
 
-“Global” here means every rail that receives the common event. It deliberately
-does not claim that a guessed Zellij tab owns the work.
+“Global” is deliberate. This slice makes no claim that a path, CWD, title,
+pane, tab, session, or client identifies the work's origin.
 
-## Current evidence and boundary
+## Evidence and hard dependencies
 
-The present Go adapter reads one decision-log path and brief frontmatter into
-one GateRow. The rail parses one kind: gate event and upserts it by log path;
-neither side has an open-set boundary or a removal event. A one-shot row cannot
-truthfully say that a missing later row is resolved.
+### What exists today
 
-Review & Gate v1 is not the missing source contract. Its portable Briefing and
-review log intentionally describe one review opportunity and its result; they
-do not enumerate all currently open gates or define Zellij placement. The gate
-skill integration must own that operational snapshot. Zaphod consumes it; it
-does not scan logs, glob files, or infer open state.
+Review & Gate v1 is a portable review contract, not an open-gate service. Its
+scope assigns workflow position, approver authority, and routing to workflow
+tooling; it defines immutable Briefings and ordered review entries, but no
+publisher invocation, provider-wide open set, snapshot revision, liveness, or
+Zellij placement. The current Subspace gate-loop recipe likewise launches and
+waits for one gate folder; it does not enumerate all live gates.
 
-The planned private zaphod subscribe sidecar is the common-bus seam. The
-managed-tab entry starts it only after its exact resident rail has been
-observed. This task adds a gate-provider adapter behind that private process;
-there is no public grout command, controller, hub, lease, custom PTY, or new
-user entry.
+Zaphod's current Go path reads one decision-log path and brief frontmatter into
+one `GateRow`, and the Rust rail upserts it by `log_path`. Neither is a complete
+provider view or a resolution transition. Zaphod must not turn those paths,
+globs, or a scan of state files into a substitute provider.
 
-## Proposed approach
+### Prerequisite GP-1 — Spacedock gate-skill publication contract (external)
 
-### One configured provider and one complete snapshot
+**Owner:** the Spacedock gate skill/workflow tooling that owns gate lifecycle;
+not Zaphod, `grout`, or the Subspace reviewer app. **Status:** absent at this
+revision. It must be accepted outside this repository before this task starts
+implementation.
 
-For this first slice, one registered gate-skill provider has one fixed,
-checkout-controlled invocation or subscription. Event data cannot choose an
-executable, URL, shell argument, glob, or filesystem path. The provider
-publishes only a complete open-set snapshot:
+GP-1's delivery artifact must contain all of the following:
 
-~~~text
-GateSnapshotV1 {
-  kind: "gate_snapshot"
-  provider: RegisteredProviderId
-  revision: monotonically increasing unsigned integer
-  complete: true
-  gates: [{
-    gate_key: provider-owned opaque nonempty ID
-    title: nonempty display text
-    detail: display text
-  }]
-}
-~~~
+- one registered provider identity and an invocation/subscription lifecycle
+  owned by the gate skill. Zaphod may attach only to the documented receiver;
+  it never chooses a program, URL, shell arguments, glob, log path, or polling
+  cadence from event data, and it never starts or restarts the publisher;
+- a versioned, complete open-gate publication. Each accepted publication says
+  exactly which gates are open for that provider scope, including an explicit
+  empty set. It distinguishes a complete view from an unavailable, partial, or
+  failed observation;
+- a provider-owned opaque, stable `gate_key` for each logical gate, display
+  fields, and ordering/revision rules. A later publication can update a gate
+  without changing its key, and an older or duplicate publication cannot
+  resurrect a resolved gate;
+- liveness and failure semantics: consumers can recognize an unavailable or
+  stale publisher without treating silence as a resolution. The contract says
+  how a new publisher epoch or restart becomes authoritative;
+- a versioned fixture bundle, owned and released with the provider, that gives
+  raw valid, update, empty, older, duplicate, malformed, partial, unavailable,
+  and restarted-publication cases plus their expected provider-owned open sets;
+  and
+- one executable provider integration proof: create/open a real fixture gate,
+  resolve it through the gate skill's normal result path, and observe a later
+  complete publication that omits that same stable `gate_key`. A hand-authored
+  Zaphod pipe, a decision-log scan, or a fixture that merely deletes a row does
+  not satisfy this proof.
 
-The gate skill owns gate_key, display values, revision ordering, and the
-meaning of open. Zaphod accepts only the registered provider, a newer complete
-revision, and unique nonempty gate keys and titles. A duplicate, older,
-malformed, partial, or failed source result emits no replacement; the last
-accepted set remains visible. An explicit valid empty gates list is the
-provider’s truthful “none open” signal.
+The external owner chooses the serialization and exact field names. This record
+does not name a local `GateSnapshotV1` or make Zaphod's parser the source of
+the contract. At GP-1 acceptance, its pinned contract revision and fixture
+bundle become this task's external test baseline.
 
-The sidecar serializes valid snapshots onto the existing common agent-event
-bridge. No individual row says it is a snapshot, and Zaphod never treats a
-missing one-shot gate event as a resolution.
+### Prerequisite BB-1 — accepted sidecar handoff
 
-### Global rail projection, separated from review authority
+`bb` must have an accepted and implemented fresh-tab handoff before this task
+starts. The `Alt Shift z` entry creates the tab, observes the exact resident
+rail, and starts the private native `zaphod subscribe` sidecar with its target
+tuple. This task adds a gate-provider consumer behind that private sidecar; it
+does not create another launcher, public `grout` command, daemon, controller,
+lease, or test profile.
 
-The rail gains a pure provider-snapshot reconciler keyed by
-(provider, gate_key). A newer valid snapshot atomically replaces that
-provider’s open set. It emits the resulting display rows in the existing gate
-section. All rails that receive the same snapshot project the same rows, so
-there is no tab routing decision to get wrong.
+BB-1 is a lifecycle boundary, not a tab-placement claim. The existing named
+`agent-event` bridge is session-wide transport. Its verified rail target only
+governs sidecar lifetime; it does not turn the gate's global publication into a
+tab-owned one.
 
-Snapshot-derived rows are display-only in this slice. Selecting one produces
-no direct float, verdict, decision-log write, provider command, or tab switch.
-The existing legacy log-path row behavior remains unchanged for legacy events;
-the separate v1 review-surface handoff owns any future trusted open action for
-provider snapshot rows.
+## Proposed Zaphod approach after GP-1 and BB-1
 
-This extends the existing pure seams rather than adding a parallel runtime:
+The private `zaphod subscribe` process receives only the registered gate
+skill's already-owned publication through GP-1's documented boundary. It does
+not invoke, discover, or repair the gate provider. It rejects a message that
+does not meet the accepted external contract and retains the last accepted
+provider set across malformed, partial, stale, duplicate, unavailable, or
+silent input. A later externally valid complete publication, including the
+provider's explicit empty set, is the only removal authority.
 
-- Go: the internal gate row builder and emitter gain a complete-snapshot
-  adapter behind private zaphod subscribe.
-- Rust: parse_agent_event, apply_agent_event, the gate display helpers, and
-  decide_rail_click gain a distinct snapshot-derived gate model and pure
-  replacement operation.
-- The existing named agent-event bridge remains transport only. It carries no
-  authority to decide a review.
+The Rust rail adds a pure provider-set reconciler keyed by the external
+`(provider, gate_key)` pair. One accepted complete publication atomically
+replaces that provider's projection. It extends `parse_agent_event`,
+`apply_agent_event`, the gate display helpers, and `decide_rail_click`; the Go
+side extends the internal emitter behind `zaphod subscribe`. The bridge remains
+transport only.
 
-### Later tab-bound placement
+Every receiving rail renders that reconciled provider set globally. Snapshot-
+derived rows are display-only in this slice: selecting one performs no float,
+verdict, decision-log write, provider command, or tab switch. The separate v1
+review-surface handoff owns any later trusted action. Legacy log-path rows stay
+separate and must not be promoted into provider snapshots.
 
-A later gate-skill contract may attach an optional immutable origin token to
-an open-gate record. The gate skill, not Zaphod, must define and validate that
-token and provide its lifecycle. A separate task can then prove exact
-placement against a supported native identity authority.
-
-This slice neither reads nor stores origin metadata. Until that later proof,
-all current gates remain global. There is no heuristic fallback from a
-decision-log path, brief path, CWD, title, tab position, raw tab ID, pane ID,
-session name, or active client.
+Tab-bound placement is deferred. This task neither reads nor stores origin
+metadata and never guesses it from a decision-log path, brief path, CWD, title,
+tab position, raw ID, pane, session, or active client.
 
 ## Riskiest unproven mechanism
 
-The risk is not rendering one row; it is preserving provider truth across a
-real open-to-resolved transition. The smallest invalidator runs the built
-private zaphod subscribe process against the gate skill’s versioned fixture
-provider in an isolated tmux-hosted Zellij profile. Snapshot 41 supplies one
-distinctive open gate; snapshot 42 is a valid empty set. The actual rail must
-show the row after 41 and no longer show it after 42.
+The critical joint is not a Rust row: it is GP-1's real resolution transition
+surviving bb's target-bound sidecar into the visible rail. First, the external
+provider must run its own fixture proof: open one gate, resolve it through its
+normal result path, and publish the later complete state that omits its stable
+key. Then an isolated tmux-hosted Zellij run starts the normal fresh tab and
+private sidecar, consumes those published records, and visibly adds then
+removes the fixture title.
 
-The run fails if it uses a hand-issued pipe instead of the sidecar, a
-decision-log scan, a custom PTY harness, a guessed tab identity, or a
-one-shot row whose absence is interpreted as removal.
+The check fails if Zaphod invokes the provider, scans a decision log, sends a
+hand-issued pipe, infers tab identity, uses a custom PTY/lease harness, or
+turns a gap in one-shot rows into removal.
 
 ## Acceptance criteria
 
 ### Offline
 
-**AC-O1 — A complete provider snapshot is the sole source of pending-gate
-truth.** Given the gate skill’s versioned fixture snapshots, valid revision 41
-with keys alpha and beta creates exactly those two rows; valid revision 42
-with only updated beta removes alpha and updates beta; valid revision 43 with
-an empty list removes beta. An older, partial, malformed, or duplicate-key
-snapshot after revision 41 changes nothing.
+**AC-O1 — Only a gate-skill-owned complete publication changes pending-gate
+truth.** Against the GP-1 fixture bundle, the valid open publication creates
+exactly the externally expected provider/key set; the later valid update and
+empty publications produce the externally expected replacement sets. Older,
+duplicate, malformed, partial, unavailable, and silent-source cases leave the
+last accepted set unchanged until the external liveness/restart rule accepts a
+new complete publication.
 
-Verified by: Go adapter and Rust reconciliation tests consume the provider’s
-fixture records and assert accepted provider/key sets after each record. The
-expected keys and labels come from the provider fixture, not from the
-reconciler under test.
+Verified by: Go adapter and Rust reconciler tests consume the pinned GP-1 raw
+fixture bundle and assert its expected provider/key sets after each record. No
+expected open state, revision, or liveness value is authored by the code under
+test.
 
-**AC-O2 — Global-first projection exposes pending work without fabricated tab
-ownership.** The same accepted fixture snapshot delivered to two independent
-rail states yields the same global alpha/beta set in both. After revision 42,
-both show only beta; after revision 43, neither shows a gate. Hostile extra
-fields containing a path, CWD, tab title, raw tab ID, pane ID, session name,
-or active-client value do not change either set.
+**AC-O2 — Global-first projection exposes pending work without fabricated
+ownership.** Delivering one accepted GP-1 publication to two independent rail
+states yields the same provider/key set in both, including after update and
+empty transitions. Extra path-, CWD-, title-, pane-, tab-, session-, and
+client-shaped data has no effect on either set.
 
-Verified by: Rust tests feed the raw provider fixture plus hostile ignored
-extras into two rails and measure their rendered gate-key sets. The independent
-baseline is the fixture’s open-set sequence; no Zaphod-authored placement
-value is used.
+Verified by: Rust tests feed one external fixture sequence to two rail states
+and measure their rendered provider/key sets against the fixture baseline;
+hostile locator-shaped values are supplied only as ignored extras.
 
-**AC-O3 — Visibility acquires no review or routing authority.**
-Snapshot-derived rows render but select to no action. Processing valid,
-invalid, changed, and empty snapshots issues no provider command, direct
-review float, decision-log write, verdict, or Zellij tab-switch request.
+**AC-O3 — Zaphod does not invoke or decide for the provider.** Processing each
+GP-1 fixture record causes zero gate-skill process starts, provider commands,
+direct reviewer floats, decision-log writes, verdicts, or Zellij tab switches.
+Selecting a snapshot-derived row is a no-op.
 
-Verified by: a rail/action-boundary test records calls to fake provider and
-Zellij sinks while it processes the provider fixture and selects each row; all
-recorded action counts remain zero. Legacy log-path row coverage remains
-separate.
+Verified by: an adapter/rail boundary test uses provider, review, workflow, and
+Zellij fakes to record all calls while it consumes the external fixture bundle;
+every forbidden call count is zero. Legacy log-path coverage remains separate.
 
-**AC-O4 — The smallest real source-to-rail path reflects resolution.**
+**AC-O4 — A real provider resolution reaches the built rail through BB-1.**
 In a temporary-root tmux-hosted Zellij server, the normal fresh-tab entry
-starts the built private sidecar. A fixture gate-skill process supplies
-snapshots 41 then 42; the real sidecar emits the common event and the built
-resident rail visibly adds then removes the fixture title. The run leaves
-standing Zellij configuration untouched and cleans up the temporary tmux and
-Zellij roots.
+starts the accepted private sidecar. GP-1's executable fixture opens then
+resolves one gate and publishes its later complete state; the resident rail
+visibly gains then loses the provider's fixture title. Standing Zellij and tmux
+configuration remains unchanged, and the temporary roots are cleaned up.
 
-Verified by: the existing isolated-profile smoke style captures native pane
-state and visible screen before, after 41, and after 42. It invokes neither a
-custom PTY/lease harness nor a hand-written pipe command.
+Verified by: the GP-1 provider integration proof plus the existing
+tmux-hosted isolated-profile smoke style capture the provider publication,
+native target state, and rail screen before open, after open, and after
+resolution. Neither test hand-writes a pipe nor uses a custom PTY/lease.
 
 ### Captain-live
 
-**AC-C1 — An operator sees current pending work without hunting, then sees
-provider resolution truthfully.** With one real gate from the configured gate
-skill open, the operator sees its global row in the managed rail. The provider
-resolves it independently; its next valid complete snapshot removes that row.
-No tab-bound claim, gate action, or manual pipe invocation is needed.
+**AC-C1 — An operator sees current pending work and its real resolution without
+hunting.** With one real gate open in the configured gate skill, the managed
+rail shows its global row. After the provider resolves that gate independently,
+the next accepted complete publication removes the row. No tab-bound claim,
+manual pipe, or rail-issued review decision is involved.
 
-Verified by: a captain drill records the provider’s before/after snapshots and
-the rail’s before/after display in a managed tab. The review-surface handoff
-task, not this drill, owns opening the reviewer UI or interpreting its result.
+Verified by: a captain drill records the provider's before/after publications,
+the accepted sidecar target, and the rail's before/after display. The v1
+review-surface handoff, not this drill, owns reviewer placement and decision
+interpretation.
 
 ## Test plan
 
-1. Run AC-O4’s open-to-empty real sidecar/rail invalidator first. It uses the
-   standard isolated tmux-hosted profile, not 7h or any custom PTY machinery.
-2. Add provider-fixture parsing and complete-snapshot validation tests:
-   revision ordering, empty removal, changed rows, duplicate keys, partial
-   data, malformed data, and last-good retention.
-3. Add pure Rust reconciliation and two-rail global-projection tests,
-   including hostile locator-shaped extras and non-actionable selection.
-4. Run focused Go and Rust suites, then the isolated profile smoke. Do not
-   mutate standing Zellij or tmux configuration.
-5. After the offline packet passes and the gate skill has a real open gate,
-   run AC-C1. Do not substitute a legacy direct float or an inline verdict.
+1. **Gate the work on the external invalidator.** GP-1 first proves its
+   publisher-owned invocation and open-to-resolved fixture transition. If it
+   is absent or fails, keep this task in ideation; do not build a Zaphod
+   surrogate.
+2. Once BB-1 and GP-1 are accepted, run AC-O4's end-to-end provider → private
+   sidecar → rail smoke first in an isolated tmux-hosted Zellij profile.
+3. Add Go and Rust tests for every GP-1 fixture record: acceptance, atomic
+   replacement, empty removal, last-good retention, and externally specified
+   liveness/restart behavior.
+4. Add two-rail global-projection and no-action tests, including hostile
+   locator-shaped extras. Do not add a tab identity field or a review route.
+5. Run focused Go and Rust suites, the isolated smoke, then AC-C1 only after
+   the offline packet passes. Do not mutate standing Zellij or tmux
+   configuration.
 
 ## Documentation change
 
-When this behavior ships, replace README’s Agent & gate rows wording with:
-“A configured gate provider publishes complete open-gate snapshots. Pending
-gates appear globally in each receiving rail and disappear only after a later
-valid provider snapshot omits them. Zaphod does not infer a gate’s tab from a
-path, CWD, title, or multiplexer ID, and it does not decide reviews.”
+After GP-1 and this consumer ship, replace README's Agent & gate rows wording
+with: “The configured gate skill publishes its own complete open-gate view.
+Pending gates appear globally in each receiving rail and disappear only after
+a later valid provider publication omits them. Zaphod does not infer a gate's
+tab from a path, CWD, title, or multiplexer ID, and it does not decide reviews.”
 
 ## Out of scope
 
-Tab-bound origin metadata or an identity authority; inferring placement from
-paths, CWDs, titles, tab positions, raw IDs, panes, sessions, or clients;
-filesystem globs, decision-log folding, legacy pz server launch, rail-issued
-approve, direct review floats, inline verdicts, review routing, provider
-discovery, a public grout command, a hub/controller, pooling, leases, custom
-PTY infrastructure, 7h, 4d, and standing configuration mutation.
+Defining, publishing, or invoking the gate skill's contract inside Zaphod;
+Review & Gate v1 changes; decision-log folding, filesystem discovery, legacy
+`pz` launch, rail-issued approve, direct review floats, inline verdicts, or
+review routing; tab-bound origin metadata or any identity heuristic; a public
+`grout` command, hub/controller, pooling, leases, custom PTY infrastructure,
+7h, 4d, or standing configuration mutation.
 
 ## Stage Report: ideation
 
@@ -290,3 +302,19 @@ This task is ready to deliver the gate half of Sprint 2 without pretending it
 knows tab provenance. The gate skill remains the authority for open-state
 snapshots and any later origin metadata; Zaphod is a global-first projection
 and never a reviewer or router.
+
+## Stage Report: ideation (cycle 3)
+
+- SKIPPED: Obtain a gate-skill-owned snapshot contract rather than inventing one locally.
+  `review-and-gate.md`, the `spacedock-subspace` command surface, and a targeted publisher scan expose no provider-wide publisher; GP-1 names the external contract and fixture bundle required before implementation.
+- DONE: Declare the accepted bb subscriber dependency and global-first behavior.
+  BB-1 is now an explicit precondition: the accepted fresh-tab handoff starts the private target-bound sidecar, while all receiving rails project gate publications globally with no tab inference.
+- SKIPPED: Prove a real resolution transition and fixture ownership boundary.
+  The required proof is correctly assigned to GP-1's provider-owned executable fixture; it cannot be run truthfully until that external publisher and its fixture bundle exist.
+
+### Summary
+
+The staff finding was correct: Zaphod had specified a gate publisher it does
+not own. This cycle removes that fabricated contract, names GP-1 and BB-1 as
+hard prerequisites, and leaves a narrow global-first consumer design ready for
+review only after those prerequisites are accepted.
