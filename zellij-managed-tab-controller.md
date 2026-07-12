@@ -1,11 +1,11 @@
 ---
 id: fp8pn84km859qges2s2ffp5h
 title: Safe managed-tab entry and guarded keybindings
-status: validation
+status: implementation
 source: outcome-first roadmap Sprint 1 safe managed-tab onramp; captain correction 2026-07-12
 started: 2026-07-12T06:45:43Z
 completed:
-verdict:
+verdict: REJECTED
 score: 0.98
 worktree: .worktrees/zellij-new-tab-entry
 issue:
@@ -366,3 +366,11 @@ The revised validation artifact keeps the same two narrow smoke findings but
 makes the user-facing boundary explicit: a new managed tab is the only
 positive path, while unrelated tabs are protected. It is ready for a fresh
 Subspace gate presentation; no code, 7h, 4d, custom PTY, or lease scope changed.
+
+### Feedback Cycles
+
+- Cycle 1 — 2026-07-12: Captain directed the narrow repair route after the
+  revised validation review: make the real smoke wait for the settled
+  post-grant resident, compare foreign-tab screen captures, and prove the
+  packet with repeated real smoke runs. Keep the existing entry point and do
+  not add 7h, 4d, lease, custom-PTY, or architecture work.
