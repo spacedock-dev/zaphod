@@ -106,6 +106,130 @@ native before/after pane+layout snapshots, switch to a foreign tab, and prove
 its literal `Alt /` snapshot remains unchanged. The pre-granted smoke does not
 settle this AC.
 
+### Exact captain drill, after the repair
+
+Run this in Terminal A from the selected candidate worktree. It uses tmux only
+as the real terminal boundary; it does not create a custom PTY, lease, or
+permission-cache grant.
+
+```bash
+repo=/Users/clkao/git/zaphod/.worktrees/zellij-new-tab-entry
+ROOT="$(mktemp -d /tmp/zaphod-cl-drill.XXXXXX)"
+CONFIG_DIR="$ROOT/config"
+CONFIG_FILE="$CONFIG_DIR/config.kdl"
+DATA_DIR="$ROOT/data"
+SOCKET_DIR="$ROOT/socket"
+HOME_DIR="$ROOT/home"
+SESSION="zaphod-cl-$$"
+TMUX_SERVER="zaphod-cl-$$"
+TMUX_SESSION=zaphod-cl-drill
+WASM="$repo/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+
+state() {
+  if [ -e "$1" ]; then shasum -a 256 "$1" | awk '{print $1}'; else printf missing; fi
+}
+STANDING_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
+STANDING_CONFIG="${ZELLIJ_CONFIG_FILE:-$STANDING_ROOT/config.kdl}"
+STANDING_LAYOUT="$STANDING_ROOT/layouts/zaphod.kdl"
+CONFIG_HASH_BEFORE="$(state "$STANDING_CONFIG")"
+LAYOUT_HASH_BEFORE="$(state "$STANDING_LAYOUT")"
+
+mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$SOCKET_DIR" "$HOME_DIR"
+cp "$repo/tests/fixtures/zellij-tmux-smoke-config.kdl" "$CONFIG_FILE"
+"$repo/build.sh" >/dev/null
+source "$repo/scripts/zellij-layout-lib.sh"
+WASM_URL="$(zaphod_canonical_file_url "$WASM")"
+
+ctl() {
+  env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" zellij --session "$SESSION" \
+    --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
+}
+start_client() {
+  tmux -L "$TMUX_SERVER" new-session -d -x 160 -y 45 -s "$TMUX_SESSION" \
+    "env HOME='$HOME_DIR' ZELLIJ_SOCKET_DIR='$SOCKET_DIR' zellij --config-dir '$CONFIG_DIR' --config '$CONFIG_FILE' --data-dir '$DATA_DIR' attach --create '$SESSION'"
+  until ctl action list-panes --json --all --command --geometry --state --tab >/dev/null 2>&1; do sleep 0.1; done
+}
+capture() {
+  ctl action list-panes --json --all --command --geometry --state --tab >"$ROOT/$1.json"
+  jq -S . "$ROOT/$1.json" >"$ROOT/$1.json.sorted"
+  ctl action dump-layout >"$ROOT/$1.kdl"
+  tmux -L "$TMUX_SERVER" capture-pane -p -t "$TMUX_SESSION:0.0" >"$ROOT/$1.screen"
+}
+
+# Bootstrap the selected root, then restart so Zellij reads the new native binding.
+start_client
+env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
+  ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+  "$repo/scripts/zellij-new-tab.sh" --session "$SESSION" --name 'Zaphod CL bootstrap'
+ctl delete-session --force "$SESSION" || true
+tmux -L "$TMUX_SERVER" kill-server || true
+start_client
+printf "Attach in Terminal B: tmux -L %q attach -t %q\\n" "$TMUX_SERVER" "$TMUX_SESSION"
+```
+
+In Terminal B, run the printed attach command. Press literal `Alt Shift z` in
+the foreign tab. The new `zaphod` tab must appear, and its ordinary permission
+prompt must be approved by CL—not by an injected key or a cache. Back in
+Terminal A, save the pre-toggle observations:
+
+```bash
+capture managed-before
+jq -e --arg url "$WASM_URL" \
+  'any(.[]; .is_plugin and .plugin_url == $url and .tab_name == "zaphod")' \
+  "$ROOT/managed-before.json"
+before_width="$(jq -er --arg url "$WASM_URL" \
+  '[.[] | select(.is_plugin and .plugin_url == $url) | .pane_columns] | if length == 1 then .[0] else error("one candidate rail required") end' \
+  "$ROOT/managed-before.json")"
+test "$before_width" = 28
+jq -e --arg url "$WASM_URL" \
+  'any(.[]; .is_plugin and .plugin_url == $url and .is_selectable == false)' \
+  "$ROOT/managed-before.json"
+```
+
+CL now presses literal `Alt /` once in Terminal B. It must visibly collapse
+the rail from 28 columns to its one-column sliver without creating a pane or
+changing the candidate URL. Terminal A then records and checks it:
+
+```bash
+capture managed-after
+after_width="$(jq -er --arg url "$WASM_URL" \
+  '[.[] | select(.is_plugin and .plugin_url == $url) | .pane_columns] | if length == 1 then .[0] else error("one candidate rail required") end' \
+  "$ROOT/managed-after.json")"
+test "$after_width" = 1
+jq -S 'map(del(.pane_x,.pane_content_x,.pane_y,.pane_content_y,.pane_rows,.pane_content_rows,.pane_columns,.pane_content_columns))' \
+  "$ROOT/managed-before.json" >"$ROOT/managed-before.identity.json"
+jq -S 'map(del(.pane_x,.pane_content_x,.pane_y,.pane_content_y,.pane_rows,.pane_content_rows,.pane_content_columns,.pane_columns))' \
+  "$ROOT/managed-after.json" >"$ROOT/managed-after.identity.json"
+cmp "$ROOT/managed-before.identity.json" "$ROOT/managed-after.identity.json"
+cmp -s "$ROOT/managed-before.kdl" "$ROOT/managed-after.kdl" && exit 1
+cmp -s "$ROOT/managed-before.screen" "$ROOT/managed-after.screen" && exit 1
+```
+
+Finally, use the same attached client for the foreign-tab check. Terminal A
+switches it with the native action, records its baseline, then CL presses
+literal `Alt /` in Terminal B. All three retained foreign observations must be
+unchanged:
+
+```bash
+ctl action go-to-previous-tab
+until ctl action list-tabs --json --all --state --layout | jq -e 'any(.[]; .active and .name != "zaphod")' >/dev/null; do sleep 0.1; done
+capture foreign-before
+# CL presses Alt / once in Terminal B while that foreign tab is visible.
+capture foreign-after
+cmp "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted"
+cmp "$ROOT/foreign-before.kdl" "$ROOT/foreign-after.kdl"
+cmp "$ROOT/foreign-before.screen" "$ROOT/foreign-after.screen"
+jq -e --arg url "$WASM_URL" \
+  '([.[] | select(.is_plugin and .plugin_url == $url)] | length) == 1' \
+  "$ROOT/foreign-after.json"
+
+ctl delete-session --force "$SESSION" || true
+tmux -L "$TMUX_SERVER" kill-server || true
+test "$(state "$STANDING_CONFIG")" = "$CONFIG_HASH_BEFORE"
+test "$(state "$STANDING_LAYOUT")" = "$LAYOUT_HASH_BEFORE"
+rm -rf "$ROOT"
+```
+
 ## Subspace review instruction
 
 When implementation returns with the repeated offline packet, review this
