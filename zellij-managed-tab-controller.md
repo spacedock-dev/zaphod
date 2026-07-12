@@ -298,3 +298,25 @@ baseline. It is not settled by unit tests or configuration inspection.
 `fp` is now the Sprint 1 safe-door task, not a controller prerequisite. It
 owns only the path an operator can actually use: fresh native tab entry,
 managed-tab-only `Alt /`, and proof that foreign tabs remain unchanged.
+
+## Stage Report: implementation
+
+- DONE: Finish the existing worktree's one-client managed-tab entry → visible tab → managed Alt-/ behavior → foreign-tab no-op slice.
+  `88fac36` makes receipt of an active tiled `PipeSource::Keybind`, not the unacknowledged `reconfigure()` request flag, the literal-toggle authorization; `d5137e6` proves the real path.
+- DONE: Drive AC-O1 through AC-O4 with the isolated tmux-hosted Zellij smoke; do not revive 7h/4d, custom PTY, lease, or controller scope.
+  `./tests/zellij-tmux-smoke-test.sh` passed four times (three consecutive plus final): literal `Alt Shift z` adds one candidate tab; literal `Alt /` changes its rail 28→1 columns without identity change; post-route foreign state is byte-identical; cleanup verifies session, tmux, root, and standing hashes.
+- DONE: Commit the smallest fix set and record exact red/green and smoke evidence in the fp implementation stage report; surface any non-core gap as a follow-up.
+  Code commits: `88fac36 fix: authorize toggles from observed keybind pipes`; `d5137e6 test: prove managed tab key path`. Red: missing receipt helper failed with `E0425`; the first pre-grant fixture prompted until its key was corrected from the `file:` URL to Zellij's raw WASM path. Green: shell entry suite 8/8; `cargo test --release` 134/134; `cargo check --tests --release`; smoke 4/4; `git diff --check`.
+- SKIPPED: Debug-profile `cargo test` / `cargo check --tests`.
+  The initial debug `cargo test` stopped at ENOSPC with 171 MiB free; only its generated worktree `target/debug` was removed, then the complete release-profile test and check commands above passed.
+- SKIPPED: AC-I1 normal-consent captain live drill.
+  Validation must run the attached disposable journey with the ordinary permission prompt; the headless pre-grant fixture is deliberately not a substitute.
+- SKIPPED: Same-tab second-client runtime-route delivery.
+  This remains the entity's named, unfiled follow-up; it is not part of the approved Sprint 1 walking skeleton.
+
+### Summary
+
+The entry worktree now proves the first usable operator journey end to end
+without controller, lease, or custom PTY machinery. The only remaining
+acceptance work is the captain's normal-consent live drill; 7h and 4d were not
+read, changed, or used as dependencies.
