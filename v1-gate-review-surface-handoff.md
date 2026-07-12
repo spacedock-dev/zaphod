@@ -4,9 +4,9 @@ status: ideation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
-sprint-readiness: ready
-blocked-on:
-blocked-reason:
+sprint-readiness: defer
+blocked-on: s9-gate-skill-contract-and-bb-direct-script-receiver
+blocked-reason: Implementation waits for the accepted gate-skill publication/selection contract and bb’s accepted direct-script fresh-tab sidecar receiver; Zaphod must not invent either.
 score: 0.95
 started: 2026-07-12T00:14:07Z
 completed:
