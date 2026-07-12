@@ -1,6 +1,6 @@
 ---
 title: One v1 review opens and returns cleanly
-status: backlog
+status: ideation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
@@ -8,7 +8,7 @@ sprint-readiness: ready
 blocked-on: v1-review-surface-contract-pending-gate-projection-and-7h-validation-before-implementation
 blocked-reason: Ideation is captain-approved now. Implementation needs the gate skill handoff contract, a real pending-gate projection, and the passed disposable-profile gate.
 score: 0.95
-started:
+started: 2026-07-12T00:14:07Z
 completed:
 verdict:
 worktree:
