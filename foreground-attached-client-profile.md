@@ -1,13 +1,13 @@
 ---
 id: 7hm8rw9kzp9m2chdmbe721qr
 title: Foreground attached-client disposable Zellij profile
-status: ideation
+status: implementation
 source: managed-view roadmap Sprint 1 entry gate, senior staff review 2026-07-11
 started: 2026-07-11T05:09:21Z
 completed:
 verdict: REJECTED
 score: 1.0
-worktree:
+worktree: .worktrees/spacedock-ensign-foreground-attached-client-profile
 issue:
 pr:
 mod-block:
@@ -15,25 +15,17 @@ sprint: s1-trusted-test-profile-onramp
 sprint-lane:
 group: walking-skeleton
 sprint-readiness: ready
-reopened: 2026-07-12
-reopened-reason: Captain requested a new ideation pass after rejected validation; preserve cycle-1 findings and validated boundaries.
 ---
 
 ## Problem
 
-The foreground handoff, immutable lease, cleanup, no-TTY rejection, and
-standing-file isolation now pass when the lifecycle reaches readiness.
-Validation nevertheless rejected AC-O1: the PTY driver accepts `ECHO=off` as
-input readiness, selects terminals only once, and sends its final raw nonce
-only once. A Zellij client can own the foreground process group and expose an
-exact session before it has created one terminal or before that terminal's
-shell can read input.
+The canonical disposable profile backgrounds its attached Zellij client, so it can render but cannot reliably own or read the controlling terminal. Repair the profile before any real-key acceptance drill consumes captain time.
 
-A fresh target-free clone has a separate ambiguity. The launcher runs its
-mandatory build before printing `PROFILE_ROOT`, so the lifecycle metadata clock
-can expire during a cold compile. The repair must distinguish that bounded
-candidate preparation from attached-session readiness without extending either
-deadline or loosening the existing lifecycle boundary.
+The current diagnostic metadata is also not a safe handoff to the later CLI
+and native-feasibility lanes: a consumer could infer a session or teardown
+right from a path, display name, or active client. The foreground lane must
+publish one narrow, test-only lease after foreground readiness instead of
+leaving those lanes to derive identity or lifecycle ownership.
 
 ## Sprint role
 
@@ -47,22 +39,22 @@ or a marker, or acquire CLI ownership.
 
 ## Riskiest unproven mechanism
 
-The foreground process-group repair is proven. The remaining risk is the gap
-between client attachment and a sole terminal shell accepting bytes: kernel
-PGID equality, an exact visible session, and `ECHO=off` prove none of those
-last two facts. The independent validator observed both zero terminals and a
-terminal that never displayed the one-shot nonce.
+The current trailing `&` makes the attached client an asynchronous Bash job.
+With monitor mode off, Bash redirects that job's stdin to `/dev/null`; it may
+render a session but cannot be the reliable receiver of the operator's PTY
+bytes. The first invalidation must therefore exercise the actual transport,
+not Zellij's control-plane input commands. It must also prove that a lease is
+not exposed before the kernel sees the primary client in the foreground.
 
-The first invalidation is therefore a driver-owned raw-input handshake in a
-real profile. After the driver independently sees the exact session and
-foreground client PGID, it must wait for exactly one non-plugin terminal, write
-a unique raw canary command to the PTY master, and find that driver-generated
-canary in that same pane's live `dump-screen`. If either terminal availability
-or the canary is absent, the driver re-enters the bounded condition loop; the
-first observed canary is the end-value proof. `ECHO=off` remains a diagnostic,
-never the unlock. A target-free clean build is a prior, separately bounded
-phase; the existing attached-lifecycle metadata deadline starts only after the
-profile reports that build complete.
+Smallest end-to-end check: launch the current profile under a test-owned PTY,
+write a nonce-bearing `printf` command to the PTY master, select the live
+terminal from `action list-panes --json`, and require the nonce in that
+terminal's live `action dump-screen --pane-id` output. The current background
+launch is expected to fail that check. After the repair, the same test must
+independently read the PTY foreground PGID from the kernel, prove that it is
+the attached client's own process group, and only then observe and parse the
+published `PROFILE_LEASE` path. No second attachment, marker pane, or captain
+drill belongs to that invalidation.
 
 ## Proposed approach
 
@@ -153,61 +145,21 @@ change the shared pure layout/identity helpers (`zaphod_render_layout`,
 `zaphod_validate_layout_identity`); there is no existing pure PTY helper to
 reuse.
 
-### Cycle 3 deterministic readiness amendment
-
-Use one test-owned, two-phase readiness design. It adds no profile controller,
-second client, managed tab, or lease authority:
-
-1. Keep the ordinary launcher and its mandatory build. Immediately before
-   `$REPO_ROOT/build.sh`, it prints exactly `PROFILE_BUILD_STARTED=1`; only
-   after a successful build and artifact check, before profile allocation, it
-   prints exactly `PROFILE_BUILD_READY=1`. The driver treats those lines as a
-   distinct, fixed, reported clean-build phase. Its current 180-second
-   lifecycle metadata budget begins at `PROFILE_BUILD_READY`, not at `Popen`,
-   and it cannot absorb a missing build marker, build failure, or build timeout.
-   The target-free test still removes `target`; it may not prewarm, copy, or
-   reuse an artifact.
-2. Retain the existing independent OS gate unchanged: the driver must first
-   observe the exact private session and
-   `CLIENT_PID == getpgid(CLIENT_PID) == tcgetpgrp(test_pty_master)`. It must
-   continue rejecting an early lease file or line. The one-shot
-   `ProfileLeaseV1` publisher still depends only on that OS/session condition;
-   it neither sends a canary nor waits for a test-driver acknowledgement.
-3. Replace the one-shot `sole_terminal_id` plus `ECHO=off` decision with a
-   bounded driver state machine. A zero-terminal response is pending and is
-   reported with bounded diagnostics; any count other than one at the final
-   decision fails. Before every raw write, the driver rechecks the same live
-   terminal through `list-panes --json` and records its pane ID. It uses only
-   the PTY master for writes and live `dump-screen --pane-id` for observations.
-4. Generate a new alphanumeric canary outside the profile for each bounded
-   handshake attempt. The driver writes its harmless `printf` command, polls
-   the recorded pane's real dump, and, if the canary is absent or the pane is
-   no longer the sole terminal, returns to the condition loop with a distinct
-   nonce. The first canary observed in a fresh dump of the same still-sole pane
-   proves the terminal shell has completed a raw-input round trip and emits
-   `PROFILE_PTY_READY=1`. Terminal mode alone does not. Profile-created files,
-   shell transcripts, synthetic dumps, `zellij action write`, and
-   `write-chars` remain invalid evidence. The existing lease parser,
-   immutable-byte digest check, ownership split, normal cleanup, signal
-   cleanup, and no-TTY path run unchanged after this proof.
-
 ## Acceptance criteria
 
 ### Offline (agent-reproducible)
 
 **AC-O1 — real keys reach the disposable terminal (end value).** A fresh,
-test-owned PTY writes a driver-generated `ZAPHOD_PTY_CANARY:<nonce>` command
-only when one real non-plugin terminal is live, then observes that exact nonce
-in the same pane's `zellij action dump-screen --pane-id` result. If a terminal
-is absent or the canary is absent, the driver re-enters its bounded condition
-loop with a new nonce; the first observed canary proves the endpoint. `ECHO=off`,
-a visible session, or a prior terminal count alone cannot satisfy this AC.
+test-owned PTY writes a nonce chosen by the test, and exactly one live terminal
+in the profile displays `ZAPHOD_PTY_CANARY:<nonce>` in its actual
+`zellij action dump-screen --pane-id` result. The expected nonce originates in
+the PTY driver, not in a file written by the profile or test fixture.
 
-Verified by: the focused lifecycle test launches the real profile, repeatedly
-observes real `list-panes --json` state until one non-plugin terminal is live,
-and performs raw-master canary handshakes against its live dump. A test-only
-delay may hold real session or shell startup, but it may not fake `list-panes`
-or `dump-screen`; the old one-shot path is the red baseline.
+Verified by: the focused profile lifecycle test launches the real profile,
+discovers its real terminal ID from `list-panes --json`, writes raw bytes to
+the PTY master, and polls the live dump until that nonce appears. It contains
+no authored dump fixture; should one ever be needed, it must record Zellij's
+real single-line dump shape rather than synthetic multiline KDL.
 
 **AC-O2 — the attached client owns the foreground PTY process group before a lease is exposed (mechanism serving AC-O1).** While AC-O1's session is alive,
 `CLIENT_PID == getpgid(CLIENT_PID) == tcgetpgrp(test_pty_master)`. A detached,
@@ -265,22 +217,7 @@ nonzero exit, no session, no temporary-root metadata, and no lease path. This
 prevents a future refactor from reintroducing a background/detached fallback
 just to make CI appear green.
 
-**AC-O7 — cold candidate build is bounded without consuming attached
-readiness.** In a target-free clone with no `target` directory, the launcher
-prints `PROFILE_BUILD_STARTED=1` before its mandatory clean build and
-`PROFILE_BUILD_READY=1` only after that build succeeds, before a profile root,
-session, or lease exists. The driver gives this phase its own reported build
-budget. Its unchanged lifecycle deadline begins only at `PROFILE_BUILD_READY`;
-it may not borrow build time, raise that deadline, or use a warmed artifact as
-clean-build evidence.
-
-Verified by: `cold-profile-readiness` removes the clone's `target`, records
-both build markers and the separate elapsed result, then runs the real PTY
-lifecycle. The test rejects a missing/late ready marker or build failure,
-asserts no disposable Zellij state exists during the build, and retains the
-committed metadata/readiness budget for the attached launch.
-
-### Captain-live (only after AC-O1 through AC-O7 pass)
+### Captain-live (only after AC-O1 through AC-O6 pass)
 
 **AC-I1 — a human can safely exercise real keys.** From an ordinary terminal,
 the captain runs the documented disposable-profile command, sees the attached
@@ -295,41 +232,37 @@ the kernel process-group or raw-input infrastructure claims.
 
 ## Test plan
 
-1. **First invalidating offline proof.** Add the driver handshake state before
-   changing the launcher. Exercise a real profile through a test-owned PTY
-   with test-only delayed session and delayed terminal-shell fixtures. The
-   fixtures may delay real process startup, but may not forge Zellij list or
-   dump output. Record the red result: the old path either fails at zero
-   terminals or sends its one-shot canary before the terminal shell can return
-   it.
-2. Implement the bounded real-state loop: exact session plus foreground PGID,
-   repeatedly one terminal, a raw canary observed in its fresh live dump, then
-   a same-pane/sole-terminal recheck. Re-run the delayed fixtures green; a
-   zero-terminal state must wait, a multiple-terminal final state must fail,
-   and an absent canary must name its phase and deadline.
-3. Add `PROFILE_BUILD_STARTED=1` immediately before the mandatory build and
-   `PROFILE_BUILD_READY=1` only after it succeeds. Add the target-free
-   clean-build test first: remove `target`, require the bounded markers, and
-   assert no temporary profile/session/lease exists. Start the unchanged
-   lifecycle clock only at the ready marker; record a red result if build time
-   still leaks into metadata readiness.
-4. Re-run the existing early-file, early-line, false-client, and mutable-lease
-   attacks. Make each driver fixture pass the build markers before it exercises
-   its original lease fault, so a missing build phase cannot mask an early-lease
-   failure. Verify that the publisher still emits only one immutable lease after
-   independent PGID/session readiness, with the existing exact schema and
-   without accepting or publishing the PTY canary.
-5. Re-run normal termination, forced launcher loss, and three fresh
-   foreground-PGID signal cases (`INT`, `TERM`, and `HUP`). Retain root, lease,
-   session, process-reap, present/missing standing-file, and exact hash checks.
-6. Re-run the no-TTY case and all bounded timeout/readiness regressions. Keep
-   the Zellij 0.44.3 and Python 3 preflights; missing prerequisites must fail
-   clearly, not produce a detached fallback.
-7. Assemble the revalidation packet: three independent focused lifecycle runs
-   with fresh roots/sessions/nonces, one target-free clean-build lifecycle,
-   the full shell suite, and the relevant Rust and Go suites. Return the same
-   validator to the packet only after every offline AC passes. Do not run
-   AC-I1 during this rework.
+1. Add the PTY-driver-focused lifecycle case first and run it against the
+   current background launcher. Its smallest red result is absence of the
+   nonce from live `dump-screen` after a raw master write; do not substitute
+   `action write-chars`, a transcript match, or a hand-authored dump.
+2. Make the smallest launcher change: terminal preflight, `set -m`, one
+   attached client job, immediate `fg`, and bounded job-group cleanup/reap.
+   Add the one-shot readiness publisher, but require it to remain silent until
+   the OS foreground-PGID observation and exact session readiness succeed.
+   Re-run the same test green, requiring both the kernel equality and
+   dump-screen nonce.
+3. Extend that focused process test to wait for `PROFILE_LEASE`, parse its JSON
+   externally, compare every field with the launch and OS observations, and
+   compare its completed digest before normal cleanup. It must reject an early,
+   duplicate, mutable, path-derived, or identity-overclaiming lease. It must
+   not attach a second client or use a marker pane.
+4. Rework the existing normal lifecycle case around the PTY driver. Verify
+   the existing layout/identity checks still use the disposable files, then
+   verify normal session termination, lease/root deletion, session deletion,
+   and present/missing standing-file snapshots.
+5. Run three isolated signal cases (`INT`, `TERM`, `HUP`) against the actual
+   foreground client PGID, plus the no-TTY failure case. Do not reuse a
+   possibly contaminated profile root or session name between cases; retain
+   bounded liveness diagnostics and prove that no lease survives either path.
+6. Run the focused shell suite and its existing timeout/readiness regressions,
+   then the relevant full shell suite. Zellij-dependent cases retain the exact
+   0.44.3 preflight and the PTY driver retains an explicit `python3`
+   preflight, so a missing prerequisite fails loudly.
+7. Do not run a captain-live drill as part of this ideation rework. After the
+   offline packet is green, AC-I1 remains a separate captain validation of the
+   resulting operator experience; it is never used to diagnose PTY, lease, or
+   cleanup infrastructure.
 
 ## Documentation change
 
@@ -340,10 +273,7 @@ Keep the existing isolation warning explicit: it never installs, rewrites, or
 restores standing Zellij configuration or layouts. Explain that
 `PROFILE_LEASE` is a test-harness handoff, not a user-facing identity or
 configuration interface. No user-facing production keybinding documentation
-changes in this task. The build markers, raw canary handshake, and timing
-phases are process-test internals; the documented ordinary command remains one
-foreground-attached invocation that builds before opening its disposable
-session.
+changes in this task.
 
 ## Out of scope
 
@@ -358,14 +288,6 @@ session.
   `$PROFILE_ROOT/bin/zaphod`; the CLI may not create clients or tear down this
   lease.
 - Executing a captain-live drill during this rework.
-- A profile-side input reader, readiness file, new keybinding, or second client
-  to acknowledge the canary. The canary belongs only to the test-owned PTY
-  driver and proves the ordinary sole terminal shell.
-- Changing the `ProfileLeaseV1` schema or making its publisher wait for the
-  canary; its existing foreground-PGID and exact-session gate remains the only
-  publication authority.
-- Extending the existing attached-lifecycle metadata deadline or treating a
-  warmed build artifact as evidence for the target-free clean-build case.
 
 ## Stage Report: ideation
 
@@ -451,30 +373,3 @@ validator; no captain-live drill was run.
    immutable-lease, cleanup, no-TTY, and global-isolation behavior intact while
    repairing the readiness path; re-run the full offline packet before asking
    the same validation reviewer to recheck it.
-
-**Captain reroute (2026-07-12) — reopen to ideation.** The captain requested a
-new design pass before another implementation attempt. Cycle 1's three findings
-remain binding, and the passing isolation and cleanup boundaries are preserved.
-
-**Cycle 2 (2026-07-12) — deterministic-readiness design.** The repair is a
-driver-owned condition loop that accepts a real raw canary only after it
-appears in a still-sole terminal's live dump. Explicit build start/ready
-markers give a target-free clean build its own bounded phase and leave the
-existing post-build lifecycle deadline intact. The lease publisher and all
-passing lifecycle/isolation boundaries remain unchanged.
-
-## Stage Report: ideation (cycle 3)
-
-- DONE: Reframe the rejected raw-PTY and cold-run metadata findings into one smallest deterministic readiness design.
-  The body replaces ECHO-only, one-shot input readiness with a bounded real-pane/raw-canary loop and separates build timing with `PROFILE_BUILD_STARTED`/`PROFILE_BUILD_READY`; workflow state validates.
-- DONE: Preserve the passing foreground-PGID, immutable-lease, cleanup, no-TTY, and standing-configuration boundaries.
-  The amendment keeps the publisher's OS/session gate, `ProfileLeaseV1`, group cleanup, terminal preflight, and file-state snapshots unchanged; validation evidence remains at `gates/foreground-attached-client-profile-validation.md`.
-- DONE: Specify the first invalidating offline proof and a revalidation packet without adding controller or managed-tab scope.
-  The first proof uses real delayed session/shell states and live Zellij inspection only; the packet requires three fresh focused runs, one target-free cold run, lifecycle/isolation regressions, and the existing full suites.
-
-### Summary
-
-The redesign treats a canary observed in a real terminal dump as readiness and
-treats terminal mode only as a diagnostic. It also makes cold compilation a
-separate, bounded pre-profile phase without changing the published lease or
-claiming that the offline packet is green.
