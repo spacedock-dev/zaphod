@@ -1,6 +1,6 @@
 ---
 title: Sprint 2 walking-skeleton staff coherence review
-status: backlog
+status: ideation
 source: captain direction 2026-07-12
 completed:
 verdict:
@@ -14,6 +14,7 @@ group: release-gate
 sprint-readiness: ready
 blocked-on:
 id: 9j214d92fg2vxa5wmapxxxbj
+started: 2026-07-12T01:58:05Z
 ---
 
 ## Problem
