@@ -348,3 +348,21 @@ permission event finishes settling, and it retains but never asserts foreign
 visible-screen evidence. Return only a stable post-grant readiness condition,
 a foreign-screen assertion, and repeated-smoke proof to the existing worktree,
 then resume the captain drill.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: Route the authoritative Subspace revise feedback into the validation artifact without changing product code or the implementation report.
+  The persisted round-1 fold is retained at `gates/zellij-managed-tab-controller-validation.decisions.jsonl`; the revised artifact answers both anchored comments while preserving its REJECTED recommendation and AC-I1 hold.
+- DONE: Explain why AC-O3 remains required for the fresh managed-tab journey.
+  It now states that an unrelated tab is only a fail-closed safety boundary for the session-shared runtime `Alt /` binding: no adoption, retrofit, or second product flow is implied.
+- DONE: Replace the hand-built captain bootstrap with the existing entry point wherever it supports the isolated profile.
+  The artifact now invokes `scripts/zellij-new-tab.sh` with its `ZELLIJ_*` roots and `--session`; it names the sole remaining gap—an attached no-pregrant disposable-session launcher—instead of duplicating entry logic.
+- DONE: Re-cite the revised validation evidence for every acceptance criterion.
+  AC-O1 → the artifact's successful selected-worktree native-entry evidence; AC-O2 → its retained `is_selectable` failure diff and settled-resident repair; AC-O3 → its unrelated-tab fail-closed safety explanation plus missing-screen assertion; AC-O4 → its success/failure/TERM cleanup evidence; AC-I1 → its explicit hold and entrypoint-based normal-consent path.
+
+### Summary
+
+The revised validation artifact keeps the same two narrow smoke findings but
+makes the user-facing boundary explicit: a new managed tab is the only
+positive path, while unrelated tabs are protected. It is ready for a fresh
+Subspace gate presentation; no code, 7h, 4d, custom PTY, or lease scope changed.
