@@ -792,19 +792,20 @@ layout in a disposable Zellij 0.44.3 session, renames it atomically, and repeats
 the identity check. A failed postflight restores the previous bytes or removes
 a new layout. The installer diagnoses keybind mismatches; it never edits them.
 
-Candidate testing uses
-`./scripts/zellij-worktree-test-profile.sh --cwd PATH`. The command builds its
-own checkout and creates one temporary root for config, the rendered Zaphod
-layout, the explicit-cwd fixture, plugin data, permissions, and a unique
-session. The profile's config and layout use one candidate URL and `rail "1"`.
-Normal exit, TERM, INT, or HUP deletes the session record and temporary root.
-Cleanup compares the existence and SHA-256 of the standing global config and
-layout; it reports mutation and never overwrites concurrent changes by trying
-to restore them.
+Candidate testing uses `./tests/zellij-tmux-smoke-test.sh` from the candidate
+worktree. The command first runs the real fresh-tab entry script against a
+disposable Zellij session, then restarts a Zellij client inside a dedicated
+tmux server with short isolated config, data, and socket roots. Literal tmux
+keys prove that foreign-tab `Alt /` is inert and that `Alt Shift z` creates a
+candidate rail. Native `list-panes` and `dump-layout` verify the candidate URL
+and pane state. Normal exit, TERM, INT, or HUP deletes the session, kills the
+tmux server, and removes the temporary root. Cleanup compares the existence
+and SHA-256 of the standing global config and layout; it reports mutation and
+never overwrites concurrent changes by trying to restore them.
 
 Use live Zellij state as the oracle. `action list-panes --json -a -g -t` proves
 pane IDs, counts, kinds, geometry, and cwd. `action dump-layout` proves the URL,
 configuration, and chrome that the server loaded. Generated KDL or a source
 grep cannot prove resident identity. Bracket every live drill with global
 config/layout hashes, and run unmerged j5 or later candidates only through the
-disposable profile. Never run a linked worktree's `install.sh`.
+tmux smoke harness. Never run a linked worktree's `install.sh`.

@@ -95,7 +95,7 @@ keybinds {
             }
         }
         bind "Alt Shift z" {
-            NewTab { layout "zaphod"; }
+            NewTab { layout "<ABSOLUTE_ZELLIJ_CONFIG_ROOT>/layouts/zaphod.kdl"; }
         }
     }
 }
@@ -107,8 +107,8 @@ rechecks identity. A failed postflight restores the previous layout bytes.
 Use live state—not the rendered file—as the final oracle:
 
 ```bash
-ZELLIJ_SESSION_NAME=<session> zellij action list-panes --json -a -g -t
-ZELLIJ_SESSION_NAME=<session> zellij action dump-layout
+zellij --session <session> action list-panes --json -a -g -t
+zellij --session <session> action dump-layout
 ```
 
 On an initialized Zaphod tab, exactly one sidebar should remain before and
@@ -125,9 +125,11 @@ To activate this checkout and create a fresh tab in an existing session, run:
 
 The command builds this checkout, renders its WASM URL into an inline layout,
 and creates exactly one new tab. It atomically updates only existing Zaphod
-keybind scopes in the selected config root: `Alt Shift z` creates the stored
-`zaphod` layout, and persistent `Alt /` is `NoOp`. It never changes an
-existing tab.
+keybind scopes in the selected config root: `Alt Shift z` natively creates
+that root's stored layout by absolute path, and persistent `Alt /` is `NoOp`.
+It never changes an existing tab. The absolute path matters: Zellij resolves
+the named `layout "zaphod"` form from its standing default config root, even
+when the session was launched with an isolated config root.
 
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail then installs a temporary, current-client `Alt /` route to its own
@@ -139,7 +141,13 @@ Use `ZELLIJ_CONFIG_DIR`, `ZELLIJ_CONFIG_FILE`, and `ZELLIJ_DATA_DIR` to run it
 against an isolated profile. The current invocation creates its tab at once;
 restart the Zellij server before relying on a newly written native keybind.
 
-The live test boundary is the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
+Run the real-key boundary with:
+
+```bash
+./tests/zellij-tmux-smoke-test.sh
+```
+
+It is the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
 
 ### Historical worktree profile
 
@@ -152,9 +160,10 @@ real-key candidate check.
 
 On first launch in each disposable profile, the pane shows a permission prompt
 (`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`,
-`Reconfigure`) — focus it and approve once; Zellij caches the grant only
-inside that profile's data root. `Reconfigure` changes only the current
-client's runtime keybinds; Zaphod does not save that route to disk.
+`Reconfigure`, `RunCommands`) — focus it and approve once; Zellij caches the
+grant only inside that profile's data root. `Reconfigure` changes only the
+current client's runtime keybinds; Zaphod does not save that route to disk.
+`RunCommands` is required only when a gate row floats `subspace-tui`.
 
 ## Status
 
@@ -177,4 +186,4 @@ and multiplexer drivers—see
   `$TMPDIR/zellij-<uid>/zellij-log/zellij.log` (permission denials, real
   compiles vs cache hits, wasm crashes)
 - Headless bench: `zellij attach bench --create-background`, then drive it
-  with `ZELLIJ_SESSION_NAME=bench zellij action …`
+  with `zellij --session bench action …`

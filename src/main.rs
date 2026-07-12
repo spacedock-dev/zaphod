@@ -795,6 +795,19 @@ impl Sidebar {
     }
 
     fn perform_toggle(&mut self) {
+        // Persistent config is deliberately NoOp. A pipe can nevertheless
+        // arrive through a stale per-client runtime binding, so the action
+        // itself—not only route installation—must require both the grant and
+        // this client's active resident route.
+        if !self.permissions_granted || !self.toggle_route_installed {
+            trace!(
+                self,
+                "perform_toggle ignored: permission={} route_installed={}",
+                self.permissions_granted,
+                self.toggle_route_installed
+            );
+            return;
+        }
         let active_tab = self.current_active_tab();
         trace!(
             self,
@@ -3408,20 +3421,16 @@ mod tests {
     }
 
     #[test]
-    fn repeat_press_keeps_the_in_flight_steer_armed() {
-        let mut sidebar = Sidebar::default();
-        sidebar.active_tab = Some(1);
+    fn repeat_press_is_swallowed_only_for_its_in_flight_tab() {
         let steer = PendingSteer {
             tab: 1,
             target: DockState::Undocked,
         };
-        sidebar.pending_steer = Some(steer);
-        sidebar.perform_toggle();
-        assert_eq!(sidebar.pending_steer, Some(steer));
-        // A press for another tab supersedes the parked steer.
-        sidebar.active_tab = Some(2);
-        sidebar.perform_toggle();
-        assert!(sidebar.pending_steer.is_none());
+        let now = Instant::now();
+        assert!(should_swallow_toggle(Some(1), Some(steer), None, now));
+        // A press for another tab is not the parked steer's bounce and the
+        // caller will supersede it before choosing its next action.
+        assert!(!should_swallow_toggle(Some(2), Some(steer), None, now));
     }
 
     #[test]
@@ -3689,6 +3698,46 @@ mod tests {
             args: BTreeMap::new(),
             is_private: false,
         }
+    }
+
+    fn sidebar_with_pending_foreign_steer() -> (Sidebar, PendingSteer) {
+        let pending = PendingSteer {
+            tab: 1,
+            target: DockState::Undocked,
+        };
+        let sidebar = Sidebar {
+            active_tab: Some(2),
+            own_tab: Some(2),
+            pending_steer: Some(pending),
+            ..Default::default()
+        };
+        (sidebar, pending)
+    }
+
+    #[test]
+    fn pregrant_toggle_pipe_is_inert_even_with_an_installed_route() {
+        // A runtime route leaked from another client must not let an
+        // unapproved client consume or mutate toggle work.
+        let (mut sidebar, pending) = sidebar_with_pending_foreign_steer();
+        sidebar.permissions_granted = false;
+        sidebar.toggle_route_installed = true;
+
+        sidebar.pipe(toggle());
+
+        assert_eq!(sidebar.pending_steer, Some(pending));
+    }
+
+    #[test]
+    fn unrouted_header_click_is_inert_even_after_permission() {
+        // The visible header follows the same fail-closed route ownership as
+        // Alt /; permission alone cannot make it a layout mutator.
+        let (mut sidebar, pending) = sidebar_with_pending_foreign_steer();
+        sidebar.permissions_granted = true;
+        sidebar.toggle_route_installed = false;
+
+        sidebar.handle_click(1); // header line
+
+        assert_eq!(sidebar.pending_steer, Some(pending));
     }
 
     #[test]

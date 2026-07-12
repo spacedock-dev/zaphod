@@ -50,6 +50,7 @@ write_fake_zellij() {
         'config_dir=""' \
         'config_file=""' \
         'data_dir=""' \
+        'session=""' \
         'while [ "$#" -gt 0 ]; do' \
         '    case "$1" in' \
         '        --config-dir)' \
@@ -64,6 +65,10 @@ write_fake_zellij() {
         '            data_dir="${2:?missing --data-dir value}"' \
         '            shift 2' \
         '            ;;' \
+        '        --session)' \
+        '            session="${2:?missing --session value}"' \
+        '            shift 2' \
+        '            ;;' \
         '        --version)' \
         '            printf "version\\t%s\\t%s\\t%s\\t%s\\n" "$config_dir" "$config_file" "$data_dir" "${ZELLIJ_SESSION_NAME:-}" >> "$FAKE_ZELLIJ_CALLS"' \
         '            printf "zellij 0.44.3\\n"' \
@@ -76,6 +81,7 @@ write_fake_zellij() {
         '            ;;' \
         '        action)' \
         '            [ "${2:-}" = "new-tab" ] || { printf "unexpected action invocation\\n" >&2; exit 64; }' \
+        '            [ -n "$session" ] || { printf "missing explicit --session in fake zellij invocation\\n" >&2; exit 64; }' \
         '            shift 2' \
         '            if [ "${1:-}" != "--name" ] || [ -z "${2:-}" ]; then' \
         '                printf "missing --name in fake zellij invocation\\n" >&2' \
@@ -87,8 +93,8 @@ write_fake_zellij() {
         '                printf "missing inline layout in fake zellij invocation\\n" >&2' \
         '                exit 64' \
         '            fi' \
-        '            printf "action-new-tab\\t%s\\t%s\\t%s\\t%s\\n" "$config_dir" "$config_file" "$data_dir" "${ZELLIJ_SESSION_NAME:-}" >> "$FAKE_ZELLIJ_CALLS"' \
-        '            printf "%s\\n" "${ZELLIJ_SESSION_NAME:-}" > "$FAKE_ZELLIJ_SESSION"' \
+        '            printf "action-new-tab\\t%s\\t%s\\t%s\\t%s\\n" "$config_dir" "$config_file" "$data_dir" "$session" >> "$FAKE_ZELLIJ_CALLS"' \
+        '            printf "%s\\n" "$session" > "$FAKE_ZELLIJ_SESSION"' \
         '            printf "%s\\n" "$name" > "$FAKE_ZELLIJ_NAME"' \
         '            printf "%s" "$2" > "$FAKE_ZELLIJ_LAYOUT"' \
         '            count=0' \
@@ -166,6 +172,44 @@ write_routable_config() {
         '        bind "Alt Shift x" { WriteChars "unrelated normal binding"; }' \
         '    }' \
         '}' > "$config_file"
+}
+
+write_zaphod_routes_without_toggle() {
+    local config_file="$1"
+    printf '%s\n' \
+        'keybinds clear-defaults=true {' \
+        '    locked {' \
+        '        bind "Alt ." {' \
+        '            MessagePlugin "file:/stale/locked/zellij-sidebar.wasm" {' \
+        '                name "navigate"' \
+        '                floating true' \
+        '                rail "1"' \
+        '            }' \
+        '        }' \
+        '    }' \
+        '    shared_except "locked" {' \
+        '        bind "Alt ." {' \
+        '            MessagePlugin "file:/stale/shared/zellij-sidebar.wasm" {' \
+        '                name "navigate"' \
+        '                floating true' \
+        '                rail "1"' \
+        '            }' \
+        '        }' \
+        '    }' \
+        '}' > "$config_file"
+}
+
+write_zaphod_routes_with_conflicting_toggle() {
+    local config_file="$1" candidate
+    write_zaphod_routes_without_toggle "$config_file"
+    candidate="$config_file.conflict"
+    sed '$d' "$config_file" > "$candidate"
+    printf '%s\n' \
+        '    normal {' \
+        '        bind "Alt /" { NewPane; }' \
+        '    }' \
+        '}' >> "$candidate"
+    mv "$candidate" "$config_file"
 }
 
 setup_fixture() {
@@ -345,8 +389,11 @@ test_new_tab_activates_isolated_roots() {
     fi
     [ "$(grep -Fc 'bind "Alt Shift z"' "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
         fail "activation did not install one native keybind in each Zaphod scope"
-    [ "$(grep -Fc 'layout "zaphod";' "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
-        fail "native keybind did not route through the stored Zaphod layout"
+    [ "$(grep -Fc "layout \"$FIXTURE_CONFIG_DIR/layouts/zaphod.kdl\";" "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
+        fail "native keybind did not route through the selected Zaphod layout"
+    if grep -F 'layout "zaphod";' "$FIXTURE_CONFIG_FILE" >/dev/null; then
+        fail "native keybind left a named layout that can resolve from the standing global root"
+    fi
     [ "$(zaphod_keybind_scopes "$FIXTURE_CONFIG_FILE")" = $'locked\nshared_except_locked' ] ||
         fail "activation routed Alt Shift z outside the scopes that own Zaphod"
     [ "$(grep -Fc 'bind "Alt /" { NoOp; }' "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
@@ -363,6 +410,76 @@ test_new_tab_activates_isolated_roots() {
     assert_temporary_files_cleaned
 
     echo "PASS: fresh tab activates only the requested isolated Zellij roots"
+}
+
+test_repeated_activation_is_idempotent() {
+    local root expected_url
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    expected_url="file:$FIXTURE_PHYSICAL/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+
+    run_entry --session WORK --name 'Zaphod first' > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR" || {
+        sed -n '1,200p' "$FIXTURE_ERROR" >&2
+        fail "first fresh-tab activation failed"
+    }
+    run_entry --session WORK --name 'Zaphod second' > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR" || {
+        sed -n '1,200p' "$FIXTURE_ERROR" >&2
+        fail "second fresh-tab activation failed"
+    }
+
+    [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = '2' ] ||
+        fail "repeated activation did not create exactly one tab per invocation"
+    [ "$(grep -Fc 'bind "Alt /" { NoOp; }' "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
+        fail "repeated activation did not retain exactly one fail-closed toggle per Zaphod scope"
+    [ "$(grep -Fc 'bind "Alt Shift z"' "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
+        fail "repeated activation duplicated the native fresh-tab binding"
+    zaphod_validate_message_plugin_identity "$FIXTURE_CONFIG_FILE" "$expected_url" ||
+        fail "repeated activation lost the candidate Zaphod route"
+    assert_temporary_files_cleaned
+
+    echo "PASS: repeated fresh-tab activation is idempotent"
+}
+
+test_missing_legacy_toggle_is_normalized_to_noop() {
+    local root
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    write_zaphod_routes_without_toggle "$FIXTURE_CONFIG_FILE"
+
+    run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR" || {
+        sed -n '1,200p' "$FIXTURE_ERROR" >&2
+        fail "activation without a legacy toggle route failed"
+    }
+
+    [ "$(grep -Fc 'bind "Alt /" { NoOp; }' "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
+        fail "activation did not add one fail-closed toggle to each Zaphod scope"
+    [ "$(zaphod_noop_toggle_scopes "$FIXTURE_CONFIG_FILE")" = $'locked\nshared_except_locked' ] ||
+        fail "activation added a fail-closed toggle outside its Zaphod scopes"
+
+    echo "PASS: missing legacy toggle routes normalize to fail-closed NoOp"
+}
+
+test_conflicting_non_zaphod_toggle_fails_before_writes() {
+    local root rc
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    write_zaphod_routes_with_conflicting_toggle "$FIXTURE_CONFIG_FILE"
+    printf '%s\n' 'standing layout sentinel' > "$FIXTURE_LAYOUT"
+    record_initial_file_bytes
+
+    set +e
+    run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
+    rc=$?
+    set -e
+    [ "$rc" -ne 0 ] || fail "conflicting non-Zaphod Alt / route unexpectedly succeeded"
+    assert_activation_rolled_back
+    [ ! -e "$FAKE_ZELLIJ_NEW_TAB_COUNT" ] ||
+        fail "conflicting non-Zaphod Alt / route reached new-tab"
+
+    echo "PASS: conflicting non-Zaphod Alt / route fails before writes"
 }
 
 test_missing_zaphod_route_fails_before_writes() {
@@ -478,6 +595,9 @@ test_default_data_root_is_explicit() {
 }
 
 test_new_tab_activates_isolated_roots
+test_repeated_activation_is_idempotent
+test_missing_legacy_toggle_is_normalized_to_noop
+test_conflicting_non_zaphod_toggle_fails_before_writes
 test_missing_zaphod_route_fails_before_writes
 test_new_tab_failure_rolls_back_activation
 test_new_tab_signal_rolls_back_activation

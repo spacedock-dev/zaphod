@@ -139,17 +139,29 @@ WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 [ -f "$WASM_PATH" ] || fail "wasm not found after build: $WASM_PATH"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive a canonical URL for $WASM_PATH"
+LAYOUT_PATH_KDL="$(zaphod_kdl_escape "$TARGET_LAYOUT")" ||
+    fail "could not derive a KDL-safe path for $TARGET_LAYOUT"
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
     fail "could not create a temporary Zaphod layout directory"
 RENDERED_LAYOUT="$TEMP_ROOT/zaphod.kdl"
-CANDIDATE_CONFIG="$TEMP_ROOT/config.kdl"
+CHECK_CONFIG="$TEMP_ROOT/config.kdl"
+CANDIDATE_CONFIG="$TEMP_ROOT/candidate-config.kdl"
 zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT"
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
-awk -v wasm_url="$WASM_URL" -f "$SCRIPT_DIR/zellij-config-activate.awk" \
+awk -v wasm_url="$WASM_URL" -v layout_path="$LAYOUT_PATH_KDL" \
+    -f "$SCRIPT_DIR/zellij-config-activate.awk" \
     "$CONFIG_FILE" > "$CANDIDATE_CONFIG"
 zaphod_validate_message_plugin_identity "$CANDIDATE_CONFIG" "$WASM_URL"
-zellij_check_config "$CANDIDATE_CONFIG"
+# Zellij resolves a NewTab layout while parsing the config. Validate against
+# the rendered candidate first; the final absolute target is checked again
+# after its atomic layout install below.
+RENDERED_LAYOUT_PATH_KDL="$(zaphod_kdl_escape "$RENDERED_LAYOUT")" ||
+    fail "could not derive a KDL-safe path for $RENDERED_LAYOUT"
+awk -v wasm_url="$WASM_URL" -v layout_path="$RENDERED_LAYOUT_PATH_KDL" \
+    -f "$SCRIPT_DIR/zellij-config-activate.awk" \
+    "$CONFIG_FILE" > "$CHECK_CONFIG"
+zellij_check_config "$CHECK_CONFIG"
 
 mkdir -p "$LAYOUT_DIR"
 CONFIG_TEMP_BASE="$(mktemp "$CONFIG_DIR/.zaphod-config.XXXXXX")" ||
@@ -182,7 +194,7 @@ zaphod_validate_message_plugin_identity "$CONFIG_FILE" "$WASM_URL"
 zaphod_validate_layout_identity "$TARGET_LAYOUT" "$WASM_URL"
 zellij_cmd setup --check >/dev/null
 
-TAB_ID="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd action new-tab \
+TAB_ID="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
     --name "$TAB_NAME" --layout-string "$(cat "$RENDERED_LAYOUT")")"
 
 ROLLBACK_NEEDED=0

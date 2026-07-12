@@ -74,6 +74,26 @@ function is_alt_slash_bind(code) {
     return code ~ /^[ \t]*bind[ \t]+"Alt \/"([ \t{;]|$)/
 }
 
+function is_inline_noop_alt_slash(code) {
+    return code ~ /^[ \t]*bind[ \t]+"Alt \/"[ \t]*\{[ \t]*NoOp[ \t]*;?[ \t]*\}[ \t]*$/
+}
+
+function code_has_nonbrace_content(code,    normalized) {
+    normalized = code
+    gsub(/[{}]/, "", normalized)
+    sub(/^[ \t]+/, "", normalized)
+    sub(/[ \t]+$/, "", normalized)
+    return normalized != ""
+}
+
+function code_is_only_noop_action(code,    normalized) {
+    normalized = code
+    gsub(/[{}]/, "", normalized)
+    sub(/^[ \t]+/, "", normalized)
+    sub(/[ \t]+$/, "", normalized)
+    return normalized == "NoOp" || normalized == "NoOp;"
+}
+
 function is_zaphod_message_plugin(code) {
     return code ~ /MessagePlugin[ \t]+"[^"]*zellij-sidebar\.wasm([^"]*)?"/
 }
@@ -113,7 +133,7 @@ function clear_scope_buffer(    line_number) {
 
 function emit_native_keybind(indent) {
     print indent "bind \"Alt Shift z\" {"
-    print indent "    NewTab { layout \"zaphod\"; }"
+    print indent "    NewTab { layout \"" layout_path "\"; }"
     print indent "}"
 }
 
@@ -121,7 +141,7 @@ function emit_fail_closed_toggle(indent) {
     print indent "bind \"Alt /\" { NoOp; }"
 }
 
-function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod_count, alt_shift_z_count, plugin_active, plugin_depth, plugin_rail_seen, plugin_indent, skip_bind, skip_bind_depth, target_indent, bind_start, bind_depth, bind_has_zaphod, bind_line, bind_code, bind_index, noop_bind_count) {
+function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod_count, alt_shift_z_count, plugin_active, plugin_depth, plugin_rail_seen, plugin_indent, skip_bind, skip_bind_depth, target_indent, bind_start, bind_depth, bind_has_zaphod, bind_has_noop, bind_has_other_action, bind_line, bind_code, bind_index, noop_bind_count) {
     scope_has_zaphod = 0
     zaphod_count = 0
     alt_shift_z_count = 0
@@ -159,6 +179,74 @@ function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod
         die("unterminated Zaphod MessagePlugin block")
     }
 
+    # A MessagePlugin action loads a floating pane when no matching plugin is
+    # running. Replace only the Zaphod-owned Alt / binding with NoOp before
+    # the generic URL/rail transform below sees its inner plugin block.
+    noop_bind_count = 0
+    for (line_number = 1; line_number <= scope_line_count; line_number++) {
+        line = scope_lines[line_number]
+        code = code_before_comment(line)
+        if (!is_alt_slash_bind(code)) {
+            continue
+        }
+        bind_start = line_number
+        bind_depth = brace_delta(line)
+        if (bind_depth == 0) {
+            if (is_inline_noop_alt_slash(code)) {
+                if (scope_has_zaphod && ++noop_bind_count > 1) {
+                    die("multiple Zaphod Alt / bindings in one keybind scope")
+                }
+                continue
+            }
+            die("Alt / is bound to a non-Zaphod action")
+        }
+        if (bind_depth < 0) {
+            die("malformed Alt / binding")
+        }
+        bind_has_zaphod = is_zaphod_message_plugin(code)
+        bind_has_noop = 0
+        bind_has_other_action = 0
+        line_number++
+        while (line_number <= scope_line_count && bind_depth > 0) {
+            bind_line = scope_lines[line_number]
+            bind_code = code_before_comment(bind_line)
+            if (is_zaphod_message_plugin(bind_code)) {
+                bind_has_zaphod = 1
+            }
+            if (code_has_nonbrace_content(bind_code)) {
+                if (code_is_only_noop_action(bind_code)) {
+                    bind_has_noop = 1
+                } else {
+                    bind_has_other_action = 1
+                }
+            }
+            bind_depth += brace_delta(bind_line)
+            line_number++
+        }
+        if (bind_depth != 0) {
+            die("unterminated Alt / binding")
+        }
+        if (bind_has_zaphod) {
+            if (!scope_has_zaphod) {
+                die("Zaphod Alt / binding escaped its owning keybind scope")
+            }
+            if (++noop_bind_count > 1) {
+                die("multiple Zaphod Alt / bindings in one keybind scope")
+            }
+            replace_with_noop[bind_start] = 1
+            for (bind_index = bind_start; bind_index < line_number; bind_index++) {
+                skip_scope_line[bind_index] = 1
+            }
+        } else if (bind_has_noop && !bind_has_other_action) {
+            if (scope_has_zaphod && ++noop_bind_count > 1) {
+                die("multiple Zaphod Alt / bindings in one keybind scope")
+            }
+        } else {
+            die("Alt / is bound to a non-Zaphod action")
+        }
+        line_number--
+    }
+
     if (!scope_has_zaphod) {
         if (alt_shift_z_count > 0) {
             die("Alt Shift z is already bound outside a Zaphod keybind scope")
@@ -174,48 +262,6 @@ function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod
 
     routed_scope_count++
     target_indent = leading_whitespace(scope_lines[1]) "    "
-
-    # A MessagePlugin action loads a floating pane when no matching plugin is
-    # running. Replace only the Zaphod-owned Alt / binding with NoOp before
-    # the generic URL/rail transform below sees its inner plugin block.
-    noop_bind_count = 0
-    for (line_number = 1; line_number <= scope_line_count; line_number++) {
-        line = scope_lines[line_number]
-        code = code_before_comment(line)
-        if (!is_alt_slash_bind(code)) {
-            continue
-        }
-        bind_start = line_number
-        bind_depth = brace_delta(line)
-        if (bind_depth <= 0) {
-            die("Alt / binding must use a multiline block")
-        }
-        bind_has_zaphod = is_zaphod_message_plugin(code)
-        line_number++
-        while (line_number <= scope_line_count && bind_depth > 0) {
-            bind_line = scope_lines[line_number]
-            bind_code = code_before_comment(bind_line)
-            if (is_zaphod_message_plugin(bind_code)) {
-                bind_has_zaphod = 1
-            }
-            bind_depth += brace_delta(bind_line)
-            line_number++
-        }
-        if (bind_depth != 0) {
-            die("unterminated Alt / binding")
-        }
-        if (bind_has_zaphod) {
-            noop_bind_count++
-            if (noop_bind_count > 1) {
-                die("multiple Zaphod Alt / bindings in one keybind scope")
-            }
-            replace_with_noop[bind_start] = 1
-            for (bind_index = bind_start; bind_index < line_number; bind_index++) {
-                skip_scope_line[bind_index] = 1
-            }
-        }
-        line_number--
-    }
 
     plugin_active = 0
     plugin_depth = 0
@@ -237,6 +283,9 @@ function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod
         }
 
         if (line_number == scope_line_count) {
+            if (noop_bind_count == 0) {
+                emit_fail_closed_toggle(target_indent)
+            }
             emit_native_keybind(target_indent)
             print line
             continue
@@ -296,6 +345,12 @@ function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod
         }
 
         print line
+    }
+}
+
+BEGIN {
+    if (layout_path == "") {
+        die("Zaphod layout path is required")
     }
 }
 

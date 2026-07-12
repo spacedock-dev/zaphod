@@ -185,9 +185,10 @@ sprint plan instead.
 - **Dogfood posture.** The historical sprint-0 pipe-unblock work established
   the rail's visible-not-blocking safety baseline. Keep that behavior in every
   current task. `install.sh` points the global layout only at the primary
-  checkout artifact. Unmerged hot-swap and live validation use
-  `scripts/zellij-worktree-test-profile.sh`; they never repoint standing global
-  config or layout files.
+  checkout artifact. Unmerged candidate live validation uses
+  `./tests/zellij-tmux-smoke-test.sh` from the candidate worktree; it drives
+  Zellij through a disposable tmux server and isolated config/data/socket
+  roots, never standing global config or layout files.
 - **Park-for-demo is correct posture.** When a task's next step is CL's live
   demo, parking it demo-ready and waiting for CL's window is right — not a
   stall. The FO keeps other tasks moving meanwhile.
