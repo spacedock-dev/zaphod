@@ -30,8 +30,10 @@ stages:
 
 Tracks Zaphod delivery work. The authoritative sequence is
 `docs/roadmap.md`; `docs/zaphod-workspace-architecture.md` defines the
-long-term boundary, and `docs/plan-agent-rail.md` records historical prototype
-work. The current per-tab rail is a product baseline, not disposable scaffolding.
+long-term boundary; and
+`docs/archive/plan-agent-rail-prototype-2026-07-07.md` records historical
+prototype work. The current per-tab rail is a product baseline, not disposable
+scaffolding.
 
 Each task must advance one operator outcome or close a measured failure in an
 existing outcome. The workflow remains its own dogfood tenant: its validation
@@ -121,8 +123,8 @@ a test plan matching the AC's level of abstraction.
   `docs/zaphod-workspace-architecture.md` for durable product boundaries;
   the shipped baseline in `README.md`; `SPEC.md` landmines;
   `docs/docking-approach.md`; and relevant prototype records. Historical
-  `docs/plan-agent-rail.md` decisions are evidence, not binding product
-  architecture.
+  `docs/archive/plan-agent-rail-prototype-2026-07-07.md` decisions are
+  evidence, not binding product architecture.
 - **Outputs:** entity body filled: Problem / Proposed approach / Acceptance criteria with `Verified by:` clauses / Test plan / Out of scope; ACs split into **offline** (agent-reproducible) and **interactive** (settled only by CL's live demo); the task's riskiest unproven mechanism named, with the smallest end-to-end check that would invalidate the design listed first in the test plan — or the auditable negative `no spike needed: {the proven mechanisms it relies on}` on the record; when the task changes user-visible behavior (keybinds, rows, layout), a concrete doc diff proposed in the body and reviewed at this gate.
 - **Good:** at least one AC measures the end value the task exists for, against an independent baseline that can move the wrong way (a count, a timing, a behavior, resulting on-disk state) — a mechanism-only AC counts only when paired with the value-measuring AC it serves; every AC's expected value comes from outside the file under test; fixtures specified in zellij's real single-line dump shape where dumps are involved; the design names which existing pure functions it extends.
 - **Bad:** an AC provable only by reviewing the entity's own prose; a string/substring/regex match over a file the implementer also writes (a tautology — the check polices its own author); a design that reaches beyond the task's sprint exit criterion; inventing new mechanisms when the spike already proved one.
