@@ -73,10 +73,10 @@ struct Sidebar {
     // The tab whose deferred steer last fired, and when: repeat presses for
     // it inside TOGGLE_COOLDOWN are swallowed as bounce.
     toggle_cooldown: Option<(usize, Instant)>,
-    // The currently visible tiled rail owns this client's temporary Alt /
-    // route. Visibility loss clears this flag so a later return rebinds the
-    // route to this resident instead of an earlier tab's resident.
-    toggle_route_installed: bool,
+    // We requested this client's temporary Alt / route while the rail was
+    // visible. Reconfigure has no acknowledgement, so this only prevents
+    // duplicate requests; it never authorizes a later pipe.
+    toggle_route_requested: bool,
     // The last render width, used to gate status polling: an undocked sliver
     // has no room to show status, so it skips the poll.
     last_cols: usize,
@@ -439,7 +439,7 @@ impl ZellijPlugin for Sidebar {
             }
             Event::Visible(visible) => {
                 if !visible {
-                    self.toggle_route_installed = false;
+                    self.toggle_route_requested = false;
                 } else {
                     self.route_toggle_to_self_if_active();
                 }
@@ -607,9 +607,21 @@ impl ZellijPlugin for Sidebar {
         if pipe_message.name != "toggle" {
             return false;
         }
-        // Only a visible, tiled resident installs a MessagePluginId route.
-        // Any other delivery is inert: it must not turn into deferred entry
-        // work after a later manifest arrives.
+        // `reconfigure()` has no acknowledgement. Receipt of this direct
+        // keybind pipe is the evidence that a runtime route reached us; only
+        // the active tiled resident may consume it. Any other delivery is
+        // inert and must not turn into deferred entry work.
+        let active_tab = self.current_active_tab();
+        if !should_accept_observed_toggle_pipe(
+            self.permissions_granted,
+            &pipe_message.source,
+            self.own_floating,
+            self.own_tab,
+            active_tab,
+        ) {
+            trace!(self, "pipe toggle ignored: not an observed active tiled keybind route");
+            return false;
+        }
         trace!(self, "pipe toggle acting");
         self.perform_toggle();
         false
@@ -687,7 +699,7 @@ impl ZellijPlugin for Sidebar {
 impl Sidebar {
     fn route_toggle_to_self_if_active(&mut self) {
         if !should_route_toggle_to_self(
-            self.toggle_route_installed,
+            self.toggle_route_requested,
             self.permissions_granted,
             self.own_floating,
             self.own_tab,
@@ -704,7 +716,7 @@ impl Sidebar {
         // This runtime-only `MessagePluginId` route names this already-loaded
         // pane directly, so a foreign tab can never bootstrap another one.
         reconfigure(runtime_toggle_keybind_kdl(self.plugin_id), false);
-        self.toggle_route_installed = true;
+        self.toggle_route_requested = true;
     }
 
     fn current_active_tab(&mut self) -> Option<usize> {
@@ -745,7 +757,15 @@ impl Sidebar {
 
     fn handle_click(&mut self, line: isize) {
         match decide_rail_click(line, &self.rows, &self.sessions, &self.gates, &self.pane_cwds) {
-            ClickAction::ToggleDock => self.perform_toggle(),
+            ClickAction::ToggleDock => {
+                // A local click is not a route acknowledgement. It remains a
+                // rail-local convenience after the same visible resident has
+                // requested its route; observed keybind pipes use the stricter
+                // receipt-based gate above.
+                if self.permissions_granted && self.toggle_route_requested {
+                    self.perform_toggle();
+                }
+            }
             ClickAction::FocusPane(id) => {
                 // A click-through during nav mode must also leave nav:
                 // focus moves to the clicked pane, and a latched nav_mode
@@ -795,19 +815,10 @@ impl Sidebar {
     }
 
     fn perform_toggle(&mut self) {
-        // Persistent config is deliberately NoOp. A pipe can nevertheless
-        // arrive through a stale per-client runtime binding, so the action
-        // itself—not only route installation—must require both the grant and
-        // this client's active resident route.
-        if !self.permissions_granted || !self.toggle_route_installed {
-            trace!(
-                self,
-                "perform_toggle ignored: permission={} route_installed={}",
-                self.permissions_granted,
-                self.toggle_route_installed
-            );
-            return;
-        }
+        // Callers establish authorization before arriving here. In particular,
+        // a literal Alt / pipe is admitted only after we observe a keybind
+        // delivery to this active tiled resident; a local request flag never
+        // substitutes for that evidence.
         let active_tab = self.current_active_tab();
         trace!(
             self,
@@ -1044,14 +1055,32 @@ fn runtime_toggle_keybind_kdl(plugin_id: u32) -> String {
 }
 
 fn should_route_toggle_to_self(
-    route_installed: bool,
+    route_requested: bool,
     permissions_granted: bool,
     own_floating: bool,
     own_tab: Option<usize>,
     active_tab: Option<usize>,
 ) -> bool {
-    !route_installed
+    !route_requested
         && permissions_granted
+        && !own_floating
+        && own_tab.is_some()
+        && own_tab == active_tab
+}
+
+// A runtime route has no acknowledgement. For a literal Alt /, the first
+// trustworthy evidence is the keybind pipe itself. It is still safe only when
+// the recipient is the active tab's tiled rail; a CLI/plugin pipe, floating
+// rail, unknown tab, or stale active-tab view must remain inert.
+fn should_accept_observed_toggle_pipe(
+    permissions_granted: bool,
+    source: &PipeSource,
+    own_floating: bool,
+    own_tab: Option<usize>,
+    active_tab: Option<usize>,
+) -> bool {
+    permissions_granted
+        && matches!(source, PipeSource::Keybind)
         && !own_floating
         && own_tab.is_some()
         && own_tab == active_tab
@@ -2834,6 +2863,41 @@ mod tests {
     }
 
     #[test]
+    fn observed_active_tiled_keybind_pipe_is_authorized_without_a_route_flag() {
+        // `reconfigure()` has no acknowledgement. The actual keybind pipe is
+        // the authorization evidence: once it arrives, the active tiled rail
+        // may toggle even if no local "route installed" flag was set.
+        assert!(should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Keybind,
+            false,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Cli("not-a-keybind".to_owned()),
+            false,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Keybind,
+            true,
+            Some(3),
+            Some(3)
+        ));
+        assert!(!should_accept_observed_toggle_pipe(
+            true,
+            &PipeSource::Keybind,
+            false,
+            Some(3),
+            Some(4)
+        ));
+    }
+
+    #[test]
     fn only_an_active_tiled_rail_can_install_the_runtime_toggle_route() {
         assert!(should_route_toggle_to_self(
             false,
@@ -3715,12 +3779,12 @@ mod tests {
     }
 
     #[test]
-    fn pregrant_toggle_pipe_is_inert_even_with_an_installed_route() {
+    fn pregrant_toggle_pipe_is_inert_even_with_a_requested_route() {
         // A runtime route leaked from another client must not let an
         // unapproved client consume or mutate toggle work.
         let (mut sidebar, pending) = sidebar_with_pending_foreign_steer();
         sidebar.permissions_granted = false;
-        sidebar.toggle_route_installed = true;
+        sidebar.toggle_route_requested = true;
 
         sidebar.pipe(toggle());
 
@@ -3733,7 +3797,7 @@ mod tests {
         // Alt /; permission alone cannot make it a layout mutator.
         let (mut sidebar, pending) = sidebar_with_pending_foreign_steer();
         sidebar.permissions_granted = true;
-        sidebar.toggle_route_installed = false;
+        sidebar.toggle_route_requested = false;
 
         sidebar.handle_click(1); // header line
 
