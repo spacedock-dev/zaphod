@@ -1,1 +1,1 @@
-zellij pipe --name agent-event --args recipient-pane-id=2 -- \{\"kind\":\"session\"\,\"id\":\"bb-recipient-isolation\"\,\"cwd\":\"/tmp/bbri.JlpuVv/same-cwd\"\,\"agent\":\"fixture\"\,\"state\":\"working\"\,\"summary\":\"BB_RECIPIENT_MARKER\"\,\"ts\":\"2026-07-13T00:00:00Z\"\} 
+zellij pipe --name agent-event --args recipient-pane-id=2 -- \{\"kind\":\"session\"\,\"id\":\"bb-recipient-isolation\"\,\"cwd\":\"/tmp/bbri.JlpuVv/same-cwd\"\,\"agent\":\"fixture\"\,\"state\":\"working\"\,\"summary\":\"BB_RECIPIENT_MARKER\"\,\"ts\":\"2026-07-13T00:00:00Z\"\}

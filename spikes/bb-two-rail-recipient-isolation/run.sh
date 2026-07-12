@@ -140,8 +140,7 @@ BYSTANDER_TAB_POSITION="$(jq -er --argjson rail "$BYSTANDER_RAIL_ID" '[.[] | sel
 [ "$TARGET_RAIL_ID" != "$BYSTANDER_RAIL_ID" ] && [ "$TARGET_TAB_ID" != "$BYSTANDER_TAB_ID" ] || fail "identity did not separate two rails"
 
 PAYLOAD="{\"kind\":\"session\",\"id\":\"bb-recipient-isolation\",\"cwd\":\"$SAME_CWD\",\"agent\":\"fixture\",\"state\":\"working\",\"summary\":\"BB_RECIPIENT_MARKER\",\"ts\":\"2026-07-13T00:00:00Z\"}"
-printf '%q ' zellij pipe --name agent-event --args "recipient-pane-id=$TARGET_RAIL_ID" -- "$PAYLOAD" > "$ROOT/pipe.argv"
-printf '\n' >> "$ROOT/pipe.argv"
+printf 'zellij pipe --name agent-event --args recipient-pane-id=%s -- %q\n' "$TARGET_RAIL_ID" "$PAYLOAD" > "$ROOT/pipe.argv"
 zellij_session pipe --name agent-event --args "recipient-pane-id=$TARGET_RAIL_ID" -- "$PAYLOAD" > "$ROOT/pipe.stdout" 2>"$ROOT/pipe.stderr"
 sleep 0.20
 capture_tab "$TARGET_TAB_POSITION" target
