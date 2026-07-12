@@ -1,11 +1,11 @@
 ---
 id: 7hm8rw9kzp9m2chdmbe721qr
 title: Foreground attached-client disposable Zellij profile
-status: validation
+status: implementation
 source: managed-view roadmap Sprint 1 entry gate, senior staff review 2026-07-11
 started: 2026-07-11T05:09:21Z
 completed:
-verdict: PASSED
+verdict: REJECTED
 score: 1.0
 worktree: .worktrees/spacedock-ensign-foreground-attached-client-profile
 issue:
@@ -356,3 +356,20 @@ passed when the lifecycle reached readiness, but AC-O1 cannot be claimed after
 the observed zero-terminal and absent-canary failures. A target-free clone also
 failed to emit profile metadata within the committed readiness window on this
 validator; no captain-live drill was run.
+
+### Feedback Cycles
+
+**Cycle 1 (2026-07-12) — REJECTED at validation, routed to implementation.**
+
+1. **AC-O1 readiness is not deterministic.** Repair the raw-PTY lifecycle so
+   repeated fresh runs always discover exactly one live terminal and observe
+   the nonce in its real `dump-screen`; do not accept an ECHO-off condition as
+   the only input-readiness proof.
+2. **Cold-run metadata timing must be bounded and reproducible.** Diagnose the
+   target-free clone's failure to emit `PROFILE_ROOT` inside the committed
+   readiness window without weakening the timeout or masking build/startup
+   delay.
+3. **Preserve the validated boundaries.** Keep the passing foreground-PGID,
+   immutable-lease, cleanup, no-TTY, and global-isolation behavior intact while
+   repairing the readiness path; re-run the full offline packet before asking
+   the same validation reviewer to recheck it.
