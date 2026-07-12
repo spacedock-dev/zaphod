@@ -5,8 +5,8 @@ source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
 sprint-readiness: ready
-blocked-on: v1-gate-origin-contract-fixture-bundle-zellij-tab-identity-authority-and-7h-validation-before-implementation
-blocked-reason: Ideation is captain-approved now. Implementation needs the gate skill's accepted origin/fixture contract, an accepted Zellij tab-identity authority, and the passed disposable-profile gate for its multi-tab drill.
+blocked-on:
+blocked-reason:
 score: 0.97
 started: 2026-07-12T00:03:20Z
 completed:
