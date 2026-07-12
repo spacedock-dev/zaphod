@@ -305,6 +305,14 @@ managed-tab-only `Alt /`, and proof that foreign tabs remain unchanged.
   `88fac36` makes receipt of an active tiled `PipeSource::Keybind`, not the unacknowledged `reconfigure()` request flag, the literal-toggle authorization; `d5137e6` proves the real path.
 - DONE: Drive AC-O1 through AC-O4 with the isolated tmux-hosted Zellij smoke; do not revive 7h/4d, custom PTY, lease, or controller scope.
   `./tests/zellij-tmux-smoke-test.sh` passed four times (three consecutive plus final): literal `Alt Shift z` adds one candidate tab; literal `Alt /` changes its rail 28→1 columns without identity change; post-route foreign state is byte-identical; cleanup verifies session, tmux, root, and standing hashes.
+- DONE: AC-O1 — Explicit native entry produces a fresh tab from the invoking checkout.
+  The smoke's literal `Alt Shift z` tab inventory changes by exactly one and its live pane inventory plus `dump-layout` contain the selected worktree's canonical candidate WASM URL, never the fixture's stale URL.
+- DONE: AC-O2 — A literal authorized `Alt /` changes only the initialized managed tab's known rail state.
+  With the disposable raw-WASM-path `Reconfigure` pre-grant, one literal key moves the candidate rail 28→1 columns; normalized native identity, command, focus, and candidate URL snapshots remain equal while screen and dumped managed layout change.
+- DONE: AC-O3 — Foreign-tab `Alt /` is a real no-op even after runtime routing.
+  After AC-O2's observed route, the smoke returns the same tmux client to its sidebar-less tab and proves byte-identical native pane and layout snapshots plus unchanged candidate count around a literal `Alt /`.
+- DONE: AC-O4 — The smoke is disposable and preserves standing state.
+  The cleanup trap verifies the isolated Zellij session, dedicated tmux server, and temporary root are gone and compares pre/post standing `config.kdl` and `layouts/zaphod.kdl` hashes on success, failure, and interruption paths.
 - DONE: Commit the smallest fix set and record exact red/green and smoke evidence in the fp implementation stage report; surface any non-core gap as a follow-up.
   Code commits: `88fac36 fix: authorize toggles from observed keybind pipes`; `d5137e6 test: prove managed tab key path`. Red: missing receipt helper failed with `E0425`; the first pre-grant fixture prompted until its key was corrected from the `file:` URL to Zellij's raw WASM path. Green: shell entry suite 8/8; `cargo test --release` 134/134; `cargo check --tests --release`; smoke 4/4; `git diff --check`.
 - SKIPPED: Debug-profile `cargo test` / `cargo check --tests`.
