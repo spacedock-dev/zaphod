@@ -86,16 +86,19 @@ sidecar invocation is `zaphod subscribe`. `grout` supplies internal source,
 row-building, and pipe-adapter code behind that binary; it is not a documented
 or installed public command.
 
-The current script's successful `new-tab` call yields only raw `TAB_ID` and
-canonical `WASM_URL`. Neither is a rail pane ID. After creation, the script
-uses the same explicit Zellij binary/config/data/session arguments to make a
-bounded native `action list-panes --json` wait. It must parse and verify
-`TAB_ID` against native state, then accept exactly one resident record with
-the verified tab ID, `is_plugin`, the exact `plugin_url == WASM_URL`, and the
-resident non-floating rail shape. Its `id` becomes `RAIL_PANE_ID`. The current
-smoke's non-suppressed, non-selectable 28-column rail is the concrete resident
-fixture. Tab name, pane title, CWD, path prefix, a URL-only match, and the raw
-new-tab output alone are never target discovery.
+The current script's successful `new-tab` call yields raw `TAB_ID` and
+canonical `WASM_URL`. `TAB_ID` is the server's stable tab ID and is bb's only
+recipient key; it is not a display position, CWD, title, or pane ID. After
+creation, the script uses the same explicit Zellij binary/config/data/session
+arguments to make a bounded native `action list-panes --json` wait. It must
+parse and verify `TAB_ID` against native state, then accept exactly one
+resident record with that stable tab ID, `is_plugin`, the exact
+`plugin_url == WASM_URL`, and the resident non-floating rail shape. That
+record proves the new tab is initialized; its pane ID is not passed to the
+sidecar and is never a routing key. The current smoke's non-suppressed,
+non-selectable 28-column rail is the concrete resident fixture. Tab name,
+pane title, CWD, path prefix, a URL-only match, and raw new-tab output without
+the native tab-state check are never target discovery.
 
 If that bounded wait sees no exact resident, more than one, malformed native
 state, or an unparseable/mismatched tab ID, the entry reports
@@ -110,7 +113,7 @@ complete target and the same Zellij profile, conceptually:
   --zellij-bin <same-zellij> --zellij-config-dir <same-config-dir> \
   --zellij-config <same-config> --zellij-data-dir <same-data-dir> \
   --zellij-session <session> --tab-id <verified-tab-id> \
-  --rail-pane-id <observed-pane-id> --rail-url <canonical-wasm-url>
+  --rail-url <canonical-wasm-url>
 ```
 
 This is bb's direct artifact, build, and invocation boundary. Successful
@@ -118,23 +121,40 @@ fresh-tab creation by the script is its only runtime condition; bb does not
 create a separate prerequisite or revive bc, a binding core, a lease, or a
 controller lane. The native hotkey is not an alternate subscription entry.
 
-### Sidecar lifecycle ownership
+### Tab-bound sidecar and receiver guard
 
-The target-bound native `zaphod subscribe` sidecar owns one AgentsView
-snapshot/SSE subscription, its local exact-target probe, and the short-lived
-`zellij pipe` children it creates. It maps initial and `data_changed` list
-results through the existing `BuildSessionRow`/`EmitRow` seam into the common
-`agent-event` attention event.
+The native `zaphod subscribe` sidecar is bound to one verified stable tab ID.
+It owns one AgentsView snapshot/SSE subscription, its local session/tab probe,
+and the short-lived `zellij pipe` children it creates. It maps initial and
+`data_changed` list results through the existing `BuildSessionRow`/`EmitRow`
+seam into the common `agent-event` attention event.
 
 The pipe stays a plain session-wide broadcast: it must never use `--plugin`,
-because Zellij 0.44.3 says that option launches an absent plugin. Each emission
-instead carries `--args recipient-pane-id=<observed RAIL_PANE_ID>`. The rail
-must admit `agent-event` only when that argument parses as its own
-`get_plugin_ids().plugin_id` (Zellij's documented unique plugin-pane ID).
-Missing, malformed, or mismatched recipients return before `apply_agent_event`:
-they create no row, no CWD binding, and no click action. The JSON row protocol
-does not change. This is a receiver-enforced fail-closed rule, not a claim that
-the native pipe itself targets a pane.
+because Zellij 0.44.3 says that option launches an absent plugin. Each bb
+emission instead carries `--args recipient-tab-id=<verified TAB_ID>`.
+
+The rail admits an `agent-event` only through one pure receiver guard. A
+`PaneUpdate` first clears the guard and records the rail's `own_tab` display
+position. Only a *later* `TabUpdate` may arm it: from that one complete
+`TabInfo` snapshot it must find exactly one entry at `own_tab`, obtain its
+stable `tab_id`, and prove that no other position reports that stable ID. The
+armed value is `{pane-manifest generation, own display position, stable tab
+ID}`. Every later `PaneUpdate` clears it again. At pipe receipt, the guard
+requires a canonical unsigned-decimal `recipient-tab-id`, an armed value for
+the current pane-manifest generation, a tiled resident rail, and equality with
+that derived stable ID. It then parses and applies the payload. A missing,
+non-canonical, stale, duplicate/ambiguous, unavailable, or mismatched mapping
+returns before `apply_agent_event`: it creates no row, no CWD binding, and no
+click action. There is no fallback to CWD, display position, tab name, URL, or
+plugin-pane ID. The JSON row protocol does not change. This is a
+receiver-enforced fail-closed rule; named pipes remain broadcasts.
+
+The implementation makes the `TabUpdate` mapping explicitly optional/fresh
+rather than treating a default numeric ID as a valid tab. A tab ID is valid
+only when it is derived from a post-manifest `TabUpdate`; a mapping that the
+rail cannot prove current is not a route. The guard applies before either row
+kind is stored. A later gate slice that needs a different delivery scope must
+define that scope explicitly; it cannot reuse an unscoped `agent-event`.
 
 Only the successful direct script invocation starts this process. It launches
 the exact-target executable as a normal detached host child with stdin closed
@@ -144,13 +164,16 @@ pane, plugin launch, or any helper pane. A failed exec reports
 intact. The script does not retain a lease, PID registry, or supervisor after
 the child starts; the child is responsible for its own terminal exit.
 
-The sidecar rechecks its exact `{Zellij profile, session, verified tab ID,
-rail pane/instance ID, canonical WASM URL}` target for its lifetime, including
-before a pipe emission. Explicit `SIGINT`/`SIGTERM`, source EOF/failure, a
-vanished session/tab/plugin, a URL mismatch, or a same-URL replacement at a
-new pane/instance ID cancels its stream and owned pipe work. It reports a
-terminal reason (`target-lost` for target loss) and exits itself. The script,
-rail, and Sprint 1 entry do not supervise, retarget, restart, or clean it up.
+The sidecar rechecks its exact `{Zellij profile, session, verified stable tab
+ID}` target for its lifetime, including before a pipe emission. Explicit
+`SIGINT`/`SIGTERM`, source EOF/failure, or a vanished session/target tab
+cancels its stream and owned pipe work. It reports a terminal reason
+(`target-lost` for target loss) and exits itself. A rail reload or replacement
+inside the same stable tab is not a retarget; the receiver guard will accept
+only after that rail has a fresh `PaneUpdate` → `TabUpdate` mapping. The
+script, rail, and Sprint 1 entry do not supervise, retarget, restart, or clean
+it up. A native tab-termination subscription may replace the bounded probe
+later; it is not part of this first slice.
 
 Stopping deliberately does not heal. A malformed source record is reported
 and skipped, but EOF, source failure, or target loss does not reconnect, retry
@@ -178,7 +201,8 @@ branch API. The selected entry is now on current `main`: its merge base with
 `feature/zellij-new-tab-entry` is that branch tip (`fabfc73d`), so the entry
 is already an ancestor rather than a pending source dependency. Its actual
 post-`new-tab` contract is only raw `TAB_ID` plus canonical `WASM_URL`; bb's
-native `list-panes` observation supplies the missing rail pane ID. Current
+native `list-panes` observation proves the resident rail while `TAB_ID`
+remains the delivery key. Current
 main's `build.sh` has no native `zaphod` artifact yet, which is precisely bb's
 small direct build addition, not a rebase, bc, or binding-core prerequisite.
 Current-main source has no `ProfileLease`/`PROFILE_LEASE` reference outside
@@ -197,23 +221,24 @@ mismatch and asks for a new decision rather than rebasing by assumption.
 The state-owned `spikes/bb-hotkey-helper-pane` run is decisive evidence, not a
 proposed path: literal `Alt Shift z` with `NewTab` plus `Run` created the
 expected tab and one visible, focused floating helper pane. The implementation
-must not try to hide or tolerate that pane. Before the direct-script handoff,
-the remaining invalidating joint is recipient admission: two rails in one
-isolated Zellij session must share a terminal CWD; a broadcast addressed to
-one native rail-pane ID must make the target render and bind the row while the
-other rail renders no row, binds nothing, and has `ClickAction::None`. The
-probe must also show the bystander tab stays active. `--plugin` is expressly
-out because an absent target would launch a plugin; a missing or malformed
-recipient must be inert for both rails.
+must not try to hide or tolerate that pane. The invalidating joint is now the
+receiver guard, not pane identity: two rails in one isolated Zellij session
+must share a terminal CWD, have different stable server tab IDs, and receive
+one broadcast addressed to the target stable tab ID. Only the target may
+render/bind the row; the bystander must keep no row, binding, or
+`ClickAction::FocusPane`, even though its CWD is identical. The probe must
+also show the bystander tab stays active. `--plugin` is expressly out because
+an absent target would launch a plugin; a missing, malformed, stale,
+ambiguous, or mismatched tab recipient must be inert for both rails.
 
 Only after that proof may the direct-script post-create handoff run: after a
 fake native `new-tab` returns
 `TAB_ID=73` and a canonical WASM URL, a fake `list-panes --json` sequence must
 move from not-ready to exactly one matching resident plugin record. Only then
-may the fake native `zaphod subscribe` process receive the observed pane ID
-and profile/session tuple, with the Zellij pane inventory unchanged except for
-the expected fresh-tab layout. The hermetic test fails if it uses a tab name,
-title, CWD, URL-only candidate, raw new-tab output as a pane ID, a manual
+may the fake native `zaphod subscribe` process receive the verified stable tab
+ID and profile/session tuple, with the Zellij pane inventory unchanged except
+for the expected fresh-tab layout. The hermetic test fails if it uses a tab
+name, title, CWD, URL-only candidate, a pane ID as a delivery key, a manual
 public grout command, ambient target discovery, or any helper pane.
 
 The next check is the narrow live arrival path: a loopback SSE server changes
@@ -235,33 +260,41 @@ adoption, or second client.
 
 **AC-O1** — Direct `scripts/zellij-new-tab.sh` starts one internal sidecar
 only after exact native target discovery, and a real source arrival becomes a
-rail row without a manual subscription command. A fake `new-tab` yields `TAB_ID=73` and a
-canonical WASM URL; a fake native `list-panes` wait becomes one resident plugin
-record whose verified `tab_id`, URL, and pane `id` match. Only then does the
-fake native `zaphod subscribe` receive the explicit Zellij profile/session/tab/
-pane/URL tuple. Against its loopback SSE endpoint and fake AgentsView list
-(empty → one fixture session after `data_changed`), it emits exactly one
-existing-format `agent-event` JSON payload with
-`recipient-pane-id=<observed RAIL_PANE_ID>`. The expected ID, CWD, state, and
-summary come from the source fixture, not from the adapter.
+rail row without a manual subscription command. A fake `new-tab` yields
+`TAB_ID=73` and a canonical WASM URL; a fake native `list-panes` wait becomes
+one resident plugin record whose verified stable `tab_id` and URL match. Only
+then does the fake native `zaphod subscribe` receive the explicit Zellij
+profile/session/stable-tab/URL tuple. Against its loopback SSE endpoint and
+fake AgentsView list (empty → one fixture session after `data_changed`), it
+emits exactly one existing-format `agent-event` JSON payload with
+`recipient-tab-id=73`. The expected ID, CWD, state, and summary come from the
+source fixture, not from the adapter.
 
 Verified by: a black-box direct-script test with fake build/new-tab/list-panes/
 native-sidecar recorders plus a Go loopback-SSE/fake-AgentsView/Zellij-payload
-test. They assert start ordering, the exact target argv, recipient argument,
-emitted JSON, no title/CWD/URL-only target discovery, and no new Zellij helper
-pane.
+test. They assert start ordering, the exact stable-tab argv and recipient
+argument, emitted JSON, no title/CWD/URL-only target discovery, no pane-ID
+recipient key, and no new Zellij helper pane.
 
 **AC-O2** — The projected row leads back only to its originating managed-tab
-pane. Feeding AC-O1's row to a rail fixture with one selectable terminal at
-the same exact CWD yields `FocusPane(that pane)` on click. A missing CWD or
-two matching terminal panes yields an unbound row and `ClickAction::None`. A
-second same-CWD rail with a different native pane ID drops the event before
-projection, so it has no row, binding, or focus action.
+pane, and delivery is keyed by the stable tab ID rather than CWD or a pane ID.
+A pure fixture first gives the target rail a fresh `PaneUpdate` at display
+position 1 and a later unique `TabUpdate` mapping position 1 to stable tab ID
+73. Its `recipient-tab-id=73` event stores the session; one selectable
+terminal at the same exact CWD yields `FocusPane(that pane)` on click. A
+bystander rail at a different display position with a unique stable ID 81 and
+the *same terminal CWD* receives that exact broadcast but has no row, binding,
+or focus action. Missing, non-canonical, stale-after-`PaneUpdate`,
+duplicate/ambiguous, or mismatched tab mappings also leave both rails
+unchanged. A missing CWD or two matching terminals in the accepted target rail
+still yields an unbound row and `ClickAction::None`.
 
-Verified by: Rust tests around `apply_agent_event`, `rows_for_own_tab`,
-`bind_session`, and `decide_rail_click`, plus an isolated two-rail native
-smoke using the CWD and pane IDs as external expected values. No global or
-cross-tab association is asserted.
+Verified by: Rust tests around a pure `accept_agent_event_for_current_tab`
+guard plus `apply_agent_event`, `rows_for_own_tab`, `bind_session`, and
+`decide_rail_click`; the expected stable IDs and shared CWD are fixture inputs
+outside the guard. A later isolated two-rail native smoke uses native stable
+tab IDs as the external expected values and proves the target/bystander
+screens and click decisions. No global or cross-tab association is asserted.
 
 **AC-O3** — bb directly owns the small native artifact/build/direct-script
 invocation addition without a Sprint 1 branch rebase or separate prerequisite.
@@ -282,12 +315,12 @@ or lease/binding-core reference fails this boundary.
 ownership. A zero, duplicate, malformed, non-resident, mismatched-tab, or
 URL-only `list-panes` candidate reaches its bounded deadline as
 `sidecar-target-unready` and starts no sidecar. Once the script has observed
-the exact target, the sidecar owns its target probe, one SSE connection, and
-pipe children. Session/tab/plugin loss, original pane/instance disappearance,
-URL mismatch, or same-URL replacement at a new instance ID cancels that work,
-emits `target-lost`, and makes no later pipe, restart, or retarget. SSE
-EOF/source failure is likewise terminal. Neither path issues an AgentsView
-stop or Zellij delete/kill/close/reconfigure command.
+the initialized stable tab, the sidecar owns its session/tab probe, one SSE
+connection, and pipe children. Session or target-tab loss cancels that work,
+emits `target-lost`, and makes no later pipe, restart, or retarget. A rail
+reload inside the same stable tab is not a new target and does not change its
+identity. SSE EOF/source failure is likewise terminal. Neither path issues an
+AgentsView stop or Zellij delete/kill/close/reconfigure command.
 
 Verified by: shell handoff fakes and Go lifecycle tests with controllable
 native target snapshots, fake SSE, and Zellij argv/payload/process recorders.
@@ -312,20 +345,27 @@ custom PTY result.
 
 ## Test plan
 
-1. **Keep the native-hotkey refutation and prove recipient isolation before
-   the handoff.** Re-run `spikes/bb-hotkey-helper-pane/run.sh`, which records
-   the visible helper-pane incompatibility. Add a tmux-hosted two-rail fixture
-   with one Zellij session and one CWD. Broadcast a row with
-   `recipient-pane-id=<target rail id>` and prove native target/bystander
-   screens plus active-tab state: target row/binding only; bystander no row,
-   no binding, and `ClickAction::None`. Repeat with missing and malformed
-   recipient arguments; neither rail may change. Do not use `--plugin`.
+1. **Keep the native-hotkey refutation and prove the stable-tab receiver
+   guard before the handoff.** Retain
+   `spikes/bb-hotkey-helper-pane/run.sh`, which records the visible helper-pane
+   incompatibility. First add one pure Rust test: a target rail gets a
+   `PaneUpdate`, then a later unique `TabUpdate` mapping its display position
+   to stable ID 73; an otherwise identical bystander maps to stable ID 81.
+   Send both the same `agent-event` with `recipient-tab-id=73` and the same
+   terminal CWD. Only the target may store/bind/focus it. Missing,
+   non-canonical, stale-after-a-new-`PaneUpdate`, duplicate/ambiguous, and
+   mismatched IDs must leave both rails unchanged. Then, after the pure guard
+   passes, add a tmux-hosted two-rail fixture with one Zellij session and one
+   CWD. Its native stable tab IDs are the target arguments; prove target and
+   bystander screens, click decisions, and bystander active-tab state. Do not
+   use `--plugin` or a pane ID as a recipient key.
 2. Extend the fake fresh-tab script test so native `new-tab` returns `TAB_ID=73`, the first
    list-panes snapshots are not ready, and a later snapshot has exactly one
    resident plugin record with matching verified tab ID and canonical WASM URL.
    Assert that the checkout-local native sidecar is spawned exactly once
-   afterward with its observed pane ID and inherited Zellij profile; no
-   title/CWD/URL-only fallback or extra Zellij pane is accepted.
+   afterward with stable tab ID 73 and inherited Zellij profile; no
+   title/CWD/URL-only fallback, pane-ID recipient key, or extra Zellij pane is
+   accepted.
 3. Cover every failed-start boundary: malformed raw tab ID, zero/duplicate
    candidates, wrong tab, wrong URL, floating/non-resident plugin, and bounded
    wait exhaustion. Each exits visibly as `sidecar-target-unready`, starts no
@@ -334,14 +374,14 @@ custom PTY result.
    AgentsView fixture (empty → one exact-CWD session). Its one SSE connection
    must emit the existing `agent-event` payload after `data_changed`; EOF/error
    is a visible terminal failure, not reconnect logic.
-5. Add target-lifecycle fakes around `zaphod subscribe`: session/tab/plugin
-   loss, original rail instance absent, URL/identity mismatch, and same-URL
-   replacement at a new instance ID. Each cancels SSE/owned child work and
-   reports `target-lost`, with no later pipe, retarget, restart, or external
-   cleanup command.
-6. Add Rust row-projection tests for the one managed-tab terminal, zero match,
-   and duplicate CWD cases. Reuse the current `agent-event` protocol and click
-   decider; do not add global/tab association state.
+5. Add target-lifecycle fakes around `zaphod subscribe`: session or stable-tab
+   loss cancels SSE/owned child work and reports `target-lost`, with no later
+   pipe, retarget, restart, or external cleanup command. A rail reload inside
+   the same stable tab is not a target change; the receiver's fresh-map guard,
+   not a pane-instance lease, decides later event admission.
+6. Add Rust row-projection tests for the accepted one managed-tab terminal,
+   zero match, and duplicate CWD cases. Reuse the guarded `agent-event`
+   protocol and click decider; do not add global/tab association state.
 7. Run the native-artifact build test, focused Go suite under `GOPROXY=off`,
    relevant Rust tests, `cargo check --tests`, and `git diff --check` from
    current main. Re-run the ancestor/path/lease audit before integration.
@@ -353,14 +393,17 @@ custom PTY result.
 
 Update README agent-row guidance around the direct
 `scripts/zellij-new-tab.sh` journey. Document that it builds the checkout's
-WASM plus native sidecar, waits for exact native rail identity after new-tab,
-then starts the internal `zaphod subscribe` sidecar; `grout` is not a user
-command. State plainly that `Alt Shift z` creates only the managed tab in this
-release; it does not start the subscriber because a Zellij `Run` keybind would
-materialize a helper pane. State that target loss, Ctrl-C, or source failure
-ends the sidecar without daemon, session, tab, pane, or plugin cleanup. Source
-restart, departure cleanup, replacement retargeting, multi-tab association,
-and review behavior are not part of this first slice.
+WASM plus native sidecar, verifies one initialized resident rail, then starts
+the internal `zaphod subscribe` sidecar keyed by the new tab's stable ID;
+`grout` is not a user command. State plainly that `Alt Shift z` creates only
+the managed tab in this release; it does not start the subscriber because a
+Zellij `Run` keybind would materialize a helper pane. Explain that pipes are
+broadcasts and a rail drops events unless a fresh `TabUpdate` maps its current
+display position to the exact `recipient-tab-id`. State that target-tab loss,
+Ctrl-C, or source failure ends the sidecar without daemon, session, tab, pane,
+or plugin cleanup. Source restart, departure cleanup, tab-termination event
+subscription, multi-tab association, and review behavior are not part of this
+first slice.
 
 ## Out of scope
 
@@ -377,6 +420,7 @@ and review behavior are not part of this first slice.
   or multi-client delivery refinements; and
 - a `Run`, layout-command-pane, plugin, or other helper-pane implementation
   behind `Alt Shift z`; and
+- a pane ID, CWD, display position, name, or URL as a delivery identity; and
 - any standing Zellij configuration mutation outside Sprint 1's accepted
   managed-tab smoke.
 
@@ -848,3 +892,22 @@ broadcasts the named pipe and the current rail ignores recipient-pane-id, so
 both tabs store/render the session before any CWD binding or focus decision.
 The missing live get_plugin_ids comparison remains a narrow fixture gap; it
 does not weaken the observed cross-tab leak.
+
+## Stage Report: ideation (cycle 11)
+
+- DONE: Replace the unproven pane-ID recipient design with stable tab-ID routing.
+  bb now uses the fresh script's verified server `TAB_ID` as the sole recipient key and emits `recipient-tab-id=<TAB_ID>`; resident-pane discovery is startup proof only.
+- DONE: Use the existing TabUpdate/own-tab mapping and fail closed when unavailable.
+  The specified pure guard clears on every `PaneUpdate`, arms only from a later unique `TabUpdate` position→stable-ID mapping, and drops absent, stale, ambiguous, malformed, or mismatched events before `apply_agent_event`.
+- DONE: Specify pure and later live proof without starting another harness.
+  AC-O2/test-plan item 1 name the smallest two-rail shared-CWD Rust fixture first, then a later tmux-hosted stable-tab smoke; this cycle ran neither Zellij nor tmux and changed no product code.
+- DONE: Re-map every acceptance criterion to the tab-bound boundary.
+  AC-O1 → fake `TAB_ID=73` handoff and loopback payload with `recipient-tab-id=73`; AC-O2 → pure fresh-map guard plus later two-rail smoke; AC-O3 → unchanged current-main artifact/ancestry evidence; AC-O4 → session/stable-tab loss fakes with no pane-instance target; AC-I1 → the held direct-script captain drill.
+
+### Summary
+
+The recorded two-rail failure invalidates plugin-pane-ID routing, not the
+direct-script walking skeleton. bb is now a tab-bound sidecar: CWD decides
+focus only after the current rail has accepted an event for its fresh, derived
+stable tab ID. The native `Alt Shift z` helper-pane limitation remains intact,
+and a future tab-termination subscription is explicitly deferred.
