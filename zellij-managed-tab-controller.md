@@ -383,10 +383,14 @@ Subspace gate presentation; no code, 7h, 4d, custom PTY, or lease scope changed.
   The sole code commit changes `tests/zellij-tmux-smoke-test.sh`; the entry script, Rust plugin, task scope, 7h, and 4d are untouched.
 - DONE: Run the entry shell suite, release Rust tests/check, failure/TERM cleanup probes, and ten consecutive unmodified real smokes; record per-run evidence and any failure diff.
   `./tests/zellij-new-tab-test.sh` passed 8/8, including forced new-tab failure rollback and TERM rollback; `cargo test --release` passed 134/134; `cargo check --tests --release` passed; `bash -n` and `git diff --check` passed.
+- DONE: AC-O1 — Explicit native entry produces a fresh tab from the invoking checkout.
+  Each of the ten green smoke runs sends literal `Alt Shift z`, observes exactly one additional active `zaphod` tab, and retains the selected worktree's candidate WASM URL in native pane inventory and dumped layout.
 - DONE: AC-O2 repeat evidence.
   Fresh smoke runs 1=0, 2=0, 3=0, 4=0, 5=0, 6=0, 7=0, 8=0, 9=0, 10=0; each printed the managed entry/toggle/foreign/cleanup PASS line and emitted no native identity diff.
 - DONE: AC-O3 visible safety evidence.
   All ten green runs exercised the new byte-equal foreign-screen comparison alongside the pre-existing native pane/layout equality and candidate-count checks; no visible diff was emitted.
+- DONE: AC-O4 — The smoke is disposable and preserves standing state.
+  Every green run's cleanup trap checked the isolated session, tmux server, temporary root, and standing hashes; the TERM-after-live-server and forced-live-tmux-failure probes exercised those same cleanup paths without a survivor report.
 - DONE: Failure and interruption cleanup probes.
   A TERM sent after the dedicated tmux server became live exited the smoke 143 after its cleanup trap; a forced live-tmux loss made the smoke fail 1 (`isolated Zellij session did not become ready`) and its wrapper confirmed cleanup. No root/session/server survivor or standing-hash failure was reported.
 - SKIPPED: AC-I1 normal-consent captain live drill.
