@@ -18,6 +18,240 @@ mod-block:
 id: s92rm4v2pz0m23memjg9xha2
 ---
 
+## Captain-directed re-ideation (cycle 4 — controlling design)
+
+This task is one walking skeleton, not a gate-projection component followed by
+a separate review-handoff component:
+
+> One pending gate appears globally in Zaphod; selecting it opens one real
+> provider-owned reviewer; after the gate skill records its resolution, the
+> gate disappears from the rail.
+
+The title records the eventual wish to show gates where work came from. This
+first slice deliberately presents them globally. The rail selected by the
+operator is only where the review surface appears; it says nothing about the
+gate's origin. Session ingestion and `bb` are independent work, not a
+prerequisite.
+
+### Decisive real-skill spike
+
+The current Subspace surface cannot provide this journey by itself.
+`docs/review-and-gate.md` assigns workflow position, approver authority, and
+routing to workflow tooling; its reviewer app owns rendering and the portable
+review log. The installed `using-subspace-tui` skill opens exactly one named
+Markdown artifact and emits a fold only when that review exits. The current
+`spacedock-subspace` CLI likewise accepts one supplied brief path (or one
+Review & Gate v1 Briefing with actor and approver), then serves/waits for that
+one review.
+
+The probe was exercised, not inferred: `go run ./cmd/spacedock-subspace check
+docs/roadmap/003-reviewer-annotations/dogfood-gate/brief.md` exited 0, and
+`go test ./cmd/spacedock-subspace -run 'TestParseReviewV1Args|TestWait'
+-count=1` passed. Its actual usage accepts a single brief or Briefing; it does
+not list pending gates, publish a current open set, accept a rail activation,
+or place a reviewer in Zellij. Therefore Zaphod must not invent either
+capability from decision logs, paths, globs, or one-shot `grout` rows.
+
+### External owner-facing scope — included in this one outcome
+
+The required addition belongs to the Spacedock gate-skill/workflow glue that
+owns a gate's lifecycle, not to Zaphod and not to the neutral Review & Gate v1
+contract. No change in that external owner is authorized or made by this
+ideation pass. When the captain authorizes it, the owner supplies all of the
+following as one small end-to-end capability:
+
+- a configured-scope current view of open gates, including an explicit empty
+  view; each item has an owner-issued opaque identity and operator display
+  text. Only a later owner-issued current view can remove an item;
+- an activation path that receives only that opaque identity and an optional
+  live Zaphod placement offer, rechecks that the gate is still open, and
+  prepares one fixed Review & Gate v1 review invocation with the correct
+  Briefing and approver authority. Event rows never supply an executable,
+  shell fragment, log path, or verdict;
+- result handling that receives the reviewer result directly, records the
+  binding resolution, routes the workflow, and then emits the later current
+  view. Closing or losing a Zaphod pane is not a resolution; and
+- an owner-released fixture that exercises open → one review → recorded
+  resolution → absent, plus stale selection and reviewer exit without a
+  resolution.
+
+The owner chooses its serialization and internal process shape. This record
+intentionally gives it no invented protocol name. If that glue happens to live
+beside Subspace, it remains a workflow-specific adapter there; it must not
+expand Review & Gate v1's portable contract or make `subspace-tui` an
+open-gate authority.
+
+## Problem
+
+Today Zaphod receives a legacy one-shot gate row derived from a decision-log
+path. Clicking it derives a sibling brief path and runs `subspace-tui`
+directly. It cannot tell whether the gate is still open, prevent a duplicate
+review, learn a real resolution, or distinguish a closing pane from a verdict.
+
+That is the wrong authority boundary. A useful attention loop needs the gate
+skill to remain authoritative while Zaphod makes the pending work and the
+review surface visible.
+
+## Required outcome
+
+**Trigger:** the configured gate skill opens one real gate and publishes its
+current view while a Zaphod rail is visible. The operator selects that global
+row. **Visible result:** the row appears, one provider-authorized reviewer
+opens beside the selected rail, and no second pane opens from a repeated
+selection. After the reviewer produces a valid resolution, the gate skill
+records and routes it, publishes its later view, and the row disappears.
+If the reviewer exits without a resolution, the row remains.
+
+**Reproducible proof:** an owner fixture, not a hand-written `zellij pipe` or
+decision-log scan, supplies the open and later-resolved states. In an isolated
+tmux-hosted Zellij profile, native pane inventory and visible rail captures
+show no gate, the one gate, the one review surface, and its removal after the
+owner records resolution. Standing configuration remains unchanged.
+
+## Proposed approach
+
+The gate skill is the source and action authority. Zaphod consumes its current
+view, renders it globally in each receiving rail, and sends an opaque
+activation request only for the row the operator selected. The current rail
+offers one ephemeral placement target. The gate skill either authorizes one
+fixed provider runner for that target or reports that the gate is stale or
+unavailable. Zaphod opens only the configured runner in one floating pane;
+its in-memory guard makes a second click while that pane is live a no-op.
+The pane closing clears that local guard but never changes gate truth.
+
+The reviewer writes its result directly to the gate skill's normal result
+path. Zaphod neither reads that result nor issues approve, revise, hold,
+reject, or a workflow action. It changes rows only when the gate skill sends
+the later current view. No automatic retry, fallback surface, prewarmed pane,
+or review pool belongs in this slice.
+
+In this repository, implementation extends the existing pure rail seams
+`parse_agent_event`, `apply_agent_event`, `section_layout`, and
+`decide_rail_click`. The new gate source is kept distinct from legacy
+log-path rows. `brief_path_for_log` and `ClickAction::FloatGate` are not used
+for the new journey: they are precisely the path-derived behavior being
+replaced. A configured provider runner is fixed by registration; a row cannot
+cause arbitrary command execution.
+
+## What this absorbs from “One v1 review opens and returns cleanly” (`qt`)
+
+Included here:
+
+- a global gate row can be selected in the rail;
+- the gate skill validates that selection and supplies the one real v1 review;
+- Zaphod opens one visible provider surface beside the selecting rail and
+  avoids a duplicate while that surface is alive; and
+- a recorded provider result produces the later rail removal, without a
+  Zaphod decision or log scrape.
+
+Deferred from `qt` as later refinement, not a prerequisite:
+
+- durable or cross-client receiver capabilities, two-rail delivery proofs,
+  lost-reply recovery, and provider fallback policy;
+- retaining or pooling hidden review panes, retrying automatically, and exact
+  restart recovery of an in-flight surface;
+- tab-origin association, tab-bound gate placement, and session-to-gate
+  correlation; and
+- `bb`'s target-bound session subscriber or a daemon that later observes tab
+  termination.
+
+## Riskiest unproven mechanism
+
+The high-risk joint is the real owner path from a global pending item through
+one visible reviewer and back to a truthful removal—not rendering a row or
+opening a generic float. The first implementation check is therefore the
+owner fixture's open → activate → resolve sequence through one isolated rail.
+It fails if a second pane appears, a stale gate opens, Zaphod derives a brief
+or command, a review exit removes the row, or resolution is inferred rather
+than recorded by the gate skill.
+
+## Acceptance criteria
+
+### Offline
+
+**AC-O1 — Gate truth remains with the gate skill.** The owner fixture's open,
+unchanged, resolved, and explicit-empty states produce exactly its expected
+global rail rows. A stale activation and a reviewer exit without a recorded
+resolution leave the gate present.
+
+Verified by: gate-skill fixture and adapter tests use the owner's expected
+states; Rust projection tests compare rendered opaque identities and labels to
+that fixture rather than values authored in Zaphod.
+
+**AC-O2 — One selection opens only one authorized surface.** A valid row
+selection results in one fixed provider runner beside the selecting rail. A
+duplicate selection while it runs, a stale item, an unavailable gate skill, or
+a rejected placement produces zero additional panes and zero verdict calls.
+
+Verified by: gate-skill, Rust host, and Zellij-command fakes record activation,
+runner, and decision calls. The fixture defines the provider identity and
+review inputs; the Zaphod code under test supplies none.
+
+**AC-O3 — Zaphod is presentation and placement only.** The new source never
+uses a decision-log path, filesystem discovery, `brief_path_for_log`, legacy
+`FloatGate`, an event-supplied command, or a rail-issued decision. A pane exit
+clears only its local duplicate guard; only a later owner view removes a row.
+
+Verified by: focused Rust tests and call-recording fakes assert zero path
+derivations, arbitrary process starts, result reads, workflow calls, and
+row removals before the fixture's resolution update.
+
+**AC-O4 — The completed journey works in a real isolated profile.** The real
+owner fixture makes one gate appear, opens one actual v1 review surface on
+selection, records its resolution through the skill, and makes the rail lose
+the row after the later owner update. No standing Zellij/tmux setting changes.
+
+Verified by: a tmux-hosted Zellij smoke captures native panes and screens
+before open, after publication, during the reviewer, and after resolution;
+the fixture supplies the expected title and lifecycle evidence.
+
+### Captain-live
+
+**AC-C1 — A pending gate leads back to resolved work without hunting.** With a
+real gate skill gate open, the operator sees one global row, opens one provider
+review beside the rail, resolves it there, and sees the row disappear only
+after the skill records that result.
+
+Verified by: a captain drill records the gate-skill state before/after, native
+pane inventory, and rail display. It does not exercise tab origin, sessions,
+or an inline verdict.
+
+## Test plan
+
+1. Implement and exercise the owner fixture's complete open → review →
+   resolution transition first. If the owner cannot provide it, stop rather
+   than fabricate a Zaphod source.
+2. Add the external adapter and Rust projection/action tests for AC-O1 through
+   AC-O3, including stale selection, repeated click, and unresolved reviewer
+   exit.
+3. Run AC-O4 in the standard isolated tmux/Zellij harness; use native state
+   and visible output, never a custom PTY, lease, or standing configuration.
+4. Run the focused external and Rust suites, then AC-C1 only after the offline
+   packet passes.
+
+## Documentation change
+
+Replace README's current log-path claim with: “The configured gate skill
+publishes current pending gates and authorizes their provider review surface.
+Zaphod shows those gates globally and places one selected review beside the
+rail, but it neither derives a command from a row nor resolves a review. A
+later gate-skill update removes a resolved gate.”
+
+## Out of scope
+
+Changing Review & Gate v1's portable contract; decision-log or filesystem
+discovery; legacy log-path float fallback; rail-owned verdicts or routing;
+session ingestion or `bb`; tab origin or persistent tab bindings; receiver
+capability/retry/pooling machinery; a public `grout` or Zaphod gate command;
+controllers, leases, 7h, 4d, custom PTYs, pane adoption, or standing
+configuration mutation.
+
+## Superseded cycle-3 design (historical)
+
+The following record is retained as audit evidence only. It named external
+prerequisites as separate component contracts; cycle 4 folds the necessary
+owner work and one review handoff into the single operator journey above.
+
 ## Captain-directed re-ideation (cycle 3)
 
 The global-first outcome remains right, but the prior body invented a
@@ -318,3 +552,18 @@ The staff finding was correct: Zaphod had specified a gate publisher it does
 not own. This cycle removes that fabricated contract, names GP-1 and BB-1 as
 hard prerequisites, and leaves a narrow global-first consumer design ready for
 review only after those prerequisites are accepted.
+
+## Stage Report: ideation (cycle 4)
+
+- DONE: Reframe s9 around one complete global gate-to-resolution journey.
+  The controlling design now covers appearance, one provider review, recorded resolution, and truthful removal in one operator path; `bb` is explicitly independent.
+- DONE: Use the real Subspace gate skill as the first spike and name missing work honestly.
+  The exercised CLI/skill probe proves one supplied review only; the exact missing current-view and activation work is assigned to the gate-skill/workflow owner, with no external change made.
+- DONE: Decide which qt behavior is absorbed and which is a later outcome.
+  One selected review and its no-duplicate/recorded-resolution path move into s9; receiver protocols, retry/pooling, and tab association remain later refinement.
+
+### Summary
+
+The task no longer blocks on invented component prerequisites or makes Zaphod
+the source of gate truth. It asks the captain to approve one cross-owner
+walking skeleton whose external gate-skill scope is explicit and bounded.
