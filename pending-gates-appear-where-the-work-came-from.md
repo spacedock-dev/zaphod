@@ -4,9 +4,9 @@ status: ideation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
-sprint-readiness: ready
-blocked-on:
-blocked-reason:
+sprint-readiness: defer
+blocked-on: captain-authorization-for-gate-skill-workflow-glue
+blocked-reason: Binding staff review approves the unified s9 design. Implementation requires explicit captain authority to change the external Spacedock gate-skill/workflow glue; bb is independent.
 score: 0.97
 started: 2026-07-12T00:03:20Z
 completed:
