@@ -831,3 +831,20 @@ not ready to implement until that narrow test is executed.
 This stopped cycle contributes only static preflight evidence and does not
 change bb's existing blocker. No disposable process was left behind, and no
 claim about cross-tab recipient isolation is made.
+
+## Stage Report: ideation (cycle 10)
+
+- FAILED: Prove recipient isolation with two live rails sharing one CWD.
+  The recorded Zellij 0.44.3 run has target {tab 0, rail 2} and bystander {tab 1, rail 5}; both rendered BB_RECIPIENT_MARKER after the one addressed broadcast.
+- FAILED: Use actual 0.44.3 pipe arguments and exact plugin-pane identity.
+  The real no-plugin argv and native tab/pane/URL tuple are recorded, but Zellij exposed no plugin stderr log, so this run cannot independently compare its pane IDs with get_plugin_ids().plugin_id.
+- DONE: Persist raw runner/output and report pass or failure without product code.
+  spikes/bb-two-rail-recipient-isolation/recorded/ contains the trap-cleaned runner, rendered layout, native inventories, raw argv, screens, empty log-path record, and RESULT=FAIL; no product code changed.
+
+### Summary
+
+The live native result is decisive about the current boundary: Zellij
+broadcasts the named pipe and the current rail ignores recipient-pane-id, so
+both tabs store/render the session before any CWD binding or focus decision.
+The missing live get_plugin_ids comparison remains a narrow fixture gap; it
+does not weaken the observed cross-tab leak.

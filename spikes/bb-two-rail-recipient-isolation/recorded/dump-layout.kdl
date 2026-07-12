@@ -1,0 +1,40 @@
+layout {
+    cwd "/private/tmp/bbri.JlpuVv/same-cwd"
+    tab name="recipient-target" hide_floating_panes=true {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane name="recipient-rail" size=28 borderless=true {
+                plugin location="file:/Users/clkao/git/zaphod/target/wasm32-wasip1/release/zellij-sidebar.wasm" {
+                    debug "1"
+                    rail "1"
+                }
+            }
+            pane name="same-cwd-terminal"
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+    tab name="recipient-target" focus=true hide_floating_panes=true {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane name="recipient-rail" size=28 borderless=true {
+                plugin location="file:/Users/clkao/git/zaphod/target/wasm32-wasip1/release/zellij-sidebar.wasm" {
+                    debug "1"
+                    rail "1"
+                }
+            }
+            pane name="same-cwd-terminal" focus=true
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+    new_tab_template {
+    }
+}
+

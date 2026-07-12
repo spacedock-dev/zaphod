@@ -1,0 +1,20 @@
+// Test-only: this layout is opened twice in one isolated session.
+layout {
+    tab name="recipient-target" {
+        pane size=1 borderless=true {
+            plugin location="zellij:tab-bar"
+        }
+        pane split_direction="vertical" {
+            pane size=28 borderless=true name="recipient-rail" {
+                plugin location="file:/Users/clkao/git/zaphod/target/wasm32-wasip1/release/zellij-sidebar.wasm" {
+                    rail "1"
+                    debug "1"
+                }
+            }
+            pane name="same-cwd-terminal" cwd="/tmp/bbri.JlpuVv/same-cwd"
+        }
+        pane size=1 borderless=true {
+            plugin location="zellij:status-bar"
+        }
+    }
+}
