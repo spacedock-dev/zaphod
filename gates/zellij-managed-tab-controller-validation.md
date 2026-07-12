@@ -7,8 +7,12 @@ Independently tested candidate: `fabfc73d78e5f9ad6cbc96111f0121bf6c61e041`
 
 ## Gate recommendation
 
-**Offline acceptance is green. Sprint 1 is ready for CL's short,
-ordinary-consent live drill; it is not done until CL completes that drill.**
+**RECOMMEND APPROVE fp.** Offline acceptance is green and the captain directly
+reported the ordinary-consent manual drill approved.
+
+An **approve** fold authorizes exactly two outcomes: merge `fp`'s existing
+candidate and mark **Sprint 1** done. It does **not** approve, dispatch,
+merge, repair, or otherwise advance `bb` or any other Sprint 2 task.
 
 The two prior proof gaps are closed without changing product architecture:
 
@@ -29,7 +33,13 @@ No 7h/4d code, ProfileLease, controller, custom PTY, or lease work was used.
 | AC-O2 | PASS | The settled-resident predicate required active tiled/non-suppressed candidate, 28 columns, `is_selectable: false`, no prompt, and a visible rail before literal `Alt /`. All ten runs changed the known rail 28 → 1 columns while normalized identity, command, focus, and URL stayed equal; layout and visible screen changed. |
 | AC-O3 | PASS | After the observed managed route, all ten runs sent literal `Alt /` on the sidebar-less foreign tab. Native pane/layout snapshots and the visible tmux screen were byte-equal, and candidate count stayed one. |
 | AC-O4 | PASS | Each green run's trap verified session, dedicated tmux server, temporary root, and standing config/layout hashes. A no-pregrant failure probe also left no named root, tmux server, or Zellij process. |
-| AC-I1 | HELD FOR CL | The headless disposable pre-grant is intentionally not ordinary consent. The exact attached-session drill below is the remaining acceptance activity. |
+| AC-I1 | PASS — captain live | The captain directly reported the supplied ordinary-consent WORK-session drill approved: stable entry script, visible consent, managed `Alt /` toggle, Chaplin foreign-tab no-op, and return toggle. No unreported capture or restart check is claimed. |
+
+## Captain live result
+
+The captain's direct report settles AC-I1. It confirms the supplied guide's
+ordinary-consent journey only; validation does not invent screenshots, pane
+snapshots, or an `Alt Shift z` restart run that the captain did not report.
 
 ## Fresh command packet
 
@@ -68,7 +78,7 @@ no-pregrant key failed closed at the settled-resident wait and left no
 `/tmp/zaphod-fp-no-pregrant-root`, named tmux server, or named Zellij
 process. These are assertion/cleanup probes, not product changes.
 
-## Captain manual drill — actual WORK session
+## Captain manual drill — actual WORK session (reported PASS)
 
 This is the usable end-value path. It creates a fresh tab and never retrofits
 the tab from which it is run.
@@ -108,7 +118,7 @@ fresh Zaphod tab and leave the originating tab unchanged.
 
 ## Subspace review instruction
 
-After CL reports the live drill result, present this one artifact with:
+Present this one final `fp` artifact with:
 
 ```bash
 subspace-tui gates/zellij-managed-tab-controller-validation.md --gate-review \
@@ -116,3 +126,6 @@ subspace-tui gates/zellij-managed-tab-controller-validation.md --gate-review \
 ```
 
 The emitted fold—not chat prose—selects completion, revision, or rejection.
+Its **approve** meaning is deliberately narrow: merge `fp` and mark Sprint 1
+done only. It neither decides nor starts `bb`, any Sprint 2 task, or another
+repair loop.

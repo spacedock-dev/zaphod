@@ -428,3 +428,24 @@ The repaired smoke packet is independently reproducible and its two prior
 gaps are disproved without any architecture expansion. Sprint 1 now waits
 only for CL's short normal-consent drill and authoritative gate fold; the
 candidate worktree remains unchanged by validation.
+
+## Stage Report: validation (cycle 4)
+
+- DONE: AC-O1 — Explicit native entry remains independently PASS.
+  The cycle-3 packet recorded ten literal Alt Shift z smokes with exactly one fresh candidate tab and the selected-worktree URL in native inventory and dump-layout.
+- DONE: AC-O2 — Settled managed literal Alt / remains independently PASS.
+  The cycle-3 packet recorded ten post-grant, non-selectable/no-prompt baselines followed by the 28 → 1 managed transition without identity drift.
+- DONE: AC-O3 — Post-route foreign Alt / remains independently PASS.
+  The cycle-3 packet recorded byte-equal foreign pane/layout/screen snapshots for all ten runs; its detached screen sentinel failed at the asserted comparison.
+- DONE: AC-O4 — Disposable cleanup remains independently PASS.
+  The cycle-3 packet recorded standing-hash and teardown checks across ten green runs plus a no-pregrant failed-closed cleanup probe.
+- DONE: AC-I1 — Captain normal-consent live drill.
+  The captain directly reported the supplied WORK-session manual drill approved: the stable entry script created the fresh managed tab, ordinary visible consent was used, managed Alt / toggled, Chaplin stayed inert, and the managed tab toggled again. No unreported capture, pane snapshot, or restart-only Alt Shift z run is claimed.
+- DONE: Prepare the final fp gate semantics without broadening workflow scope.
+  gates/zellij-managed-tab-controller-validation.md now states that an approve fold merges fp and marks Sprint 1 done only; it neither decides nor starts bb, any Sprint 2 task, or another repair.
+
+### Summary
+
+All fp acceptance criteria are now satisfied: offline proof was independently
+reproduced and AC-I1 is settled by the captain's direct live report. The sole
+remaining workflow action is one final Subspace fold over fp's artifact.
