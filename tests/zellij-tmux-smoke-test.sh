@@ -277,6 +277,40 @@ wait_for_candidate() {
     fail "literal Alt Shift z did not create a candidate Zaphod tab"
 }
 
+# A pre-granted plugin still receives PermissionRequestResult asynchronously.
+# Do not baseline the literal Alt / until its own visible tiled resident has
+# handled that result: otherwise is_selectable can settle during the key test
+# and look like a toggle side effect.
+wait_for_settled_candidate_resident() {
+    local panes="$1"
+    local layout="$2"
+    local screen="$3"
+    local tabs="$4"
+    local attempt
+    for attempt in $(seq 1 160); do
+        zellij_session action list-panes --json --all --command --geometry --state --tab \
+            > "$panes" 2>"$ROOT/settled-candidate-panes.err" || true
+        zellij_session action list-tabs --json --all --state --layout \
+            > "$tabs" 2>"$ROOT/settled-candidate-tabs.err" || true
+        tmux_command capture-pane -p -t "$TMUX_PANE" > "$screen" || true
+        if jq -e --arg wasm_url "$WASM_URL" \
+            'any(.[]; .is_plugin and .plugin_url == $wasm_url and .tab_name == "zaphod" and .is_floating == false and .is_suppressed == false and .pane_columns == 28 and .is_selectable == false)' \
+            "$panes" >/dev/null 2>&1 && \
+            jq -e 'any(.[]; .active and .name == "zaphod")' "$tabs" >/dev/null 2>&1 && \
+            ! grep -F 'asks permission to:' "$screen" >/dev/null && \
+            grep -F 'PANES' "$screen" >/dev/null; then
+            jq -S . "$panes" > "$panes.sorted"
+            jq -S . "$tabs" > "$tabs.sorted"
+            zellij_session action dump-layout > "$layout"
+            return
+        fi
+        sleep 0.05
+    done
+    cat "$ROOT/settled-candidate-panes.err" >&2 || true
+    cat "$ROOT/settled-candidate-tabs.err" >&2 || true
+    fail "candidate did not settle as the active tiled 28-column, non-selectable post-grant resident"
+}
+
 # First run the real entry script against a short-lived attached Zellij
 # session. This persists the checked config and selected absolute layout path.
 start_tmux_zellij
@@ -309,8 +343,11 @@ jq -e --arg wasm_url "$WASM_URL" \
     fail "fresh server unexpectedly started on a candidate Zaphod tab"
 send_literal "$(printf '\033Z')"
 wait_for_candidate "$ROOT/candidate.json"
-capture_state "$ROOT/candidate-before.json" "$ROOT/candidate-before.kdl" "$ROOT/candidate-before.screen"
-capture_tabs "$ROOT/candidate-tabs-before.json"
+wait_for_settled_candidate_resident \
+    "$ROOT/candidate-before.json" \
+    "$ROOT/candidate-before.kdl" \
+    "$ROOT/candidate-before.screen" \
+    "$ROOT/candidate-tabs-before.json"
 TAB_COUNT_AFTER="$(jq -er 'length' "$ROOT/candidate-tabs-before.json")"
 [ "$TAB_COUNT_AFTER" -eq "$((TAB_COUNT_BEFORE + 1))" ] ||
     fail "literal Alt Shift z changed tab count from $TAB_COUNT_BEFORE to $TAB_COUNT_AFTER (expected one fresh tab)"
@@ -325,6 +362,10 @@ grep -F 'asks permission to:' "$ROOT/candidate-before.screen" >/dev/null &&
     fail "candidate rail unexpectedly prompted instead of using the disposable pre-grant"
 grep -F 'PANES' "$ROOT/candidate-before.screen" >/dev/null ||
     fail "candidate Zaphod rail was not visibly rendered in the tmux client"
+jq -e --arg wasm_url "$WASM_URL" \
+    'any(.[]; .is_plugin and .plugin_url == $wasm_url and .is_selectable == false)' \
+    "$ROOT/candidate-before.json" >/dev/null ||
+    fail "candidate baseline was captured before its pre-granted permission result settled"
 
 # A pre-authorized rail requests its runtime MessagePluginId route, but the
 # request's return value is not authorization. One literal key must be
@@ -370,6 +411,10 @@ cmp -s "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" || {
 cmp -s "$ROOT/foreign-before.kdl" "$ROOT/foreign-after.kdl" || {
     diff -u "$ROOT/foreign-before.kdl" "$ROOT/foreign-after.kdl" >&2 || true
     fail "post-route foreign Alt / changed the native layout"
+}
+cmp -s "$ROOT/foreign-before.screen" "$ROOT/foreign-after.screen" || {
+    diff -u "$ROOT/foreign-before.screen" "$ROOT/foreign-after.screen" >&2 || true
+    fail "post-route foreign Alt / visibly changed the tmux client"
 }
 jq -e --arg wasm_url "$WASM_URL" \
     '([.[] | select(.is_plugin and .plugin_url == $wasm_url)] | length) == 1' \
