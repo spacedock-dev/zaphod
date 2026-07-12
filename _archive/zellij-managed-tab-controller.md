@@ -1,11 +1,11 @@
 ---
 id: fp8pn84km859qges2s2ffp5h
 title: Safe managed-tab entry and guarded keybindings
-status: validation
+status: done
 source: outcome-first roadmap Sprint 1 safe managed-tab onramp; captain correction 2026-07-12
 started: 2026-07-12T06:45:43Z
-completed:
-verdict:
+completed: 2026-07-12T09:54:46Z
+verdict: passed
 score: 0.98
 worktree: .worktrees/zellij-new-tab-entry
 issue:
@@ -14,6 +14,7 @@ mod-block:
 sprint: s1-safe-managed-tab-onramp
 group: walking-skeleton
 sprint-readiness: ready
+archived: 2026-07-12T09:54:46Z
 ---
 
 ## Problem
