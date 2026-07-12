@@ -4,9 +4,9 @@ status: ideation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
-sprint-readiness: ready
-blocked-on:
-blocked-reason:
+sprint-readiness: defer
+blocked-on: two-rail-recipient-isolation-proof
+blocked-reason: Binding staff review requires a live two-managed-rail same-CWD recipient-isolation proof before bb implementation; the interrupted spike produced no result.
 score: 1.0
 started: 2026-07-12T00:02:21Z
 completed:
@@ -816,3 +816,18 @@ The native hotkey path is decisively refuted and reproducible. The selected
 recipient rule is fail-closed and avoids Zellij's plugin-launch behavior, but
 the two-rail live proof remains an explicit failed ideation obligation; bb is
 not ready to implement until that narrow test is executed.
+
+## Stage Report: ideation (cycle 9)
+
+- FAILED: Prove recipient isolation with two live rails sharing one CWD.
+  The safety stop arrived before a disposable Zellij/tmux process was launched; no live two-rail result exists.
+- FAILED: Use actual 0.44.3 pipe arguments and exact plugin-pane identity.
+  Preflight confirmed the documented pipe form with recipient-pane-id, SDK PipeMessage.args, and the rail's get_plugin_ids().plugin_id assignment, but no live identity comparison was run.
+- FAILED: Persist raw runner/output and report pass or failure without product code.
+  No runner, fixture, raw output, or product-code change was written before the safety interruption; the result is inconclusive, not PASS or FAIL.
+
+### Summary
+
+This stopped cycle contributes only static preflight evidence and does not
+change bb's existing blocker. No disposable process was left behind, and no
+claim about cross-tab recipient isolation is made.
