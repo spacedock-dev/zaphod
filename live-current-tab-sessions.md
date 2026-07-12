@@ -1,6 +1,6 @@
 ---
 title: Live sessions arrive and lead back to work
-status: ideation
+status: backlog
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
@@ -10,7 +10,7 @@ blocked-reason: Ideation is captain-approved now. Implementation and the live dr
 score: 1.0
 started: 2026-07-12T00:02:21Z
 completed:
-verdict:
+verdict: REJECTED
 worktree:
 issue:
 pr:
