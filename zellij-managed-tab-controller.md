@@ -374,3 +374,27 @@ Subspace gate presentation; no code, 7h, 4d, custom PTY, or lease scope changed.
   post-grant resident, compare foreign-tab screen captures, and prove the
   packet with repeated real smoke runs. Keep the existing entry point and do
   not add 7h, 4d, lease, custom-PTY, or architecture work.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Test-first repair the real tmux smoke only: wait for a stable post-grant resident before AC-O2's literal-key baseline, and assert the already-captured foreign-tab screen is unchanged for AC-O3.
+  Red: the direct pre-baseline `is_selectable == false` assertion reproduced `FAIL: candidate baseline was captured before its pre-granted permission result settled`. `fabfc73` adds one bounded native/screen predicate for candidate URL, active non-floating 28-column resident, no prompt, and `is_selectable: false`, then compares `foreign-before.screen` and `foreign-after.screen` byte-for-byte.
+- DONE: Keep `scripts/zellij-new-tab.sh` as the entry point; do not add a custom launcher, 7h/4d, leases, custom PTYs, or managed-tab architecture work.
+  The sole code commit changes `tests/zellij-tmux-smoke-test.sh`; the entry script, Rust plugin, task scope, 7h, and 4d are untouched.
+- DONE: Run the entry shell suite, release Rust tests/check, failure/TERM cleanup probes, and ten consecutive unmodified real smokes; record per-run evidence and any failure diff.
+  `./tests/zellij-new-tab-test.sh` passed 8/8, including forced new-tab failure rollback and TERM rollback; `cargo test --release` passed 134/134; `cargo check --tests --release` passed; `bash -n` and `git diff --check` passed.
+- DONE: AC-O2 repeat evidence.
+  Fresh smoke runs 1=0, 2=0, 3=0, 4=0, 5=0, 6=0, 7=0, 8=0, 9=0, 10=0; each printed the managed entry/toggle/foreign/cleanup PASS line and emitted no native identity diff.
+- DONE: AC-O3 visible safety evidence.
+  All ten green runs exercised the new byte-equal foreign-screen comparison alongside the pre-existing native pane/layout equality and candidate-count checks; no visible diff was emitted.
+- DONE: Failure and interruption cleanup probes.
+  A TERM sent after the dedicated tmux server became live exited the smoke 143 after its cleanup trap; a forced live-tmux loss made the smoke fail 1 (`isolated Zellij session did not become ready`) and its wrapper confirmed cleanup. No root/session/server survivor or standing-hash failure was reported.
+- SKIPPED: AC-I1 normal-consent captain live drill.
+  The headless fixture remains intentionally distinct from normal consent; return to validation for the held attached-client drill rather than claiming it here.
+
+### Summary
+
+The bounce fixes only the two refuted observations: the managed toggle baseline
+is now post-grant stable, and foreign-tab visual evidence is asserted. The
+repeated real packet is 10/10 green with exercised failure and TERM cleanup;
+the next remaining acceptance activity is validation's normal-consent drill.
