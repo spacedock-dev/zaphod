@@ -341,6 +341,63 @@ No current document should instruct users to apply or install this series.
   fork requires a later, explicit captain gate; this entity does not authorize
   one.
 
+## Cycle 3 reassessment — operator-bound disposition
+
+### Outcome used for the decision
+
+The real Zaphod outcome is the normal `zaphod [PATH]` entry journey: when
+invoked inside Zellij, it creates or focuses the workspace binding's managed
+tab and leaves the invoking foreign view unchanged. That outcome already gives
+the operator one owned dock, a stable managed-tab ID, and an attention loop in
+which session focus and provider-owned review work do not require tab hunting.
+
+Foreign-tab retrofit does not improve that journey. It changes a view Zaphod
+does not own, although the current architecture expressly excludes both a
+foreign-tab dock and a patched or forked Zellij. The roadmap also keeps `4d`
+outside the release path until the continuity drill records a concrete failure
+that needs a different boundary. No such failure is in this record.
+
+### Disposition
+
+**Deferred.** The rejected helper series cannot be repaired into an
+operator-facing deliverable by adding more planner tests. The existing
+`zaphod [PATH]` path has no caller for a foreign-tab transaction, and inventing
+one would reverse an explicit product boundary without an observed value
+failure. The planner spike, exact-base RED/GREEN replay, and inertness checks
+remain useful negative evidence; they do not authorize runtime activation.
+
+### Smallest conditional end-to-end boundary
+
+If a later captain-approved product decision names an explicit, opt-in
+foreign-tab outcome, begin with one response-bearing Zellij CLI operation, not
+with a helper or a second public surface. A Zaphod driver would invoke that
+operation only after an explicit user request; automatic retrofit, background
+rail election, and a blind `Alt /` action are not valid callers.
+
+The operation must carry the target session and stable `TabId`, a caller nonce,
+the layout, and retain policy. It must route through a new request, `Action`,
+and `ScreenInstruction` rather than wrap legacy `Action::OverrideLayout`; the
+screen must preflight the named tab, stage only the rail plugin, re-read the
+same tab's pane-ID/geometry fingerprint immediately before its one exact
+commit, and return exactly one typed `Applied` or `Rejected` result to the
+same CLI process. Focus, tab position, current cwd, current command, and a
+dump's `focus=true` must not select the target.
+
+The first proof would be a disposable official Zellij session running that
+real CLI operation against N=2 terminals. Its process observer records the
+CLI exit/result, `list-panes --json`, child PIDs, geometry, tab/base/swap
+state, and plugin/PTY side-effect messages before and after both a feasible
+layout and the 79+79 rejection. Rejection must leave every observation
+unchanged and return nonzero; success must retain both terminal IDs and PIDs
+while adding one rail. This is the smallest end-to-end check that could
+invalidate the conditional design. It remains a future upstream-only proof:
+Zaphod must still not select, install, pin, or require a patched runtime.
+
+No new spike is authorized now. This deferral relies on the documented managed
+view, foreign-view, and no-fork boundaries plus the preserved validation
+refutation; the already-proven pure planner and inert proof-kit mechanics are
+insufficient by themselves.
+
 ## Stage Report: ideation
 
 - DONE: Trace the exact Zellij 0.44.3 retained-override call graph and select the smallest upstreamable result-bearing seam that can preflight and atomically place all retained pane IDs without spawning or dropping a terminal.
@@ -479,3 +536,19 @@ process-evidence portion of AC-7. The subspace draft, decision record, per-AC
 evidence, refutation audit, and activation boundary are under
 `.spacedock-state/gates/zellij-transactional-retained-pane-override*`; no fork
 was installed, selected, shipped, or required.
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Reassess the rejected upstream transactional-override path against one real Zaphod operator outcome, not helper-only proof.
+  The `zaphod [PATH]` entry journey creates or focuses one managed tab while leaving the invoking foreign tab unchanged; retrofit adds no recorded value to that outcome.
+- DONE: Name the smallest end-to-end caller, identity, and process-observation boundary that could make it viable, or conclude it remains deferred.
+  Deferred; a later explicit product decision would first need one response-bearing CLI operation addressed by session, stable `TabId`, and nonce, plus a real N=2 process observer.
+- DONE: Preserve the inert no-fork/no-runtime-activation boundary and all rejected validation evidence.
+  The new disposition retains the cycle-3 refutation, exact-base replay, and proof-kit inertness evidence; it authorizes neither a runtime fork nor Zaphod activation.
+
+### Summary
+
+The current product outcome deliberately leaves foreign tabs unchanged, so the
+transactional override has no authorized caller and remains deferred. The
+record preserves one conditional host boundary and its first real process check
+without reviving the rejected helper series or selecting a patched runtime.
