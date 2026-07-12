@@ -1,6 +1,6 @@
 ---
 title: Zellij transactional retained-pane override for safe foreign-tab docking
-status: validation
+status: backlog
 score: 0.95
 source: j5 cycle-5 host-API blocker — captain selected Choice A, 2026-07-10
 started: 2026-07-10T15:03:06Z
@@ -11,8 +11,10 @@ pr:
 verdict: REJECTED
 mod-block:
 id: 4dt6vkakec3fmmpm5s0kgtch
-parked: 2026-07-12
-parked-reason: Captain parked the orphaned rejected upstream proof task; branch and reports retained, no active worktree or worker.
+parked:
+parked-reason: Captain reopened for ideation after rejected validation; branch and rejection evidence retained.
+reopened: 2026-07-12
+reopened-reason: Captain requested a new ideation pass rather than resuming the rejected upstream design directly.
 ---
 
 ## Problem
@@ -362,6 +364,11 @@ shipped fork.
 
 - **Cycle 1 — ideation gate held (2026-07-10).** The transactional planner and result contract are technically sound, but the next stage lacks a mergeable Zaphod-repository deliverable: a disposable external checkout alone cannot satisfy this workflow's local merge boundary. Revise the design to ship an inert upstream patch series plus a deterministic disposable apply/red-green harness in this repository. The installer, Cargo dependency graph, and runtime must not consume the patch; applying, pinning, vendoring, or requiring a fork still needs a later explicit captain gate.
 - **Cycle 2 — validation → implementation (2026-07-11): REJECTED.** Two clean exact-base replays prove only isolated helper APIs and inertness. No Zellij server operation, plugin event, or CLI command invokes the transactional path; commit does not compare the plan's stable `tab_id` with the target tab; the verifier omits the N=2 rejection test; and `pane-snapshots.json` contains declarative fixture material rather than observed pane/PID/process outcomes. Implementation must wire one real disposable server operation end to end, recheck tab identity and the retained-pane fingerprint immediately before a single commit, return an explicit result through the actual caller path, run success and impossible-layout N=2 cases through that path, and record externally observed pane IDs, geometry, process survival, zero terminal spawn/drop, and caller-visible rejection. Preserve the inert Zaphod boundary and do not install or select a fork.
+
+- **Captain reroute (2026-07-12) — reopen to ideation.** Reconsider the rejected
+  upstream boundary before any further implementation. Preserve the cycle-2
+  evidence and do not revive a runtime fork, direct patch activation, or a
+  helper-only substitute without a newly approved end-to-end boundary.
 
 ## Stage Report: ideation (cycle 2)
 
