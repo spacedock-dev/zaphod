@@ -1,13 +1,20 @@
-# Agent rail — prototype record and workspace delivery plan
+# Agent rail — archived prototype record and workspace delivery plan
+
+> **Archived prototype evidence — not a delivery plan.**
+> [`docs/roadmap.md`](../roadmap.md) is authoritative. The component delivery
+> order below is superseded and must not guide product task creation or
+> dispatch. This record preserves the prototype decisions and evidence that
+> explain the code that exists today.
 
 > Prototype plan: 2026-07-07 · target architecture:
-> `docs/zaphod-workspace-architecture.md`
+> [`docs/zaphod-workspace-architecture.md`](../zaphod-workspace-architecture.md)
 > agentsview v0.36.1 · subspace recon at HEAD 9be5fbc · zellij CLI 0.44.1
-> Dock container shipped at v3.12 (`docs/docking-approach.md`, historical prototype)
-> The shipped Zellij rail remains a prototype. New product work follows the
-> managed-view, hub, driver, dock, and provider boundaries below.
+> Dock container shipped at v3.12
+> ([`docs/docking-approach.md`](../docking-approach.md), historical prototype)
+> The shipped Zellij rail remains a prototype. This historical plan proposed
+> the managed-view, hub, driver, dock, and provider boundaries below.
 
-## Target delivery order
+## Historical component delivery order — superseded
 
 Land product work in this order:
 
@@ -129,9 +136,10 @@ automates the discovery.
 
 ## References & constraints
 
-- Target architecture and delivery order are defined in
-  `docs/zaphod-workspace-architecture.md` and above. The shipped dock
-  container remains documented in `docs/docking-approach.md`.
+- The target architecture is described in
+  [`docs/zaphod-workspace-architecture.md`](../zaphod-workspace-architecture.md).
+  The shipped dock container remains documented in
+  [`docs/docking-approach.md`](../docking-approach.md).
 - Landmine and seam facts above are from the 2026-07-07 agentsview spike
   (v0.36.1) and subspace recon (HEAD 9be5fbc), cited inline where they bear.
 - Constraints: single-user, single-machine. Row payload size limits are
