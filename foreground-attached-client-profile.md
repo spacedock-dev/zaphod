@@ -373,3 +373,20 @@ validator; no captain-live drill was run.
    immutable-lease, cleanup, no-TTY, and global-isolation behavior intact while
    repairing the readiness path; re-run the full offline packet before asking
    the same validation reviewer to recheck it.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Implement the reviewed raw-PTY readiness state loop: same-pane rechecks, fresh-nonce retry, and terminal mode as diagnostic only.
+  RED: the new driver regressions failed with missing `same_sole_terminal` and `None != 'canary-two'`; green `b847a3b` rechecks each probe/canary write, retries stale/absent observations with fresh nonces, and passed 7 driver tests plus three fresh real PTY lifecycles.
+- DONE: Separate bounded cold-build and post-build lifecycle phases with explicit markers, without allocating profile state or weakening deadlines.
+  RED: `FAIL: timed out waiting for profile value PROFILE_BUILD_STARTED`; green launcher output is `PROFILE_BUILD_STARTED=1` then `PROFILE_BUILD_READY=1` before root/session allocation, with a separately bounded 360-second build phase and unchanged 180-second driver lifecycle deadline.
+- DONE: Repair candidate-clone/deadline test defects, preserve all validated boundaries, and record red/green plus full offline evidence.
+  RED: the old candidate cloned stale launcher/driver bytes and the query-cap regression observed `[2.0] != [5]`; green copies the reviewed launcher/driver, resets `SECONDS` before the shared post-build deadline, uses one driver deadline across discovery/canary/lease, and captures the PTY artifact for cold-marker checks.
+
+### Summary
+
+Committed `b847a3b` on `spacedock-ensign/foreground-attached-client-profile`.
+The final packet passed `./tests/zellij-install-profile-test.sh all`, three
+fresh focused lifecycles, target-free cold build/lifecycle, 7 Python driver
+tests, 132 Rust tests plus `cargo check --tests`, and `go test ./...` with
+`go vet ./...`. No captain-live drill was run.
