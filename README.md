@@ -117,6 +117,26 @@ ZELLIJ_SESSION_NAME=<session> zellij action dump-layout
 Exactly one sidebar should remain before and after `Alt /`; every sidebar URL
 in the dump must name the primary checkout artifact.
 
+### Create a fresh managed tab
+
+To activate this checkout and create a fresh tab in an existing session, run:
+
+```bash
+./scripts/zellij-new-tab.sh --session WORK
+```
+
+The command builds this checkout, renders its WASM URL into an inline layout,
+and creates exactly one new tab. It also atomically updates only existing
+Zaphod keybind scopes in the selected config root: `Alt /` and `Alt .` point
+at this checkout, and `Alt Shift z` creates the stored `zaphod` layout. It
+never changes an existing tab.
+
+Use `ZELLIJ_CONFIG_DIR`, `ZELLIJ_CONFIG_FILE`, and `ZELLIJ_DATA_DIR` to run it
+against an isolated profile. The current invocation creates its tab at once;
+restart the Zellij server before relying on a newly written native keybind.
+
+The live test boundary is the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
+
 ### Test an unmerged worktree
 
 Run the profile from the checkout under test. `--cwd` sets the terminal leaf
