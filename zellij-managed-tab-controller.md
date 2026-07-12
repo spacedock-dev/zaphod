@@ -2,12 +2,12 @@
 id: fp8pn84km859qges2s2ffp5h
 title: Safe managed-tab entry and guarded keybindings
 status: ideation
-source: managed-view roadmap Sprint 2 controller delivery; ideation evidence preserved 2026-07-11
+source: outcome-first roadmap Sprint 1 safe managed-tab onramp; captain correction 2026-07-12
 started: 2026-07-12T06:45:43Z
 completed:
 verdict:
 score: 0.98
-worktree:
+worktree: .worktrees/zellij-new-tab-entry
 issue:
 pr:
 mod-block:
@@ -18,173 +18,309 @@ sprint-readiness: ready
 
 ## Problem
 
-Zaphod has no shipped entry point that creates or focuses one managed Zellij tab, and the current `Alt /` prototype still mutates ordinary tabs. Design the thin native controller and portable launcher seam that make `Alt Shift z` idempotent and make `Alt /` a no-op outside the recorded managed tab.
+Before Sprint 2 can surface real sessions and gates, an operator needs one
+safe, direct way into a Zaphod-owned tab. The value is deliberately small:
+from an ordinary Zellij tab, create a fresh tab made from the selected
+checkout's WASM; then use `Alt /` to open or collapse that tab's rail without
+ever changing a foreign tab.
 
-## Seed direction
+The prior controller/portable-CLI proposal is rejected. It put a controller,
+stable binding record, helper protocol, invocation witness, and `Run`-adjacent
+machinery ahead of the first usable action. It must not be repaired or used as
+an implementation dependency.
 
-Ideation must reuse the completed live spike evidence, define controller messages and permission flow, specify artifact preflight and visible failures, extend the disposable Zellij profile, and split offline from interactive acceptance. The CLI `Run` path remains a proving harness, not the production keybinding mechanism.
+The existing implementation evidence lives in
+`.worktrees/zellij-new-tab-entry` on `feature/zellij-new-tab-entry` at
+`c34436f`. It has the right narrow seam—an entry script, native `NewTab`, an
+absolute rendered layout, persistent `Alt /` `NoOp`, and a tmux-hosted
+fixture—but is not accepted as-is. In particular, it treats a fire-and-forget
+`reconfigure()` call and a local `toggle_route_installed` flag as authorization
+for a route that has not actually been observed. It has not proved a literal,
+authorized positive `Alt /` path or the desired second-client behavior in the
+same managed tab.
 
-## Dependency boundary
+## Required end value
 
-Ideation may proceed in parallel with the driver contract to expose interface pressure. Implementation must consume the approved managed-view contract and must not add pane adoption, hub, dock, provider, or tmux behavior.
+**Trigger:** The operator runs `scripts/zellij-new-tab.sh --session <name>` or
+presses native `Alt Shift z` after activating the selected checkout's Zellij
+configuration.
+
+**Visible result:** A fresh Zaphod tab appears with that checkout's candidate
+WASM. In that initialized tab, `Alt /` changes the rail's known docked/sliver
+state. In every foreign tab it does nothing: it creates no pane, does not load
+the WASM, and does not change layout, focus, geometry, process, or tab state.
+
+**Shared-tab rule:** The rail and swap state belong to the managed tab, not to
+one attached terminal. Two clients viewing the same initialized managed tab
+are both allowed to toggle that shared rail. A client-local runtime binding may
+be required by Zellij as delivery plumbing, but it must never become a
+client-private authorization scheme or require a client token.
+
+**Reproducible proof:** A real Zellij client inside an isolated tmux server
+sends literal `Alt Shift z` and `Alt /` bytes, captures the visible screen, and
+uses native Zellij pane/layout state to prove the positive managed-tab path,
+same-tab second-client path, and foreign-tab no-op. It cleans up the isolated
+roots and proves standing Zellij config/layout hashes did not change.
 
 ## Proposed approach
 
-Use a separate, thin Zellij WASM controller and a fixed portable-launcher helper. The controller captures trustworthy key invocation context, owns permission and visible-error UX, and calls one installed command. The helper owns workspace resolution, binding locks, artifact checks, and Zellij CLI convergence. Neither component parses providers, renders dock rows, or moves user panes.
-
-The production keybindings use `MessagePlugin`, never Zellij's `Run` action:
-
-```kdl
-bind "Alt Shift z" {
-    MessagePlugin "file:<CONTROLLER_WASM>" {
-        name "ensure-managed-view-v1"
-        launch_new true
-        floating true
-        controller "1"
-    }
-}
-bind "Alt /" {
-    MessagePlugin "file:<CONTROLLER_WASM>" {
-        name "toggle-managed-layout-v1"
-        launch_new true
-        floating true
-        controller "1"
-    }
-}
-```
-
-`launch_new true` is deliberate. In Zellij 0.44.3, `PipeSource::Keybind` carries no invoking pane, tab, or client. A fresh controller actor can map its plugin ID through `PaneManifest` to the tab in which Zellij launched it, translate that tab position through `TabUpdate` to a stable tab ID, and cross-check `get_focused_pane_info()` for the associated client. It must recover the pre-key focused terminal pane ID and a source cwd that equals that terminal's cwd; the actor's inherited cwd is corroborating evidence, not a substitute for pane identity. A missing, stale, or contradictory pane/tab/cwd witness rejects the request. The actor closes after success or a foreign-tab no-op, so no controller pane persists.
-
-The controller's event loop extends the prototype's pure `own_tab_position` and `active_tab_for_decision` seams. `pipe()` only validates and records one key intent. A later `PaneUpdate`, `TabUpdate`, or zero-delay `Timer` drains it after invocation evidence and permission state exist; blocking host calls never run from `load()` or `pipe()`.
-
-### Controller/launcher protocol
-
-After it has an invocation witness, the controller runs only the configured canonical executable with controller-generated arguments:
+Continue in the existing worktree; do not create a controller worktree or
+rewrite the entry path:
 
 ```text
-zaphod zellij key-request --protocol 1 --request-id ID --action ACTION \
-  --session-id SESSION --actor-pane-id ACTOR --invoking-tab-id TAB \
-  --invoking-tab-position POSITION --invoking-pane-id TERMINAL \
-  --invoking-cwd CWD
+.worktrees/zellij-new-tab-entry
+feature/zellij-new-tab-entry @ c34436f
 ```
 
-`run_command` has no standard-input channel, so request fields travel only in this fixed argument shape; key payloads never become commands or arguments. The helper writes one JSON result to standard output, and the controller correlates the `RunCommandResult` by `request_id`:
+1. **Fresh native entry.** `scripts/zellij-new-tab.sh` derives its repository
+   from its own physical path, builds that checkout's WASM, renders
+   `layouts/zaphod.kdl` with its canonical file URL, and atomically installs
+   the selected config root's layout and bindings. The explicit command creates
+   one fresh managed tab per invocation. It is intentionally not a
+   create-or-focus controller.
 
-```text
-KeyRequest {
-  protocol: 1,
-  request_id,
-  action: ensure_managed_view | toggle_managed_layout,
-  session_id,
-  actor_pane_id,
-  invoking_tab_id,
-  invoking_tab_position,
-  invoking_pane_id,
-  invoking_cwd
-}
+2. **Persistent fail-closed bindings.** In the Zaphod-owned keybinding scopes,
+   activation leaves `Alt /` as `NoOp` and binds `Alt Shift z` to native
+   `NewTab` with the selected absolute rendered layout path. It refuses an
+   unrelated `Alt /` binding rather than rewriting it. It never uses `Run`, a
+   `MessagePlugin` keybind that can load a missing pane, a controller WASM, or
+   a `zaphod zellij key-request` helper.
 
-KeyResult {
-  protocol: 1,
-  request_id,
-  outcome: created | focused | toggled | noop_foreign | rejected,
-  managed_tab_id?,
-  binding_generation?,
-  message?
-}
-```
+3. **Tab-scoped runtime toggle.** Only a visible, tiled resident rail in an
+   initialized Zaphod tab may arrange a runtime `MessagePluginId` route to its
+   existing plugin instance, after Zellij's ordinary `Reconfigure` permission.
+   The route is runtime-only and must not write the persistent config. A pipe
+   can act only when that resident's tab is the active managed tab; a floating,
+   absent, stale, or foreign resident ignores it. Receipt of a real direct pipe
+   plus the native state transition—not the successful return of
+   `reconfigure()` or a local boolean—establishes that a route was usable.
 
-The controller supplies identity, not policy. The helper derives the canonical root from the invoking tab's terminal context, acquires the binding lock, and validates the session, reserved name, stable tab ID, and binding generation. `ensure_managed_view` creates the managed layout and records its returned stable ID when no binding exists, or focuses the recorded ID. `toggle_managed_layout` compares `invoking_tab_id` with the recorded managed ID before issuing any Zellij command; a mismatch returns `noop_foreign`. Both paths use stable-ID CLI actions. The helper serializes repeated requests, so concurrent `Alt Shift z` presses cannot create two tabs.
+4. **Two clients, one tab.** The implementation may install or refresh a
+   delivery route for each attached client if Zellij requires it, but each
+   route targets the existing shared resident and has identical tab-scoped
+   semantics. Once client B is looking at the initialized managed tab and has
+   completed the normal permission path, B's literal `Alt /` must toggle the
+   same rail. No per-client token, lease, active-client guess, or hidden
+   controller is introduced.
 
-This command is not the rejected option-2 keybinding harness: Zellij opens no terminal `Run` pane. The native controller launches the helper in the background and receives its result as an event.
+5. **Real, narrow harness.** Extend the tmux-hosted smoke in the same
+   worktree. It owns a short-lived tmux server and temporary Zellij
+   config/data/socket roots; it sends keys with `tmux send-keys`, captures
+   panes with `tmux capture-pane`, and queries Zellij with native actions.
+   It does not build a custom PTY controller, lease, raw-input canary,
+   process-group monitor, or readiness choreography.
 
-### Permissions, preflight, and failures
+### Rejected gaps to finish in the existing worktree
 
-The controller requests `ReadApplicationState` and `RunCommands` on first render, after its pane is registered. It waits for `PermissionRequestResult`; it never sends a consent keystroke. Denial renders `Zaphod controller permission denied; no changes made` and waits for explicit dismissal.
-
-Installation and every external `zaphod` entry preflight the exact canonical controller WASM, helper executable, managed layout, and keybinding artifact identity before changing a binding or session. A direct keypress proves the controller WASM loaded; the helper repeats layout and binding preflight before mutation. Missing helper, malformed result, stale binding, duplicate reserved name, command failure, or timeout leaves the error in the controller float. A missing controller artifact produces Zellij's own visible error float; installation must refuse to write such a keybinding. Successful and `noop_foreign` results close the actor without a persistent pane.
-
-### Pressure on the shared driver contract
-
-The parallel driver contract must support these Zellij requirements without adopting their transport:
-
-- `InvocationContext { session_id, stable_view_id, native_actor_id }` accompanies key-originated actions.
-- `ensure_managed_view` returns `Created { stable_view_id }` or `Focused { stable_view_id }`, not a Boolean.
-- `toggle_managed_layout` returns `Toggled`, `NoopForeign`, or `Rejected` and guarantees `NoopForeign` issued no native layout command.
-- Binding convergence is serialized and compare-validates the stable ID, reserved name, and generation before mutation.
-- Driver preflight reports missing controller, helper, layout, or unsupported stable-ID action separately.
-
-The shared contract need not expose `MessagePlugin`, permissions, plugin pane IDs, or `RunCommandResult`. Those remain Zellij adapter details.
+- Replace the optimistic fire-and-forget route authorization. A local
+  `toggle_route_installed` write immediately after `reconfigure()` cannot make
+  a later unobserved route safe or prove that it reached the intended client.
+- Add a literal, permission-authorized managed-tab `Alt /` proof. The current
+  smoke proves entry and foreign inertness but not the positive key path.
+- Add the two-client same-tab proof. The current branch describes a
+  second-client route as inert; that is the rejected client-private behavior.
+- Retain the current-checkout identity proof through script, native binding,
+  live pane inventory, and dumped layout. A stale global `zaphod.kdl` or WASM
+  URL is a failure.
 
 ## Riskiest unproven mechanism
 
-The completed option-2 spike proved stable-ID convergence and guards only when a transient CLI `Run` pane supplied `ZELLIJ_PANE_ID`. It did not prove that a `MessagePlugin launch_new true` actor always lands in the keypressing tab, can recover the pre-key terminal pane ID and workspace cwd after its float opens, can derive that tab's stable ID before acting, and closes without persistent focus, pane, geometry, or process changes. This invocation-witness mechanism must be tested first. If it cannot distinguish two attached clients on different tabs, loses source identity when its float takes focus, or Zellij routes the message to an older instance, the design is invalid; do not fall back to active-tab, pane, or cwd guessing.
+**A runtime `MessagePluginId` route can support a literal `Alt /` from two
+attached clients viewing the same initialized tab, while a literal `Alt /`
+from a foreign tab remains inert.** Unit tests can prove decision guards but
+not Zellij's actual runtime delivery. This needs a narrow tmux-hosted spike
+before further polish.
+
+If Zellij cannot provide that behavior with the existing resident layout and
+runtime route, stop at the observed limitation and return it for a captain
+decision. Do not revive the rejected controller/CLI/lease architecture merely
+to force the test through.
 
 ## Acceptance criteria
 
 ### Offline
 
-**AC-1 — Native key invocation has a trustworthy pane, cwd, and stable-tab witness.** In a disposable Zellij 0.44.3 session, fresh `launch_new` controller actors invoked from three tabs with distinct terminal and cwd canaries, including two attached clients focused on different tabs, report the exact pre-key terminal pane ID, keypressing tab's independent stable ID, and source cwd on every attempt and leave no controller pane after exit.
-Verified by: before/after `list-tabs --json` and `list-panes --json --all` snapshots over at least five invocations per tab; actor and focused pane IDs mapped through `PaneManifest` and `TabUpdate`; reported cwd compared with the pre-key focused terminal baseline; terminal pane IDs, PIDs, focus, and geometry compared after actor exit. Any cross-client or cwd mismatch invalidates the design.
+**AC-O1 — Explicit native entry produces a fresh tab from the invoking
+checkout.** From an isolated root whose initial config contains a stale
+Zaphod URL, the entry script is run from the selected worktree, Zellij is
+restarted to load the generated native binding, and literal `Alt Shift z`
+creates exactly one new managed tab. The live tab contains the canonical WASM
+URL from that worktree and no stale URL.
 
-**AC-2 — Managed entry is idempotent under repetition and concurrency.** The first `Alt Shift z` request creates one managed tab; three sequential requests and two near-simultaneous requests focus the same stable tab ID and create no additional tab or terminal.
-Verified by: an independent pre-key tab/pane baseline, helper outcomes, recorded binding ID/generation, returned stable IDs, final tab count, pane IDs, and PIDs. The expected delta is exactly one managed tab on the first request and zero thereafter.
+Verified by: compare native pre/post `list-panes --json --all` tab inventory
+(one additional tab); inspect the candidate plugin URL in both that inventory
+and `action dump-layout`; and compare it to the canonical URL derived from the
+selected worktree's built artifact. `tmux capture-pane` must show the
+candidate rail or its normal permission prompt. The expected candidate URL and
+tab-count delta come from the selected checkout and Zellij state, not from a
+generated config string.
 
-**AC-3 — `Alt /` is disabled outside the managed tab.** Requests from every foreign tab return `noop_foreign` without issuing a native layout action; a request from the managed tab advances exactly one known managed swap state.
-Verified by: helper action logs plus before/after stable tab IDs, active swap name, pane IDs, PIDs, focus, and geometry. Every foreign snapshot must equal its settled baseline; the managed request changes only its swap state and expected geometry.
+**AC-O2 — A literal authorized `Alt /` changes only the initialized managed
+tab's known rail state.** With the normal `Reconfigure` permission granted in
+the isolated test profile, a literal `Alt /` sent while the managed tab is
+active changes its native swap state between the layout's `docked` and
+`undocked` forms. It does not add a pane, replace a process, or change the
+candidate rail URL.
 
-**AC-4 — Permission and artifact failures fail visibly and closed.** Permission denial, missing helper, missing or invalid layout, stale managed ID, duplicate reserved name, malformed helper result, and timed-out helper never create a second managed tab or change a foreign layout.
-Verified by: exact controller message/outcome and final tab/pane/PID snapshots for each negative case. No test automates a permission response; the denial case waits for `PermissionRequestResult`.
+Verified by: take native pane, process/PID, geometry, focus, and dumped-layout
+snapshots immediately before and after the literal key; require the reported
+swap state/managed layout shape to change as expected while the rail plugin
+identity and all existing pane identities remain equal. Capture the visible
+tmux pane for the same transition. A helper call or direct plugin method does
+not satisfy this criterion.
 
-**AC-5 — The controller remains an adapter.** Its pure state machine accepts only the two key intents, waits for permission and an invocation witness, launches only the configured helper, correlates one result, and closes or renders an error.
-Verified by: Rust unit tests extending `own_tab_position` and `active_tab_for_decision` behavior with stale/mismatched TabUpdate fixtures, duplicate presses, permission states, unexpected pipe sources, malformed results, and timeouts; host-call fakes prove `load()` and `pipe()` emit no blocking call.
+**AC-O3 — A second attached client may toggle the same managed tab.** Attach
+clients A and B to the same isolated Zellij session and put both on the
+initialized managed tab. After the ordinary permission path is available to
+both, literal `Alt /` from A changes the shared swap state and literal `Alt /`
+from B changes it back. Neither press creates a new sidebar/plugin pane or
+rewrites the persistent config.
+
+Verified by: use two tmux panes attached to the same Zellij session; record
+the managed tab's native state and candidate plugin/pane count before A, after
+A, and after B; capture both client screens; and compare the isolated
+`config.kdl` hash before and after the two presses. The expected two opposite
+state changes derive from `layouts/zaphod.kdl`'s docked/undocked swaps.
+
+**AC-O4 — Foreign-tab `Alt /` is a real no-op even after runtime routing.**
+After AC-O2 or AC-O3 has established a usable managed route, switch an attached
+client to a sidebar-less foreign tab and send literal `Alt /`. The foreign tab
+does not create or focus a candidate pane and its pane inventory, PID,
+geometry, focus, active-tab selection, and dumped layout are unchanged.
+
+Verified by: normalized native `list-panes --json --all --command --geometry
+--state --tab` and `dump-layout` snapshots before/after the key must be byte
+equal for the foreign tab; the tmux capture must show no Zaphod launch or
+layout transition; and candidate plugin count must remain unchanged. This is
+run after—not before—the positive route so it catches a leaked runtime route.
+
+**AC-O5 — The smoke is disposable and preserves standing state.** Every smoke
+outcome, including permission refusal, a failed candidate build, and
+interruption, removes its Zellij session, dedicated tmux server, and temporary
+root. It leaves the operator's standing config and `layouts/zaphod.kdl` hashes
+unchanged.
+
+Verified by: the test records pre/post SHA-256 states for both standing files,
+checks the tmux server and isolated Zellij session are gone in cleanup, and
+asserts the temporary root does not exist. Failure paths use an independent
+sentinel standing root to prove cleanup rather than only a happy-path log.
 
 ### Interactive
 
-**AC-6 — Real key UX is acceptable.** In CL's disposable attached profile, real `Alt Shift z` creates then focuses one managed tab, and real `Alt /` toggles there while doing nothing visible to foreign layouts.
-Verified by: CL presses both configured keys from managed and foreign tabs, repeats entry three times, and confirms navigation, focus restoration, controller-float flicker, and latency are acceptable. CLI action simulation cannot settle this AC.
+**AC-I1 — The operator can use the first Sprint 1 journey without tab
+hunting.** In an attached disposable session, CL invokes the selected
+checkout's entry script or presses `Alt Shift z`, approves the ordinary
+permission prompt, sees the selected candidate rail, toggles it with `Alt /`,
+and confirms `Alt /` is inert from a foreign tab. A second client on the same
+managed tab can also toggle it.
 
-**AC-7 — First-run consent and errors are understandable.** The first real keypress presents one controller permission prompt; denial and one missing-helper drill explain that nothing changed and allow dismissal without trapping focus.
-Verified by: CL observes and resolves the permission prompt manually, then reviews the denial and missing-helper surfaces in the disposable profile.
+Verified by: CL's live drill follows the printed tmux-harness commands, with
+native pane/layout snapshots retained beside the captured screen. The drill
+records the candidate checkout, both client/tab positions, the managed swap
+transitions, and the unchanged foreign baseline. It is not settled by unit
+tests or configuration inspection.
 
 ## Test plan
 
-1. Build the smallest instrumented controller actor and test AC-1 before implementing the helper. Launch it with `MessagePlugin launch_new true` from three distinct-cwd tabs and two clients; record its plugin ID, manifest tab position, stable TabUpdate ID, inherited or focused source cwd, and `get_focused_pane_info()` result. Stop if any request cannot prove its tab and cwd origin or leaves persistent pane/focus/geometry changes.
-2. Define pure request, result, binding-decision, and controller-state types. Add failing tests for foreign no-op, stale evidence, permission denial, duplicate requests, malformed results, and timeout before implementing transitions.
-3. Add the fixed helper command and disposable binding root. Prove one first create, three repeated focuses, and two near-simultaneous requests against tab and pane inventories.
-4. Add guarded stable-ID toggle. Compare managed and every foreign tab before and after; record native actions so a foreign no-op proves no command ran.
-5. Run each failure drill with isolated controller URL, layout, binding, and permission roots. Never alter the standing config, layout, data directory, or WORK session.
-6. Extend `scripts/zellij-worktree-test-profile.sh` with controller artifact/config inputs and printed `list-tabs`/`list-panes` inspection commands. Keep real single-line Zellij shapes whenever a dumped fixture is unavoidable; this design should rely on JSON inventories instead of parsing dumps.
-7. Run Rust `cargo test` and `cargo check --tests`, the canonical shell profile suite, and the interactive AC-6/AC-7 script in a disposable attached session.
+1. **Run the smallest real delivery spike first.** In the existing worktree,
+   start Zellij in an isolated tmux server, activate the selected layout,
+   attach two clients, complete the normal permission path, and drive literal
+   `Alt Shift z` and `Alt /`. Prove AC-O2 through AC-O4 before refactoring any
+   remaining branch code. If client B cannot toggle the shared tab, report the
+   actual Zellij route behavior; do not add a controller, CLI protocol, lease,
+   or custom PTY workaround.
+2. Add failing tests for the narrow code decisions: a persistent `NoOp` route;
+   a native absolute-path `NewTab` route; no optimistic local authorization;
+   direct-pipe handling only by an active tiled resident; and foreign/floating/
+   absent state being inert. Extend the existing pure helpers around
+   `runtime_toggle_keybind_kdl`, `should_route_toggle_to_self`, and
+   `decide_toggle`; do not add a new driver layer.
+3. Complete `scripts/zellij-new-tab.sh` and its config transformer with
+   current-checkout artifact identity, atomic write/rollback, conflicting
+   non-Zaphod binding refusal, and isolated-root fixture coverage.
+4. Make the tmux smoke automate AC-O1, AC-O2, AC-O4, and cleanup. It may use a
+   deliberately pre-authorized permission fixture for headless coverage, but
+   it must never fake consent with injected permission keystrokes. Retain the
+   normal consent flow for AC-I1.
+5. Extend the smoke to attach client B and automate AC-O3 if Zellij's
+   permission fixture permits it; otherwise leave a short, exact manual
+   two-client command sequence and run it for AC-I1. Do not call an unrun
+   manual drill a passed automated gate.
+6. Run the focused shell suites, Rust tests, `cargo check --tests`, the
+   tmux-hosted smoke, and `git diff --check`. Review the actual Zellij/tmux
+   state before presenting the captain-live drill.
 
 ## Documentation diff proposed at this gate
 
-- In `docs/zaphod-workspace-architecture.md`, replace the abstract controller paragraph with the two key intents, fresh-actor invocation witness, fixed helper boundary, exact permissions, foreign `NoopForeign`, and structured failure outcomes.
-- In `README.md`, keep the shipped prototype instructions clearly historical and add a managed-controller usage section only after the real key drill passes.
-- In the generated/disposable config documentation, show `launch_new true` and canonical controller identity; do not install or recommend the binding until AC-1 and CL's interactive gate pass.
+- `docs/roadmap.md` names this as Sprint 1's first walking skeleton: safe
+  door, visible candidate tab, tab-scoped toggle, and tmux proof. It does not
+  put it behind `7h`.
+- `README.md` documents the stable entry command, the native `Alt Shift z`
+  binding, `Alt /`'s managed-tab-only meaning, and the selected-worktree
+  identity expectation. It removes instructions that recommend first-toggle
+  retrofit of an ordinary tab.
+- `docs/zellij-tmux-smoke-harness.md` records literal key delivery, positive
+  managed toggle, same-tab two-client behavior, foreign no-op, and disposable
+  cleanup. It explicitly excludes custom PTY/lease machinery.
+- `docs/zaphod-workspace-architecture.md` replaces the stale controller/CLI
+  account with this Sprint 1 onramp. The broad future launcher/driver remains
+  architectural direction, not a prerequisite to the first operator journey.
 
 ## Out of scope
 
-- pane adoption or `break_panes_to_tab_with_id`;
-- workspace hub, dock TUI, providers, `grout`, or item protocols;
-- tmux behavior beyond the shared-contract pressure listed above;
-- foreign-tab layout retrofit, retained-layout transactions, or a Zellij fork;
-- changing the current sidebar renderer or row behavior;
-- standing global config/layout edits during implementation; and
-- automatic permission or consent responses.
+- `7h`, `4d`, ProfileLeaseV1, custom PTY control, leases, raw-input canaries,
+  process-group choreography, or another foreground-profile test system;
+- a new controller WASM, `Run` pane, portable `key-request` CLI, persistent
+  managed-tab record, client tokens, or active-client identity guessing;
+- create-or-focus/adoption semantics, pane moves, workspace hub, tmux product
+  driver, provider ingestion, gate pooling, or review resolution;
+- retrofitting a foreign tab, spawning a rail from `Alt /`, or changing a
+  foreign layout; and
+- rewriting the existing entry worktree into a new branch or worktree.
 
 ## Stage Report: ideation
 
-- DONE: Turn the completed option-2 spike evidence into a minimal controller protocol for idempotent Alt Shift z and managed-tab-only Alt /, including permissions, artifact preflight, and visible failure behavior.
-  The design uses fresh native `MessagePlugin` actors plus a fixed `zaphod zellij key-request` helper, structured outcomes, `ReadApplicationState`/`RunCommands`, canonical artifact checks, manual consent, and closed visible failures.
-- DONE: Specify offline and interactive acceptance evidence using the disposable Zellij profile, stable IDs, pane inventories, geometry, and repeated entry without relying on the transient CLI Run path in production.
-  AC-1 through AC-5 use independent tab/pane/PID/cwd/geometry baselines and stable IDs; AC-6 and AC-7 reserve real-key flicker, latency, focus, consent, and error UX for CL's attached-profile demo.
-- DONE: Identify concrete pressure on the parallel driver contract without absorbing pane adoption, hub, dock, provider, tmux, or foreign-tab retrofit scope.
-  The contract needs invocation context, structured create/focus/toggle/no-op results, serialized stable-ID convergence, and typed preflight errors; Zellij messages, permissions, actors, and result events remain adapter-local.
-- DONE: Name the riskiest unproven mechanism and put its invalidating check first.
-  A fresh controller must recover the exact pre-key terminal pane ID, cwd, and stable tab ID across multiple tabs and clients without persistent mutation; failure forbids active-tab, pane, or cwd guessing.
-- DONE: Propose the user-visible documentation diff.
-  The gate records precise evergreen-architecture, README, and disposable-config updates, all conditional on AC-1 and CL's interactive acceptance.
+- DONE: Reframed the entity around the approved Sprint 1 walking skeleton:
+  explicit fresh entry, visible candidate tab, tab-scoped toggle, and real
+  tmux proof. The old controller/CLI design is explicitly rejected.
+- DONE: Reconciled the existing implementation evidence without treating it as
+  authority. Implementation continues in
+  `.worktrees/zellij-new-tab-entry` on `feature/zellij-new-tab-entry` at
+  `c34436f`; the exact gaps are optimistic route authorization, literal
+  positive toggle, same-tab second-client behavior, and identity proof.
+- DONE: Made foreign-tab immutability and current-checkout WASM identity
+  end-value criteria rather than helper mechanics. The required tmux proof
+  uses real key bytes, visible capture, native state, and disposable cleanup.
+- DONE: Kept `7h` and `4d` untouched and excluded the rejected lease/custom
+  PTY/controller path. No implementation code or separate implementation plan
+  was created in this stage.
+- DONE: Mapped every acceptance criterion to its independent planned evidence;
+  these are design citations, not claims that the live drill has run.
+  AC-O1 → *Fresh native entry*, `layouts/zaphod.kdl`, and test-plan steps 1,
+  3, and 4: native tab inventory plus the rendered candidate URL supply the
+  externally observable tab-count and artifact-identity oracle.
+  AC-O2 → *Tab-scoped runtime toggle*, `layouts/zaphod.kdl`'s named swaps, and
+  test-plan steps 1, 2, and 4: literal tmux key bytes and native layout/pane
+  snapshots settle the positive transition rather than a helper call.
+  AC-O3 → *Two clients, one tab*, *Riskiest unproven mechanism*, and test-plan
+  steps 1 and 5: the two attached tmux clients and their opposite native swap
+  transitions are the planned proof; it remains unrun until implementation.
+  AC-O4 → *Persistent fail-closed bindings*, `docs/zellij-tmux-smoke-harness.md`,
+  and test-plan steps 1 and 4: a post-route foreign snapshot is compared with
+  its independent baseline, so a leaked runtime route cannot pass by merely
+  leaving the initial foreign test inert.
+  AC-O5 → *Real, narrow harness* and test-plan step 4: pre/post standing-file
+  hashes plus tmux/session/root teardown are the independent cleanup oracle.
+  AC-I1 → *Required end value* and test-plan steps 4–6: CL's normal-consent,
+  two-client disposable drill remains the explicit live acceptance, not a
+  substitute for offline evidence.
+- DONE: Re-ran the ideation AC scan after adding those mappings. The task body
+  and report are its sole design record; no separate implementation plan was
+  written.
 
 ### Summary
 
-The design keeps the controller thin: it authenticates native key context, manages permission/error UX, and invokes one fixed portable helper. The first implementation check can invalidate the approach before helper work if Zellij cannot preserve an exact invocation witness without the transient CLI `Run` pane.
+`fp` is now the Sprint 1 safe-door task, not a controller prerequisite. It
+owns only the path an operator can actually use: fresh native tab entry,
+managed-tab-only `Alt /`, and proof that another client on that same tab can
+use the shared rail while foreign tabs remain unchanged.
