@@ -70,28 +70,22 @@ Build and install only from the primary checkout:
 
 The installer derives the primary checkout from Git's common directory and
 refuses linked worktrees, even when `ZELLIJ_CONFIG_DIR` points to a writable
-destination. It also requires every Zaphod `MessagePlugin` in the effective
-`config.kdl` to use the primary checkout's canonical WASM URL and `rail "1"`.
-On a mismatch, it reports each offending URL and writes nothing. It never
-rewrites keybinds.
+destination. It also requires every remaining Zaphod `MessagePlugin` in the
+effective `config.kdl` to use the primary checkout's canonical WASM URL and
+`rail "1"`; on a mismatch, it reports each offending URL and writes nothing.
+It never rewrites keybinds. Configure persistent `Alt /` as `NoOp` before
+running it.
 
-For the one-time cleanup, build the primary checkout and deliberately repoint
-each Zaphod keybind to
+For the one-time cleanup, build the primary checkout and point the Zaphod
+navigation route at
 `file:<PRIMARY_CHECKOUT>/target/wasm32-wasip1/release/zellij-sidebar.wasm`.
-Each message block must include `rail "1"`. This is the reference shape, not a
-worktree-install recipe:
+Each message block must include `rail "1"`; leave `Alt /` fail-closed. This is
+the reference shape, not a worktree-install recipe:
 
 ```kdl
 keybinds {
     shared {
-        bind "Alt /" {
-            MessagePlugin "file:<PRIMARY_CHECKOUT>/target/wasm32-wasip1/release/zellij-sidebar.wasm" {
-                name "toggle"
-                floating true
-                skip_cache true
-                rail "1"
-            }
-        }
+        bind "Alt /" { NoOp; }
         bind "Alt ." {
             MessagePlugin "file:<PRIMARY_CHECKOUT>/target/wasm32-wasip1/release/zellij-sidebar.wasm" {
                 name "navigate"
@@ -99,6 +93,9 @@ keybinds {
                 skip_cache true
                 rail "1"
             }
+        }
+        bind "Alt Shift z" {
+            NewTab { layout "zaphod"; }
         }
     }
 }
@@ -114,8 +111,9 @@ ZELLIJ_SESSION_NAME=<session> zellij action list-panes --json -a -g -t
 ZELLIJ_SESSION_NAME=<session> zellij action dump-layout
 ```
 
-Exactly one sidebar should remain before and after `Alt /`; every sidebar URL
-in the dump must name the primary checkout artifact.
+On an initialized Zaphod tab, exactly one sidebar should remain before and
+after `Alt /`; every sidebar URL in the dump must name the primary checkout
+artifact.
 
 ### Create a fresh managed tab
 
@@ -126,10 +124,16 @@ To activate this checkout and create a fresh tab in an existing session, run:
 ```
 
 The command builds this checkout, renders its WASM URL into an inline layout,
-and creates exactly one new tab. It also atomically updates only existing
-Zaphod keybind scopes in the selected config root: `Alt /` and `Alt .` point
-at this checkout, and `Alt Shift z` creates the stored `zaphod` layout. It
-never changes an existing tab.
+and creates exactly one new tab. It atomically updates only existing Zaphod
+keybind scopes in the selected config root: `Alt Shift z` creates the stored
+`zaphod` layout, and persistent `Alt /` is `NoOp`. It never changes an
+existing tab.
+
+When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
+The rail then installs a temporary, current-client `Alt /` route to its own
+already-running plugin. `Alt /` toggles that rail only. In a foreign tab—or in
+a newly attached client before its rail has initialized—it safely does nothing
+and never creates a pane.
 
 Use `ZELLIJ_CONFIG_DIR`, `ZELLIJ_CONFIG_FILE`, and `ZELLIJ_DATA_DIR` to run it
 against an isolated profile. The current invocation creates its tab at once;
@@ -137,56 +141,27 @@ restart the Zellij server before relying on a newly written native keybind.
 
 The live test boundary is the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
 
-### Test an unmerged worktree
+### Historical worktree profile
 
-Run the profile from the checkout under test. `--cwd` sets the terminal leaf
-used by the retrofit drill:
-
-```bash
-./scripts/zellij-worktree-test-profile.sh --cwd "$PWD"
-```
-
-The command builds that checkout, creates isolated config, layout, data, and
-permission state, and launches an attached session from `explicit-cwd.kdl`.
-It prints the profile root, session, commit, candidate URL, and exact
-`list-panes`/`dump-layout` inspection commands. In another terminal, start a
-resident control from the same profile:
-
-```bash
-PROFILE_ROOT=<printed-profile-root>
-SESSION_NAME=<printed-session-name>
-zellij --config-dir "$PROFILE_ROOT/config" --data-dir "$PROFILE_ROOT/data" \
-  --session zaphod-control --new-session-with-layout zaphod
-```
-
-Press the profile's real `Alt /` and use the printed live-state commands to
-verify one candidate identity. Clean up the control before the attached drill:
-
-```bash
-zellij delete-session --force zaphod-control
-zellij delete-session --force "$SESSION_NAME"
-```
-
-The profile's exit and signal traps delete its session, config, data, and
-permission state, then fail if the standing global `config.kdl` or
-`layouts/zaphod.kdl` existence or SHA-256 changed. The profile never copies,
-rewrites, or restores global files.
+`scripts/zellij-worktree-test-profile.sh` is parked experimental evidence. It
+is not the candidate test path and does not define `Alt /` safety. Use the
+[isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md) for every
+real-key candidate check.
 
 ### Permissions
 
 On first launch in each disposable profile, the pane shows a permission prompt
-(`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`) — focus
-it and approve once; Zellij caches the grant only inside that profile's data
-root.
+(`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`,
+`Reconfigure`) — focus it and approve once; Zellij caches the grant only
+inside that profile's data root. `Reconfigure` changes only the current
+client's runtime keybinds; Zaphod does not save that route to disk.
 
 ## Status
 
-Working prototype (zellij 0.44.1): per-tab toggle, click/keyboard switching,
-plugin-local agent awareness, state/status lines, docked/sliver toggle. A
-tab without a sidebar gets one on its first `Alt /`: a one-time layout
-retrofit docks the rail, installs the swap set, and preserves the tab's
-pane arrangement (falling back to stacking the panes when the tab's
-layout cannot be dumped).
+Working prototype (zellij 0.44.3): per-tab toggle, click/keyboard switching,
+plugin-local agent awareness, state/status lines, and docked/sliver toggle.
+Create a rail with `scripts/zellij-new-tab.sh` or the initialized `Alt Shift z`
+binding. `Alt /` never creates or retrofits a tab.
 
 [SPEC.md](SPEC.md) records the shipped prototype and its numbered Zellij
 plugin landmines, including the historical rebuild guidance. For the evergreen

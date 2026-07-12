@@ -1,9 +1,13 @@
-# Docking via layouts — prototype findings and shipped approach
+# Docking via layouts — historical prototype findings
 
-> **Historical prototype record.** This document explains the shipped Zellij
-> WASM dock and its current-tab retrofit experiments. It is not the product
-> architecture. The evergreen direction uses one managed tab or window and is
-> defined in [`docs/zaphod-workspace-architecture.md`](zaphod-workspace-architecture.md).
+> **Historical prototype record — not an operational contract.** This document
+> records the earlier Zellij WASM dock and current-tab retrofit experiments.
+> They are superseded: create a managed tab with `Alt Shift z` or
+> `scripts/zellij-new-tab.sh`; persistent `Alt /` is `NoOp`, and an active
+> tiled rail may temporarily route it to its own plugin id. `Alt /` never
+> creates or retrofits a tab. The evergreen direction uses one managed tab or
+> window and is defined in
+> [`docs/zaphod-workspace-architecture.md`](zaphod-workspace-architecture.md).
 >
 > Investigation date: 2026-06-20 · shipped prototype validated 2026-07-02
 > zellij CLI 0.44.1 · `zellij-tile` locked at 0.44.3
@@ -264,12 +268,13 @@ deletes it.
   (a CLI `zellij pipe` with a mismatched `--plugin-configuration` spawns a new
   floating instance instead of reaching the docked one).
 
-## Shipped prototype architecture (validated live, 2026-07-02)
+## Historical prototype architecture (validated live, 2026-07-02)
 
-The end state, mirroring yazelix's model:
+The retired end state, mirroring yazelix's model:
 
-**The sidebar pane exists in every toggled tab's layout, permanently.** The
-default layout is chrome-only; a tab's first toggle retrofits the sidebar in.
+**The sidebar pane existed in every toggled tab's layout, permanently.** The
+retired default layout was chrome-only; its first toggle retrofitted the
+sidebar in.
 "Toggle" (`Alt /` and the `⇄` header control) never creates, hides, shows,
 moves, or destroys a pane — it only cycles the tab's `swap_tiled_layout`
 states:
@@ -353,14 +358,14 @@ conclusion this implied is superseded: concrete pane nodes spawn only under
 *override/tab* application, while **swap** application re-seats them — the
 mechanism Toggle v3 (below) is built on.
 
-**Retrofit arm — VERIFIED.** With the session's sole sidebar instance
+**Retired retrofit arm — VERIFIED.** With the session's sole sidebar instance
 floating in another tab, `Alt /` on a sidebar-less tab ran the cross-tab
 election (lowest pane id acted), the override hit the *active* tab rather
 than the actor's, the unnamed `tab` node preserved the tab's name, and
 post-retrofit toggling cycled cleanly.
 
-**Bootstrap gap — CONFIRMED, fix shipped with toggle v2.** In a fresh
-chrome-only session, the `Alt /` keybind's launch-if-missing spawned a
+**Retired bootstrap gap — CONFIRMED.** In a fresh chrome-only session, the
+then-`Alt /` keybind's launch-if-missing spawned a
 *floating* rail-"1" instance in the active tab. `own_tab == active` then
 routed every toggle to `next_swap_layout()` on a tab with no zaphod swap
 set: toggle-dead, and the resident blocked the retrofit election.
@@ -635,14 +640,14 @@ emits. All shipped at HEAD.
   stuck pane forever. A skipped poll shows the pane's previous status, never a
   blank, and heals on the next `TabUpdate`.
 
-- **Debounce and honor the launching press (v3.4).** A press for a tab whose
+- **Retired debounce and launch behavior (v3.4).** A press for a tab whose
   JIT pipeline is still in flight, or whose steer fired < 600ms ago, is
   swallowed — the pipeline's visible collapse lags the press, so a quick second
   press otherwise reads as an instant re-toggle. And a toggle pipe that reaches
   a just-launched instance before its first `PaneUpdate` (the keybind's
   launch-if-missing races its own pipe) is parked, not dropped, and consumed
   exactly once on the first manifest that names the instance with its active
-  tab known.
+  tab known. The current fail-closed route intentionally drops that press.
 
 - **Single-line chrome extraction (v3.11).** zellij's layout dump serializes a
   chrome or rail pane with its plugin child inline on one line —

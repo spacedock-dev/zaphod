@@ -293,6 +293,15 @@ zaphod_keybind_scopes() {
     ' "$1"
 }
 
+zaphod_noop_toggle_scopes() {
+    awk '
+        /^[[:space:]]*locked[[:space:]]*\{/ { scope = "locked" }
+        /^[[:space:]]*shared_except[[:space:]]+"locked"[[:space:]]*\{/ { scope = "shared_except_locked" }
+        /^[[:space:]]*normal[[:space:]]*\{/ { scope = "normal" }
+        /^[[:space:]]*bind "Alt \/"[[:space:]]*\{[[:space:]]*NoOp;[[:space:]]*\}/ { print scope }
+    ' "$1"
+}
+
 test_new_tab_activates_isolated_roots() {
     local root expected_url
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
@@ -340,6 +349,10 @@ test_new_tab_activates_isolated_roots() {
         fail "native keybind did not route through the stored Zaphod layout"
     [ "$(zaphod_keybind_scopes "$FIXTURE_CONFIG_FILE")" = $'locked\nshared_except_locked' ] ||
         fail "activation routed Alt Shift z outside the scopes that own Zaphod"
+    [ "$(grep -Fc 'bind "Alt /" { NoOp; }' "$FIXTURE_CONFIG_FILE")" -eq 2 ] ||
+        fail "activation did not leave a fail-closed Alt / binding in each Zaphod scope"
+    [ "$(zaphod_noop_toggle_scopes "$FIXTURE_CONFIG_FILE")" = $'locked\nshared_except_locked' ] ||
+        fail "activation routed the fail-closed Alt / binding outside Zaphod scopes"
     grep -F 'bind "Alt Shift x" { WriteChars "unrelated locked binding"; }' \
         "$FIXTURE_CONFIG_FILE" >/dev/null || fail "activation changed an unrelated locked binding"
     grep -F 'bind "Alt Shift x" { WriteChars "unrelated normal binding"; }' \

@@ -1,5 +1,5 @@
 # ABOUTME: Safely rewrites existing Zaphod MessagePlugin routes in a Zellij KDL config.
-# ABOUTME: Adds native Alt Shift z NewTab bindings only in scopes that already own Zaphod.
+# ABOUTME: Makes Alt / fail closed and adds native Alt Shift z only in Zaphod scopes.
 
 function die(message) {
     print "zaphod config activation: " message > "/dev/stderr"
@@ -70,6 +70,10 @@ function is_alt_shift_z_bind(code) {
     return code ~ /^[ \t]*bind[ \t]+"Alt Shift z"([ \t{;]|$)/
 }
 
+function is_alt_slash_bind(code) {
+    return code ~ /^[ \t]*bind[ \t]+"Alt \/"([ \t{;]|$)/
+}
+
 function is_zaphod_message_plugin(code) {
     return code ~ /MessagePlugin[ \t]+"[^"]*zellij-sidebar\.wasm([^"]*)?"/
 }
@@ -100,6 +104,8 @@ function replace_rail(line,    indent) {
 function clear_scope_buffer(    line_number) {
     for (line_number = 1; line_number <= scope_line_count; line_number++) {
         delete scope_lines[line_number]
+        delete skip_scope_line[line_number]
+        delete replace_with_noop[line_number]
     }
     scope_line_count = 0
     scope_active = 0
@@ -111,7 +117,11 @@ function emit_native_keybind(indent) {
     print indent "}"
 }
 
-function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod_count, alt_shift_z_count, plugin_active, plugin_depth, plugin_rail_seen, plugin_indent, skip_bind, skip_bind_depth, target_indent) {
+function emit_fail_closed_toggle(indent) {
+    print indent "bind \"Alt /\" { NoOp; }"
+}
+
+function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod_count, alt_shift_z_count, plugin_active, plugin_depth, plugin_rail_seen, plugin_indent, skip_bind, skip_bind_depth, target_indent, bind_start, bind_depth, bind_has_zaphod, bind_line, bind_code, bind_index, noop_bind_count) {
     scope_has_zaphod = 0
     zaphod_count = 0
     alt_shift_z_count = 0
@@ -164,6 +174,49 @@ function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod
 
     routed_scope_count++
     target_indent = leading_whitespace(scope_lines[1]) "    "
+
+    # A MessagePlugin action loads a floating pane when no matching plugin is
+    # running. Replace only the Zaphod-owned Alt / binding with NoOp before
+    # the generic URL/rail transform below sees its inner plugin block.
+    noop_bind_count = 0
+    for (line_number = 1; line_number <= scope_line_count; line_number++) {
+        line = scope_lines[line_number]
+        code = code_before_comment(line)
+        if (!is_alt_slash_bind(code)) {
+            continue
+        }
+        bind_start = line_number
+        bind_depth = brace_delta(line)
+        if (bind_depth <= 0) {
+            die("Alt / binding must use a multiline block")
+        }
+        bind_has_zaphod = is_zaphod_message_plugin(code)
+        line_number++
+        while (line_number <= scope_line_count && bind_depth > 0) {
+            bind_line = scope_lines[line_number]
+            bind_code = code_before_comment(bind_line)
+            if (is_zaphod_message_plugin(bind_code)) {
+                bind_has_zaphod = 1
+            }
+            bind_depth += brace_delta(bind_line)
+            line_number++
+        }
+        if (bind_depth != 0) {
+            die("unterminated Alt / binding")
+        }
+        if (bind_has_zaphod) {
+            noop_bind_count++
+            if (noop_bind_count > 1) {
+                die("multiple Zaphod Alt / bindings in one keybind scope")
+            }
+            replace_with_noop[bind_start] = 1
+            for (bind_index = bind_start; bind_index < line_number; bind_index++) {
+                skip_scope_line[bind_index] = 1
+            }
+        }
+        line_number--
+    }
+
     plugin_active = 0
     plugin_depth = 0
     plugin_rail_seen = 0
@@ -175,6 +228,13 @@ function emit_scope(    line_number, line, code, delta, scope_has_zaphod, zaphod
         line = scope_lines[line_number]
         code = code_before_comment(line)
         delta = brace_delta(line)
+
+        if (skip_scope_line[line_number]) {
+            if (replace_with_noop[line_number]) {
+                emit_fail_closed_toggle(target_indent)
+            }
+            continue
+        }
 
         if (line_number == scope_line_count) {
             emit_native_keybind(target_indent)
