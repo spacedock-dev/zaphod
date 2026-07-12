@@ -49,14 +49,18 @@ multi-client refinements remain deferred.
 
 ### One walking-skeleton path
 
-Add a small `grout subscribe --server <url> --zellij-session <name>` mode on
-current main. It performs one `agentsview session list --server <url> --json
---include-one-shot` snapshot, opens `/api/v1/events`, and re-lists when it
-receives `data_changed`; the event carries scope rather than session content.
-For each returned session, it reuses `BuildSessionRow` and `EmitRow` to send
-the existing `agent-event` JSON to the supplied Zellij session. The only
-session needed to prove the slice is a real current session whose recorded CWD
-equals the managed tab's origin terminal CWD.
+Add bb's new concrete lifecycle runner, `grout subscribe --server <url>
+--zellij-session <name> --rail-pane-id <id> --rail-url <candidate-url>`, on
+current main. One direct invocation creates one runner process; `--server`
+identifies its one real AgentsView subscription, while the remaining values
+are one observed resident-rail target, not discovery hints. It performs one
+`agentsview session list --server <url> --json --include-one-shot` snapshot,
+opens `/api/v1/events`, and re-lists when it receives `data_changed`; the
+event carries scope rather than session content. For each returned session, it
+reuses `BuildSessionRow` and `EmitRow` to send the existing `agent-event` JSON
+to that exact Zellij session. The only session needed to prove the slice is a
+real current session whose recorded CWD equals the managed tab's origin
+terminal CWD.
 
 The rail stays the projection and action owner. It reuses `apply_agent_event`,
 `rows_for_own_tab`, `bind_session`, and `decide_rail_click`: a single exact
@@ -66,21 +70,49 @@ tab, infers an origin from a title or path prefix, or opens a pane. This slice
 supports one initialized managed tab only; it does not define global or
 cross-tab association rules.
 
-The first slice deliberately stops rather than heals. A malformed source
-record is reported and skipped; an SSE EOF or source failure reports a visible
-subscriber error and exits for an operator restart. It does not auto-start
-AgentsView, reconnect, retry forever, expire departed rows, or pool a process.
-Those are later reliability work only if the completed operator loop exposes a
-measured need.
+### Subscription lifecycle ownership
+
+`grout subscribe` is bb's lifecycle owner. The new runner validates its exact
+target tuple—the Zellij session name, rail plugin pane/instance ID, and
+canonical candidate URL—before opening SSE. It
+then owns one local target-probe loop for its lifetime (including a probe
+before every pipe emission); that probe is not a second AgentsView
+subscription. The runner starts only while the tuple names a present resident
+rail in the intended managed tab. A session name, tab title, CWD, or candidate
+URL alone is never enough to select or retarget it. The resident rail plugin
+and Sprint 1 entry path neither start nor supervise this process.
+
+The runner owns only the resources it creates: its single SSE connection and
+its own short-lived `zellij pipe` children. Its cancellation context handles
+explicit operator stop (`SIGINT` or `SIGTERM`), source failure/EOF, and a
+target-probe result of session gone, original rail pane/instance absent, or
+canonical URL/identity mismatch. It then closes the SSE stream, stops or waits
+for its own pipe child, reports a named terminal reason (`target-lost` for
+target loss), and exits. A tab close, plugin exit, or replacement—even a new
+rail with the same URL but a different instance ID—therefore ends the old
+runner; only a fresh direct `grout subscribe` invocation with a newly observed
+tuple may create another one.
+
+Stopping is deliberately terminal rather than healing. A malformed source
+record is reported and skipped, but SSE EOF, source failure, or target loss
+does not reconnect, retry forever, auto-start AgentsView, restart the child,
+or follow a replacement rail. The runner has no authority to stop
+AgentsView; delete, kill, close, or reconfigure a Zellij session, tab, pane,
+or plugin; clear rows; or start a replacement. The rail plugin has no host
+process supervision or cleanup authority, and Sprint 1 does not implicitly
+own a Sprint 2 runner. Reconnect, row expiry, and pooling are later
+reliability work only if the completed operator loop exposes a measured need.
 
 ### Managed-tab integration contract
 
 At integration time, Sprint 1 need supply only an accepted fresh managed tab:
-the selected checkout's resident rail, one selectable terminal pane, ordinary
-Zellij `RunCommands` permission, and the session name passed to `grout`. The
-subscriber does not consume a `ProfileLeaseV1`, a second client, a custom PTY,
-or a managed-tab implementation API. It simply emits the existing pipe
-protocol into that Zellij session; the resident rail projects the row locally.
+the selected checkout's resident rail with observable plugin-pane/instance ID
+and canonical candidate URL, one selectable terminal pane, ordinary Zellij
+`RunCommands` permission, and the session name that `grout subscribe` probes.
+Sprint 1 does not start or supervise the runner. The runner does not
+consume a `ProfileLeaseV1`, a second client, a custom PTY, or a managed-tab
+implementation API. It simply emits the existing pipe protocol into the
+observed Zellij session; the resident rail projects the row locally.
 
 Implementation may begin from current `main` while Sprint 1 validation
 continues. The managed-tab smoke remains the integration and captain-live
@@ -108,14 +140,15 @@ new decision rather than rebasing by assumption.
 
 ### Riskiest unproven mechanism and smallest spike
 
-The unproven joint is the narrow live arrival path, not a profile handoff: one
-SSE `data_changed` must cause a new source session to reach the resident rail
-as a bound, focusable row. The first invalidating check is hermetic and runs
-on current main: a loopback SSE server changes its list fixture from empty to
-one session whose CWD equals the fixture's only managed-tab terminal; a fake
-Zellij recorder must receive one `agent-event` session row after the event.
-The test fails if the subscriber needs a lease, branch API, manual one-shot
-command, or a second tab.
+The unproven joint is the narrow live arrival path while its exact rail target
+is still present, not a profile handoff: one SSE `data_changed` must cause a
+new source session to reach the resident rail as a bound, focusable row. The
+first invalidating check is hermetic and runs on current main: a loopback SSE
+server changes its list fixture from empty to one session whose CWD equals the
+fixture's only managed-tab terminal; a fake target probe reports the observed
+rail tuple present, and a fake Zellij recorder must receive one `agent-event`
+session row after the event. The test fails if the runner needs a lease, branch
+API, manual one-shot command, a second tab, or ambient target discovery.
 
 After the Sprint 1 smoke passes, the smallest captain-live drill creates one
 real session in the managed tab's terminal CWD, observes its row after one
@@ -128,10 +161,11 @@ exercise a gate, foreign tab, reconnect, pooling, adoption, or second client.
 
 **AC-O1** — A real source arrival becomes a rail row without a manual
 one-shot command. Against a loopback SSE endpoint and a fake AgentsView list
-that changes from no sessions to one fixture session after `data_changed`,
-`grout subscribe` emits exactly one existing-format `agent-event` session row
-to the supplied Zellij session. The expected ID, CWD, state, and summary come
-from the source fixture, not from grout.
+that changes from no sessions to one fixture session after `data_changed`, an
+invoked `grout subscribe` first validates the exact present rail tuple, then
+emits exactly one existing-format `agent-event` session row to that supplied
+Zellij session. The expected ID, CWD, state, and summary come from the source
+fixture, not from grout.
 
 Verified by: a Go test with a loopback SSE server, a fake AgentsView binary,
 and a fake Zellij argv/payload recorder; it asserts the emitted JSON and the
@@ -156,13 +190,31 @@ Verified by: the recorded merge-base/diff/lease audit above plus the fresh
 current-main Go spike (`TestEmitEndToEnd|TestSessionRowFromFixture`). A branch
 or lease reference introduced by the implementation fails this boundary.
 
-### Captain-live (only after AC-O1 through AC-O3 and Sprint 1 smoke pass)
+**AC-O4** — bb's new `grout subscribe` runner has explicit, bounded lifecycle
+ownership. It validates the exact target tuple before opening its one source
+connection, then owns its target probe, SSE connection, and pipe children.
+With a fake target probe initially reporting that tuple, each of Zellij
+session exit, original rail pane/instance disappearance (tab close or plugin
+exit), and a replacement or URL mismatch cancels the fake SSE connection and
+any owned pipe child, emits `target-lost`, and makes no later pipe call,
+restart, or retarget. A fake SSE EOF/source failure is likewise terminal, not
+a reconnect. Neither path issues an AgentsView stop or Zellij
+delete/kill/close/reconfigure command.
+
+Verified by: Go lifecycle tests that execute the new runner against a
+controllable target probe, fake SSE endpoint, and Zellij argv/payload/process
+recorder. The expected target tuple and terminal reason are fixtures; the
+recorder asserts that only the runner's own connection and child work are
+cleaned up.
+
+### Captain-live (only after AC-O1 through AC-O4 and Sprint 1 smoke pass)
 
 **AC-I1** — An operator sees one real current session in the initialized
 managed tab and returns to its pane. In the Sprint 1 managed-tab smoke
-environment, one real source session under the terminal's CWD appears in the
-resident rail within one source event/list cycle. Clicking it focuses that
-same terminal, with no manual grout one-shot command or tab hunt.
+environment, an explicitly invoked `grout subscribe` first validates the
+managed rail target; one real source session under the terminal's CWD then
+appears in the resident rail within one source event/list cycle. Clicking it
+focuses that same terminal, with no manual grout one-shot command or tab hunt.
 
 Verified by: a captain drill retaining the source event/list observation,
 before/after native pane snapshots, and visible rail click. It runs only after
@@ -172,29 +224,39 @@ custom PTY result.
 ## Test plan
 
 1. **Run the current-main arrival spike first.** Add the loopback SSE/list
-   fixture (empty → one exact-CWD session), fake Zellij recorder, and one
-   `data_changed` frame. It must produce the row through current main without
-   a lease, rebase, or manual session-get invocation.
+   fixture (empty → one exact-CWD session), fake target probe initially
+   reporting the exact rail tuple, fake Zellij recorder, and one `data_changed`
+   frame. Execute the new `grout subscribe` runner; it must produce the row
+   through current main without a lease, rebase, ambient target discovery, or
+   manual session-get invocation.
 2. Add pure Go tests for snapshot/event dispatch and source error exit. Keep
-   one connection only; EOF/error is visible failure, not reconnect logic.
-3. Add Rust row-projection tests for the one managed-tab terminal, zero match,
-   and duplicate CWD cases. Reuse the current `agent-event` protocol and
-   click decider; do not add global/tab association state.
-4. Run the focused Go suite under `GOPROXY=off`, relevant Rust tests,
+   one connection only; EOF/error is a visible terminal failure, not reconnect
+   logic.
+3. Add target-lifecycle fakes around the new runner: session gone, original
+   rail instance absent, URL/identity mismatch, and same-URL replacement at a
+   new instance ID. Each must cancel the SSE/owned child work and report
+   `target-lost`, with no later pipe, retarget, restart, or external cleanup
+   command.
+4. Add Rust row-projection tests for the one managed-tab terminal, zero match,
+   and duplicate CWD cases. Reuse the current `agent-event` protocol and click
+   decider; do not add global/tab association state.
+5. Run the focused Go suite under `GOPROXY=off`, relevant Rust tests,
    `cargo check --tests`, and `git diff --check` from current main. Re-run the
    branch-diff/lease audit before any integration work.
-5. After Sprint 1 accepts its managed-tab smoke, run AC-I1's one-session
+6. After Sprint 1 accepts its managed-tab smoke, run AC-I1's one-session
    drill. A missing managed tab is a held integration gate, not a reason to
    rebase, revive 7h, or broaden the task.
 
 ## Documentation change
 
 Update the README agent-row guidance with the small `grout subscribe` command,
-its explicit AgentsView URL and Zellij session target, and the supported
-promise: in one initialized managed tab a new source session becomes a row
-that returns to its uniquely CWD-bound pane. State that source restart,
-departure cleanup, multi-tab association, and review behavior are not part of
-this first slice.
+its explicit AgentsView URL and observed Zellij session/rail-instance target,
+and the supported promise: in one initialized managed tab a new source session
+becomes a row that returns to its uniquely CWD-bound pane. State that the
+new `grout subscribe` runner owns start/stop; Ctrl-C, source failure, or target
+loss ends it without daemon, session, tab, pane, or plugin cleanup. Source
+restart, departure cleanup, replacement retargeting, multi-tab association,
+and review behavior are not part of this first slice.
 
 ## Out of scope
 
@@ -203,6 +265,8 @@ this first slice.
 - global-versus-tab gate association, gates or review controls, pooling,
   reconnect/backoff hardening, stale-row expiry, automatic source startup, or
   source-owned multi-session policy;
+- automatic runner restart, retargeting to a replacement tab/session/rail,
+  or subscriber authority to clean up AgentsView or Zellij-owned resources;
 - pane adoption, a hub, controller/CLI protocol, a second managed tab,
   cross-tab focus, or multi-client delivery refinements; and
 - any standing Zellij configuration mutation outside Sprint 1's accepted
@@ -559,3 +623,20 @@ managed rail and returns the operator to one uniquely CWD-bound pane. Current
 main already contains the row/payload seam, and the managed-tab branch adds no
 subscriber API, so implementation need not rebase. Sprint 1 remains the
 accepted managed-tab integration gate, not a lease dependency.
+
+## Stage Report: ideation (cycle 5)
+
+- DONE: Resolve the material lifecycle-ownership question for the one real AgentsView subscription.
+  AC-O1 and AC-O4 now name bb's new `grout subscribe` runner as creator and lifecycle owner, with `{session, rail-instance, candidate-URL}` as its only target tuple and its own target probe, SSE connection, and pipe children.
+- DONE: Make target loss and stop behavior checkable without widening the slice.
+  Session/tab/plugin exit, URL mismatch, and same-URL replacement at a new instance ID now cancel the runner with `target-lost`; EOF/source failure is terminal; no reconnect, retarget, restart, or AgentsView/Zellij cleanup authority is introduced. The Go lifecycle tests execute the new runner in AC-O4 and test-plan step 3.
+- DONE: Preserve the current-main, no-Sprint-1-rebase decision and the held integration gate.
+  AC-O2 retains its exact-CWD/no-focus ambiguity fixture, AC-O3's recorded current-main evidence is unchanged, and AC-I1 remains the held Sprint 1 managed-tab drill. This revision changes only bb's design, ACs, test plan, documentation intent, out-of-scope boundary, and report. No product code, 7h/4d record, lease, custom PTY, branch rebase, or managed-tab implementation change was made.
+
+### Summary
+
+The revised walking skeleton has one deliberately owned subscription:
+`grout subscribe` validates an observed resident rail, owns the resulting
+stream, and ends it when that exact target or its source ends. It cannot
+silently follow a replacement or clean up external resources. The bb ideation
+fold is ready for captain re-presentation.
