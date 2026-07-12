@@ -1,6 +1,6 @@
 ---
 title: Live sessions arrive and lead back to work
-status: backlog
+status: ideation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
@@ -8,7 +8,7 @@ sprint-readiness: ready
 blocked-on: 7h-validation-gate-before-implementation
 blocked-reason: Ideation is captain-approved now. Implementation and the live drill require the passed disposable-profile gate.
 score: 1.0
-started:
+started: 2026-07-12T00:02:21Z
 completed:
 verdict:
 worktree:
