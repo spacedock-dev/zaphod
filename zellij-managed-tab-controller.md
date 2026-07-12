@@ -328,3 +328,23 @@ The entry worktree now proves the first usable operator journey end to end
 without controller, lease, or custom PTY machinery. The only remaining
 acceptance work is the captain's normal-consent live drill; 7h and 4d were not
 read, changed, or used as dependencies.
+
+## Stage Report: validation
+
+- FAILED: Independently reproduce AC-O1 through AC-O4 against the committed entry-point worktree using the entity's real tmux/Zellij smoke evidence; do not trust the implementer report.
+  At clean `d5137e602dcef91a721852bffa099bb21380102c`, entry shell 8/8, Rust 134/134, release check, and successful real smokes reproduced AC-O1 plus the native portions of O3/O4; an unmodified repeated smoke refuted AC-O2 when the rail's `is_selectable` changed true→false between baseline and literal `Alt /` snapshots, and AC-O3 never compares its captured foreign visible screens.
+- DONE: Perform the required detached refutation audit and record concrete attacks, commit identity, and results; keep 7h/4d and custom PTY/lease machinery out of scope.
+  Detached `/tmp/zaphod-fp-refutation-d5137e6` at the same SHA found no persistent-route, foreign-tab, or direct-plugin-launch hole; its no-pregrant failure path cleaned root/session/tmux and preserved standing sentinels. 7h, 4d, leases, and custom PTYs were not used or changed.
+- DONE: Prepare the exact normal-consent captain drill and Subspace validation artifact for AC-I1; do not substitute a headless pre-grant for the live drill.
+  `gates/zellij-managed-tab-controller-validation.md` records the held disposable real-key drill, exact rejected finding, narrow revalidation packet, and required Subspace review/log location.
+- SKIPPED: AC-I1 normal-consent captain live drill.
+  Held until the repeated offline smoke proves a settled post-grant baseline; no headless pre-grant result is claimed as captain consent.
+
+### Summary
+
+Validation found two narrow proof gaps rather than a reason to change the
+entry architecture: the smoke snapshots a candidate before its pre-granted
+permission event finishes settling, and it retains but never asserts foreign
+visible-screen evidence. Return only a stable post-grant readiness condition,
+a foreign-screen assertion, and repeated-smoke proof to the existing worktree,
+then resume the captain drill.
