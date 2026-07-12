@@ -105,23 +105,32 @@ subagents with `relationship_type: "subagent"`, a real parent ID, and a
 
 The subscriber broadcasts the profile's eligible session rows once. Each
 rail instance decides visibility from its current `PaneManifest`; the source
-process never assigns a tab. Extend `rows_for_own_tab`, `bind_session`, and
-`decide_rail_click` with one pure `sessions_in_own_tab` projection:
+process never assigns a tab. Binding is globally unambiguous before it is
+current-tab-local: collect every listed, selectable, non-plugin pane in the
+profile's manifest, compare exact CWDs, and count matches without selecting a
+tab. Extend `rows_for_own_tab`, `bind_session`, and `decide_rail_click` with
+pure `global_session_candidates` and `project_session_for_own_tab` decisions:
 
-1. A session whose CWD matches no listed, selectable, non-plugin pane in the
-   rail's own tab is omitted from that rail entirely, even if a foreign tab
-   matches it.
-2. Exactly one own-tab CWD match renders a bound row. On click,
-   `decide_rail_click` re-evaluates the latest own-tab rows and CWD map, then
-   may return `FocusPane` for that one pane only.
-3. Two or more own-tab matches render the session as unbound and make the
-   click a no-op. A changed, missing, closed, or foreign pane also makes the
-   click a no-op. There is no `go_to_tab`, `show_self`, name, title, or CWD
-   prefix fallback.
+1. Zero profile-wide CWD matches omits the session from every rail.
+2. Exactly one profile-wide match renders a bound row only in that pane's own
+   rail. Rails in every other tab omit it.
+3. Two or more profile-wide matches render an unbound row in every rail that
+   owns a matching pane. Each click is a no-op. Thus a source session whose
+   CWD matches one pane in each of two tabs is unbound in both rails, not
+   bound once per tab.
 
-Thus a stale CWD entry outside the latest row set cannot bind, and focus can
-never cross tabs. The existing `focus_terminal_pane` call remains the only
-action after the pure decision has proved a unique current-tab pane.
+On click, `decide_rail_click` re-evaluates the same global candidate set and
+may return `FocusPane` only when it still contains exactly one pane and that
+pane belongs to the rail handling the click. A changed, missing, closed, or
+foreign pane also makes the click a no-op. There is no `go_to_tab`,
+`show_self`, session ID, title, path heuristic, active-tab value, raw tab ID,
+or CWD-prefix fallback.
+
+The manifest's tab membership only identifies where an already unique pane
+may render; it never breaks a tie. Thus a stale CWD entry outside the latest
+row set cannot bind, and focus can never cross tabs. The existing
+`focus_terminal_pane` call remains the only action after the pure decision
+has proved one profile-wide, current-rail pane.
 
 ### Freshness, expiry, and failure truth
 
@@ -175,8 +184,8 @@ no dependency on paused bc, qb, or 6v work.
 
 ### Offline (agent-reproducible)
 
-**AC-O1 — One profile-targeted subscriber converges from initial load, SSE,
-reconnect, and periodic refresh.** Against a loopback SSE server with
+**AC-O1** — One profile-targeted subscriber converges from initial load, SSE,
+reconnect, and periodic refresh. Against a loopback SSE server with
 recorded `data_changed` and heartbeat frames, a fake AgentsView list whose
 snapshots change, and a fake Zellij binary, the watcher emits the expected
 top-level rows immediately, re-emits a changed row after an event, performs a
@@ -188,7 +197,7 @@ Verified by: a hermetic Go test with an injectable clock and fake binaries;
 the fake Zellij argv/environment must equal the supplied `ProfileLeaseV1`
 target and must not contain an ambient profile value.
 
-**AC-O2 — Root filtering is metadata-authoritative and fails closed.** A
+**AC-O2** — Root filtering is metadata-authoritative and fails closed. A
 captured AgentsView list fixture contains one root, an `agent-` Claude child,
 and a `codex:` child. Both children carry source relationship metadata and
 share the root's CWD. The top-level predicate emits only the fixture-proven
@@ -200,19 +209,26 @@ Verified by: a Go list-decoding/filter test using the captured metadata-only
 fixture and a fake AgentsView argv recorder. Its expected root/child table is
 recorded outside the filtering function.
 
-**AC-O3 — Current-tab scope, ambiguity, and focus never guess.** A real
-single-line `list-panes --json -a -g -t` capture is adapted into a fixture
-with an own-tab unique CWD match, a foreign-tab match, and duplicate own-tab
-matches. The unique own-tab row is visible and decides `FocusPane`; the
-foreign-only row is absent; the duplicate stays visible but unbound and its
-click decides nothing. A stale CWD map entry for a closed pane cannot alter
-any result.
+**AC-O3** — Current-tab scope, profile-wide ambiguity, and focus never
+guess. A real single-line `list-panes --json -a -g -t` capture is adapted
+into fixtures with a unique profile-wide CWD match, a foreign-only match, and
+duplicate matches. The exact two-tab duplicate fixture has terminal pane 41
+in rail A and terminal pane 84 in rail B, both with CWD
+`/work/shared`, plus one source session with that same CWD. Its expected
+result is an unbound row and `ClickAction::None` in rail A, and the same
+unbound row and `ClickAction::None` in rail B; neither decision may produce
+`FocusPane(41)` or `FocusPane(84)`. A unique profile-wide own-tab row remains
+visible and decides `FocusPane`; a foreign-only row is absent. A stale CWD
+map entry for a closed pane cannot alter any result.
 
-Verified by: Rust tests for `sessions_in_own_tab`, `bind_session`, and
-`decide_rail_click`, followed by `cargo test && cargo check --tests`. No
-layout dump is parsed or used for this task.
+Verified by: Rust tests for `global_session_candidates`,
+`project_session_for_own_tab`, `bind_session`, and `decide_rail_click`,
+including `two_tabs_same_cwd_never_binds_or_focuses`, followed by
+`cargo test && cargo check --tests`. The two-tab fixture is recorded in
+Zellij's real single-line `list-panes` JSON shape; no layout dump is parsed
+or used for this task.
 
-**AC-O4 — Failure is bounded and stale rows have a finite, truthful life.**
+**AC-O4** — Failure is bounded and stale rows have a finite, truthful life.
 A burst of `data_changed` during a blocked refresh causes no concurrent
 refreshes and exactly one coalesced follow-up. EOF, silent SSE, list errors,
 and a wedged pipe stay within the reconnect and five-second pipe budgets.
@@ -226,8 +242,8 @@ prove no child survives the timeout.
 
 ### Captain-live (only after AC-O1 through AC-O4 and 7h pass)
 
-**AC-I1 — A real current-tab interruption appears and leads back to its pane
-without tab hunting.** In a fresh passed-7h profile, the metadata baseline
+**AC-I1** — A real current-tab interruption appears and leads back to its pane
+without tab hunting. In a fresh passed-7h profile, the metadata baseline
 and the leased profile's `list-panes` output agree that exactly one
 top-level, current-tab session is eligible. It appears after the initial or
 SSE-driven refresh within the source's 10-second coalescing floor plus one
@@ -259,8 +275,13 @@ and a captain observation of the row click.
    coalescing with loopback SSE and fake AgentsView/Zellij binaries.
 5. Extend the Rust event model with parsed timestamps, then test stale,
    expired, and renewed rows with an injected clock. Add current-tab scope,
-   ambiguity, closed-pane, and revalidated-click cases around the existing
-   binding functions.
+   profile-wide ambiguity, closed-pane, and revalidated-click cases around
+   the existing binding functions. Freeze the exact two-tab same-CWD fixture:
+   rails A/B own terminal panes 41/84, both map to `/work/shared`, and the
+   source session has that CWD. `two_tabs_same_cwd_never_binds_or_focuses`
+   must return unbound/`ClickAction::None` for both rails and never any
+   `FocusPane`, without a session-ID, title, path, active-tab, or raw-tab-ID
+   tie-breaker.
 6. Run `cd grout && GOPROXY=off go test -count=1 ./... && go vet ./...`,
    then `cargo test && cargo check --tests`. Only after those checks and 7h
    pass, run AC-I1's disposable-profile drill. A missing profile or source
@@ -325,3 +346,21 @@ Cycle 2 makes the ideation evidence auditable without changing the design.
 Each AC now points to a concrete fixture, pure seam, source record, test-plan
 step, or deliberately held live-profile proof. No code, profile, 7h, or 4d
 state changed.
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Revise the design, AC-O3, and test plan so a source CWD shared by panes in two tabs cannot focus either pane.
+  AC-O3 now requires profile-wide candidate counting before current-tab rendering: a shared CWD renders unbound in both matching rails, and `decide_rail_click` returns `ClickAction::None` unless one profile-wide candidate remains.
+- DONE: Add the exact two-tab same-CWD fixture and test evidence without adding a heuristic tie-breaker.
+  AC-O3 and test-plan step 5 name `two_tabs_same_cwd_never_binds_or_focuses`: panes 41 and 84 in rails A/B both map to `/work/shared`; the same-CWD source session is unbound with no `FocusPane` in either rail. The cited pure seams are `global_session_candidates`, `project_session_for_own_tab`, `bind_session`, and `decide_rail_click`; tab membership never selects a candidate.
+- DONE: Keep the revision inside this session task and preserve the held live-profile boundary.
+  This cycle changes only the session design, AC-O3, test plan, and report. It adds no code, profile run, 7h/4d mutation, session-ID/title/path/active-tab/raw-tab-ID tie-breaker, or other-task change.
+  AC-O1 retains its `Subscriber lifecycle` loopback-SSE/fake-profile-target proof; AC-O2 retains its captured root/Claude-child/Codex-child metadata fixture; AC-O4 retains its injected-clock and bounded-process proof; and AC-I1 remains the deliberately held post-7h lease-to-row drill. Their cycle-2 citations and verification sources are unchanged.
+
+### Summary
+
+Cycle 3 makes CWD ambiguity profile-wide. A rail may focus only a pane that
+is unique across every selectable terminal pane in the profile and belongs to
+that rail; same-CWD panes in two tabs remain visible but inert in both rails.
+The exact pure-fixture proof is specified for later implementation, while the
+held 7h live-profile drill remains untouched.
