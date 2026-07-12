@@ -130,8 +130,7 @@ to force the test through.
 
 ### Offline
 
-**AC-O1 — Explicit native entry produces a fresh tab from the invoking
-checkout.** From an isolated root whose initial config contains a stale
+**AC-O1 — Explicit native entry produces a fresh tab from the invoking checkout.** From an isolated root whose initial config contains a stale
 Zaphod URL, the entry script is run from the selected worktree, Zellij is
 restarted to load the generated native binding, and literal `Alt Shift z`
 creates exactly one new managed tab. The live tab contains the canonical WASM
@@ -145,8 +144,7 @@ candidate rail or its normal permission prompt. The expected candidate URL and
 tab-count delta come from the selected checkout and Zellij state, not from a
 generated config string.
 
-**AC-O2 — A literal authorized `Alt /` changes only the initialized managed
-tab's known rail state.** With the normal `Reconfigure` permission granted in
+**AC-O2 — A literal authorized `Alt /` changes only the initialized managed tab's known rail state.** With the normal `Reconfigure` permission granted in
 the isolated test profile, a literal `Alt /` sent while the managed tab is
 active changes its native swap state between the layout's `docked` and
 `undocked` forms. It does not add a pane, replace a process, or change the
@@ -184,8 +182,7 @@ sentinel standing root to prove cleanup rather than only a happy-path log.
 
 ### Interactive
 
-**AC-I1 — The operator can use the first Sprint 1 journey without tab
-hunting.** In an attached disposable session, CL invokes the selected
+**AC-I1 — The operator can use the first Sprint 1 journey without tab hunting.** In an attached disposable session, CL invokes the selected
 checkout's entry script or presses `Alt Shift z`, approves the ordinary
 permission prompt, sees the selected candidate rail, toggles it with `Alt /`,
 and confirms `Alt /` is inert from a foreign tab.
@@ -292,6 +289,9 @@ baseline. It is not settled by unit tests or configuration inspection.
   remove executable same-tab two-client delivery from Sprint 1's acceptance
   gate. It is now the named, unfiled follow-up in `Out of scope`; no code,
   frontmatter, 7h, or 4d state changed.
+- DONE: Scanner-heading repair: `spacedock status --read
+  zellij-managed-tab-controller --stage ideation --ac-scan --json` now reports
+  AC-O1, AC-O2, AC-O3, AC-O4, and AC-I1, each with `unevidenced: false`.
 
 ### Summary
 
