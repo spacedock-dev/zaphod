@@ -16,8 +16,8 @@ mod-block:
 id: e6djd6wv1rxvj5zq4wqcw2ja
 group: release-gate
 sprint-readiness: defer
-blocked-on: 7h-validation-and-s2-delivery-task-validation
-blocked-reason: The three outcome tasks may ideate now; this integration gate waits for their validated behavior and the 7h live-profile pass.
+blocked-on: bb-s9-qt-validation
+blocked-reason: Release proof waits for the three Sprint 2 walking-skeleton task validations; it does not wait for 7h.
 ---
 
 ## Problem
