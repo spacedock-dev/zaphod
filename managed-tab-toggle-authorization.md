@@ -222,3 +222,10 @@ decision lookup that returns no active tab when focused-pane lookup fails or
 its stable ID is absent from the current `TabUpdate` mapping. Both route offer
 and pipe receipt should use that strict result, with focused regression tests.
 The captain's WORK drill is deliberately not run against a rejected candidate.
+
+### Feedback Cycles
+
+- Cycle 1 — 2026-07-13: Validation rejected stale cached active-tab fallback
+  authorizing an `Alt /` receipt after live focus lookup failed. Route a narrow
+  strict-lookup repair to implementation; both offer and receipt must fail
+  closed when current focus or its stable tab ID is unavailable.
