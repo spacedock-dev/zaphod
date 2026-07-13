@@ -267,7 +267,12 @@ wait_for_screen_marker 'BB_RECIPIENT_MARKER' "$TARGET_SCREEN"
 
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
-tmux_command capture-pane -p -t "$TMUX_PANE" > "$BYSTANDER_SCREEN"
+BARRIER_PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-barrier\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"working\",\"summary\":\"BB_BYSTANDER_BARRIER\"}"
+zellij_session pipe --name zaphod-agent-v1-target-token-event \
+    --args "recipient-tab-id=$BYSTANDER_TAB_ID,recipient-token=target-token" \
+    -- "$BARRIER_PAYLOAD" > "$PIPE_ACK_FILE"
+[ "$(cat "$PIPE_ACK_FILE")" = accepted ] || fail "bystander rail did not acknowledge the barrier row"
+wait_for_screen_marker 'BB_BYSTANDER_BARRIER' "$BYSTANDER_SCREEN"
 if grep -F 'BB_RECIPIENT_MARKER' "$BYSTANDER_SCREEN" >/dev/null; then
     cat "$BYSTANDER_SCREEN" >&2 || true
     fail "same-CWD bystander rendered the target-tab broadcast"
