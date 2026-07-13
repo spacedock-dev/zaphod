@@ -316,6 +316,23 @@ complete, and the gate is ready for the captain's direct-script-only demo.
   convergence gate; do not launch another `code_completion` panel without a
   new captain approval.
 
+- **Cycle 4 — 2026-07-14: REVISED during the fresh-session live drill, captain routed to implementation.**
+  In fresh Zellij session `FQ-FRESH`, direct entry at frozen head `9808800`
+  completed its permission handshake and delivered the first marked AgentsView
+  row (`fq-initial-1783981287`). AgentsView then indexed the second marked
+  session (`fq-sse-1783981287`), but the sidebar remained at four total rows and
+  sidecar PID `49088` exited at `2026-07-14 06:28:21 +0800`. Its log recorded
+  `target-lost: malformed native pane state: invalid character 'l' looking for
+  beginning of value`; a subsequent read-only probe returned valid JSON 100/100
+  times. Diagnose and preserve the exact malformed bytes or provenance, then
+  make the live refresh lifecycle tolerate only evidence-backed transient native
+  replies while keeping persistent malformed state and real tuple loss fail
+  closed. Prove that a post-readiness `data_changed` refresh survives the bounded
+  transient, renders the second session, and leaves the sidecar alive; prove the
+  terminal cases still exit and clean up. This remains within the advertised
+  subscription end value, so no task reframe is required. Do not launch another
+  `code_completion` panel without a new captain approval.
+
 ## Stage Report: implementation addendum (review-convergence pause)
 
 - DONE: Freeze the revised implementation at
