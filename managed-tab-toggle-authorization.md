@@ -191,3 +191,34 @@ configuration spike can still invalidate this design before code changes.
 ### Summary
 
 TDD red evidence: the entry suite first failed with `inline layout did not declare the v1 managed-tab marker on every rail`; the route test first failed because a tiled lookalike authorized `should_route_toggle_to_self`. The green result is `cargo test` 137 passed (134 before v3 tests), `cargo check --tests`, 9 entry-suite checks, and the tmux-hosted smoke all passing. The review hardening retains no custom PTY, lease, controller, adoption path, or Sprint 2 dependency; pre-existing repository-wide `cargo fmt --check` differences were left untouched.
+
+## Stage Report: validation
+
+- DONE: Independently replay the ordinary offline boundary at implementation
+  head `27f782ea85765433ab4824e9d4ad929ae5085c70`.
+  `cargo test -q` passed 137/137; `cargo check --tests` passed; the entry
+  suite passed 9/9; and the real tmux-hosted Zellij smoke passed its fresh
+  managed entry, exact native proof, managed `Alt /`, same-WASM lookalike
+  inertness, and disposable-root/standing-config assertions.
+- DONE: Refute malformed and visual-lookalike layout declarations from a
+  detached disposable checkout.
+  The rendered-layout validator rejected missing, wrong, and duplicate
+  markers; missing URLs; URL-suffix lookalikes; and a same-WASM rail with the
+  title, `rail "1"`, CWD, and geometry baseline but no provenance.
+- REFUTED: Alt-/ pipe receipt is fail-closed for stale active-tab state.
+  A detached-checkout test modeled a former managed resident cached at display
+  position 3 while `get_focused_pane_info()` failed. `active_tab_for_decision`
+  returned that cached 3, and `should_accept_observed_toggle_pipe` authorized
+  the Keybind receipt. The focused test failed with `a stale cached tab must
+  not authorize receipt`. This is a real receipt path for the stale runtime
+  `MessagePluginId` route, not a cosmetic unit fixture.
+
+### Summary
+
+**REJECT to implementation.** The ordinary route is green, but the exact
+stale-state negative promised by AC-3/AC-4 is not. Keep cached active-tab
+fallback for non-authorizing UI behavior if needed; introduce a strict toggle
+decision lookup that returns no active tab when focused-pane lookup fails or
+its stable ID is absent from the current `TabUpdate` mapping. Both route offer
+and pipe receipt should use that strict result, with focused regression tests.
+The captain's WORK drill is deliberately not run against a rejected candidate.
