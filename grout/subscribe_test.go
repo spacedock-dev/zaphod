@@ -102,7 +102,7 @@ func TestRecipientProbeAllowsMoreThanQuarterSecond(t *testing.T) {
 
 func TestRecipientProbeHonorsOverallWaitDeadline(t *testing.T) {
 	dir := t.TempDir()
-	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nsleep 1\n")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nsleep 1 &\nwait\n")
 	started := time.Now()
 	err := waitForRecipient(context.Background(), SubscribeConfig{
 		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
@@ -112,7 +112,7 @@ func TestRecipientProbeHonorsOverallWaitDeadline(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "recipient-ready timeout") {
 		t.Fatalf("hanging recipient error = %v; want overall wait timeout", err)
 	}
-	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+	if elapsed := time.Since(started); elapsed > 300*time.Millisecond {
 		t.Fatalf("hanging recipient exceeded overall wait deadline: %s", elapsed)
 	}
 }

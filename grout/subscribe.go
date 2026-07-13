@@ -338,6 +338,10 @@ func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
 		probeCtx, cancel := context.WithTimeout(waitCtx, cfg.PipeTimeout)
 		args := cfg.zellijArgs("pipe", "--name", "agent-event-ready", "--args", "recipient-tab-id="+cfg.TabID+",recipient-token="+cfg.RecipientToken)
 		command := exec.CommandContext(probeCtx, cfg.ZellijBin, args...)
+		// A shell killed at the probe deadline can leave descendants holding its
+		// stdout pipe open. Do not let those inherited descriptors extend the
+		// recipient startup bound.
+		command.WaitDelay = 50 * time.Millisecond
 		command.Stdin = strings.NewReader("probe")
 		output, err := command.Output()
 		cancel()
