@@ -190,3 +190,62 @@ func TestSubscribeFailsClosedWhenItsVerifiedTargetIsGone(t *testing.T) {
 		t.Fatalf("target loss must not pipe or leave a pipe argv log: %v", err)
 	}
 }
+
+func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		contentType string
+	}{
+		{name: "wrong content type", contentType: "application/json"},
+		{name: "immediate eof", contentType: "text/event-stream"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			zellij := fakeSubscriberZellij(t, dir, filepath.Join(dir, "argv.log"), `[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":"/work/managed"}
+]`)
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/sessions":
+					fmt.Fprint(w, `{"sessions":[]}`)
+				case "/api/v1/events":
+					w.Header().Set("Content-Type", tc.contentType)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer source.Close()
+
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = runSubscribe(context.Background(), SubscribeConfig{
+				ServerURL:         source.URL,
+				ZellijBin:         zellij,
+				ZellijConfigDir:   "/isolated/config",
+				ZellijConfigFile:  "/isolated/config/config.kdl",
+				ZellijDataDir:     "/isolated/data",
+				ZellijSession:     "WORK",
+				TabID:             "73",
+				RailURL:           "file:/candidate/zellij-sidebar.wasm",
+				StartupFD:         int(writer.Fd()),
+				PipeTimeout:       time.Second,
+				SummaryClampBytes: 512,
+			}, nil)
+			_ = writer.Close()
+			payload, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if err == nil {
+				t.Fatal("invalid stream unexpectedly succeeded")
+			}
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if len(payload) != 0 {
+				t.Fatalf("invalid stream signaled readiness: %q", payload)
+			}
+		})
+	}
+}
