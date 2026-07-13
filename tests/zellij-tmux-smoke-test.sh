@@ -208,8 +208,9 @@ done
 AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
-"$REPO_ROOT/build.sh" >/dev/null
+CARGO_TARGET_DIR="$REPO_ROOT/target" "$REPO_ROOT/build.sh" >/dev/null
 "$(command -v cargo)" build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --target-dir "$REPO_ROOT/target" \
     --features host-kdl-validator --bin zaphod-kdl-validate
 LAYOUT_VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
 [ -x "$LAYOUT_VALIDATOR" ] || fail "host KDL validator was not built"
@@ -433,9 +434,10 @@ entry_command() {
             "ZELLIJ_SESSION_NAME=$INHERITED_ZELLIJ_SESSION_NAME" \
             "ZELLIJ_PANE_ID=$INHERITED_ZELLIJ_PANE_ID")
     fi
-    "${client_env[@]}" \
+        "${client_env[@]}" \
         ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
+        CARGO_TARGET_DIR="$REPO_ROOT/target" \
         ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
         --agentsview-url "$AGENTSVIEW_URL"

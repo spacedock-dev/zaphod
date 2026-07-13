@@ -16,6 +16,7 @@ fail() {
 
 command -v cargo >/dev/null 2>&1 || fail "cargo is required for the layout capture test"
 cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --target-dir "$REPO_ROOT/target" \
     --features host-kdl-validator --bin zaphod-kdl-validate
 VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
 EXPECTED='file:/candidate/zellij-sidebar.wasm'
