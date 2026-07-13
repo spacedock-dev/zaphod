@@ -35,6 +35,7 @@ DATA_DIR=""
 SOCKET_DIR=""
 HOME_DIR=""
 PERMISSION_CACHE=""
+PERMISSION_FIXTURE="${ZAPHOD_PERMISSION_FIXTURE:-pregranted}"
 ISOLATED_CONFIG_BEFORE=""
 ISOLATED_LAYOUT=""
 ISOLATED_LAYOUT_BEFORE=""
@@ -45,6 +46,7 @@ TMUX_PANE="$TMUX_SESSION:0.0"
 AGENTSVIEW_PID=""
 AGENTSVIEW_URL=""
 SIDECAR_PID=""
+ENTRY_PID=""
 
 zellij_control() {
     env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
@@ -66,6 +68,10 @@ cleanup() {
     local cleanup_status=0
     trap - EXIT INT TERM HUP
     set +e
+    if [ -n "$ENTRY_PID" ]; then
+        kill -TERM "$ENTRY_PID" 2>/dev/null || true
+        wait "$ENTRY_PID" 2>/dev/null || true
+    fi
     if [ -n "$SIDECAR_PID" ]; then
         kill -TERM "$SIDECAR_PID" 2>/dev/null || true
         for _attempt in $(seq 1 100); do
@@ -130,6 +136,10 @@ for required in tmux jq shasum go; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required for the tmux smoke"
 done
 zaphod_require_zellij_0443
+case "$PERMISSION_FIXTURE" in
+    pregranted|upgrade) ;;
+    *) fail "ZAPHOD_PERMISSION_FIXTURE must be pregranted or upgrade" ;;
+esac
 
 # Zellij's Unix socket is capped at 103 bytes on macOS. Keep this disposable
 # root under /tmp rather than the much longer per-user $TMPDIR.
@@ -181,8 +191,11 @@ mkdir -p "$(dirname "$PERMISSION_CACHE")"
     printf '%s\n' \
         '    ReadApplicationState' \
         '    ChangeApplicationState' \
-        '    ReadPaneContents' \
-        '    ReadCliPipes' \
+        '    ReadPaneContents'
+    if [ "$PERMISSION_FIXTURE" = pregranted ]; then
+        printf '%s\n' '    ReadCliPipes'
+    fi
+    printf '%s\n' \
         '    Reconfigure' \
         '    RunCommands'
     printf '%s\n' '}'
@@ -360,11 +373,39 @@ capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreig
 jq -e --arg wasm_url "$WASM_URL" \
     'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
     fail "isolated profile unexpectedly started on the selected checkout rail"
-env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
-    ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
-    "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
-    --agentsview-url "$AGENTSVIEW_URL" \
-    > "$ROOT/entry.out"
+entry_command() {
+    env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
+        ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
+        ZAPHOD_SIDECAR_START_TIMEOUT=5 \
+        "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
+        --agentsview-url "$AGENTSVIEW_URL"
+}
+if [ "$PERMISSION_FIXTURE" = upgrade ]; then
+    entry_command > "$ROOT/entry.out" 2> "$ROOT/entry.err" &
+    ENTRY_PID=$!
+    for _attempt in $(seq 1 160); do
+        tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/permission-prompt.screen"
+        grep -F 'asks permission to:' "$ROOT/permission-prompt.screen" >/dev/null && break
+        kill -0 "$ENTRY_PID" 2>/dev/null || break
+        sleep 0.05
+    done
+    grep -F 'asks permission to:' "$ROOT/permission-prompt.screen" >/dev/null || {
+        cat "$ROOT/entry.err" >&2 || true
+        fail "old permission cache did not produce the native expanded-permission prompt"
+    }
+    send_literal y
+    set +e
+    wait "$ENTRY_PID"
+    ENTRY_STATUS=$?
+    set -e
+    ENTRY_PID=""
+    if [ "$ENTRY_STATUS" -ne 0 ]; then
+        cat "$ROOT/entry.err" >&2 || true
+        fail "literal permission approval did not complete direct entry"
+    fi
+else
+    entry_command > "$ROOT/entry.out"
+fi
 TAB_ID="$(sed -n 's/^TAB_ID=//p' "$ROOT/entry.out")"
 SIDECAR_PID="$(sed -n 's/^SIDECAR_PID=//p' "$ROOT/entry.out")"
 [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || fail "entry script did not report a stable tab ID"
