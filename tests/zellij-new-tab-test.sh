@@ -40,7 +40,7 @@ write_fake_build() {
         'if [ "${FAKE_SIDECAR_EXEC_FAILURE:-}" = 1 ]; then' \
         '    printf "%s\\n" "#!/definitely/missing-zaphod-interpreter" > "$(dirname "$0")/target/zaphod"' \
         'else' \
-        '    printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "startup_fd=\"\"" "previous=\"\"" "for arg in \"\$@\"; do" "    if [ \"\$previous\" = --startup-fd ]; then startup_fd=\"\$arg\"; fi" "    previous=\"\$arg\"" "done" "[ -n \"\$startup_fd\" ]" "printf '\''ready\\n'\'' >&\"\$startup_fd\"" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" > "$(dirname "$0")/target/zaphod"' \
+        '    printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "startup_fd=\"\"" "previous=\"\"" "for arg in \"\$@\"; do" "    if [ \"\$previous\" = --startup-fd ]; then startup_fd=\"\$arg\"; fi" "    previous=\"\$arg\"" "done" "[ -n \"\$startup_fd\" ]" "if [ \"\${FAKE_SIDECAR_HANG_STARTUP:-}\" = 1 ]; then" "    printf '\''%s\\n'\'' \"\$\$\" > \"\$FAKE_SIDECAR_PID_FILE\"" "    trap '\''exit 0'\'' TERM INT" "    while :; do sleep 1; done" "fi" "printf '\''ready\\n'\'' >&\"\$startup_fd\"" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" > "$(dirname "$0")/target/zaphod"' \
         'fi' \
         'chmod +x "$(dirname "$0")/target/zaphod"' \
         > "$fixture/build.sh"
@@ -143,6 +143,7 @@ setup_fixture() {
     FAKE_ZELLIJ_NEW_TAB_COUNT="$root/fake-new-tab-count"
     FAKE_ZELLIJ_PANES="$root/fake-panes.json"
     FAKE_SIDECAR_ARGV="$root/fake-sidecar-argv"
+    FAKE_SIDECAR_PID_FILE="$root/fake-sidecar-pid"
 
     mkdir -p "$FIXTURE/scripts" "$FIXTURE/layouts" \
         "$FIXTURE_CONFIG_DIR/layouts" "$(dirname "$FIXTURE_CONFIG_FILE")" \
@@ -171,6 +172,7 @@ run_entry() {
         FAKE_ZELLIJ_NEW_TAB_COUNT="$FAKE_ZELLIJ_NEW_TAB_COUNT" \
         FAKE_ZELLIJ_PANES="$FAKE_ZELLIJ_PANES" \
         FAKE_SIDECAR_ARGV="$FAKE_SIDECAR_ARGV" \
+        FAKE_SIDECAR_PID_FILE="$FAKE_SIDECAR_PID_FILE" \
         ZELLIJ_CONFIG_DIR="$FIXTURE_CONFIG_DIR" \
         ZELLIJ_CONFIG_FILE="$FIXTURE_CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$FIXTURE_DATA_DIR" \
@@ -358,9 +360,32 @@ test_sidecar_exec_failure_is_visible() {
     echo "PASS: sidecar exec failure is visible and preserves standing KDL"
 }
 
+test_sidecar_stream_timeout_reaps_process() {
+    local root status sidecar_pid leaked=0
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    set +e
+    FAKE_SIDECAR_HANG_STARTUP=1 run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "sidecar stream timeout unexpectedly succeeded"
+    grep -F 'did not establish the AgentsView stream' "$FIXTURE_ERROR" >/dev/null ||
+        fail "sidecar stream timeout was hidden"
+    sidecar_pid="$(cat "$FAKE_SIDECAR_PID_FILE")"
+    if kill -0 "$sidecar_pid" 2>/dev/null; then
+        leaked=1
+        kill -TERM "$sidecar_pid" 2>/dev/null || true
+    fi
+    [ "$leaked" -eq 0 ] || fail "sidecar stream timeout left process $sidecar_pid running"
+    assert_standing_kdl_unchanged
+    echo "PASS: sidecar stream timeout terminates and reaps its process"
+}
+
 test_selected_checkout_creates_one_inline_tab_without_writes
 test_setup_failure_stops_before_new_tab
 test_new_tab_failure_leaves_standing_kdl_unchanged
 test_term_during_new_tab_leaves_standing_kdl_unchanged
 test_unready_resident_starts_no_sidecar
 test_sidecar_exec_failure_is_visible
+test_sidecar_stream_timeout_reaps_process
