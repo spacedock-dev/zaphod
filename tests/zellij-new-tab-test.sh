@@ -307,8 +307,8 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged() {
     runner_pid=$!
     for attempt in $(seq 1 100); do [ ! -e "$ready" ] || break; sleep 0.05; done
     [ -e "$ready" ] || { cat "$FIXTURE_ERROR" >&2; fail "TERM fixture never reached new-tab"; }
-    config_during="$(sha256 "$FIXTURE_CONFIG_FILE")"
-    layout_during="$(sha256 "$FIXTURE_LAYOUT")"
+    config_during="$(sha256 "$FIXTURE_CONFIG_FILE" 2>/dev/null || printf '%s\n' unreadable)"
+    layout_during="$(sha256 "$FIXTURE_LAYOUT" 2>/dev/null || printf '%s\n' unreadable)"
     kill -TERM "$runner_pid"
     : > "$release"
     set +e
