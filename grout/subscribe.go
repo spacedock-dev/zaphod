@@ -367,14 +367,25 @@ func streamEvents(
 	var streamBoundary sync.Mutex
 	var streamEnded atomic.Bool
 	var streamActivity atomic.Uint64
-	go func() {
-		for scanner.Scan() {
+	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		advance, token, err = bufio.ScanLines(data, atEOF)
+		if token != nil {
 			streamBoundary.Lock()
 			streamActivity.Add(1)
 			if cfg.afterScan != nil {
 				cfg.afterScan()
 			}
 			streamBoundary.Unlock()
+		}
+		if atEOF && len(data) == 0 {
+			streamBoundary.Lock()
+			streamEnded.Store(true)
+			streamBoundary.Unlock()
+		}
+		return advance, token, err
+	})
+	go func() {
+		for scanner.Scan() {
 			select {
 			case lines <- scanResult{line: scanner.Text()}:
 			case <-streamCtx.Done():
