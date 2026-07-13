@@ -141,7 +141,7 @@ case "$PERMISSION_FIXTURE" in
     pregranted|upgrade) ;;
     *) fail "ZAPHOD_PERMISSION_FIXTURE must be pregranted or upgrade" ;;
 esac
-[ "$PERMISSION_FIXTURE" = pregranted ] || ENTRY_START_TIMEOUT=5
+[ "$PERMISSION_FIXTURE" = pregranted ] || ENTRY_START_TIMEOUT=10
 
 # Zellij's Unix socket is capped at 103 bytes on macOS. Keep this disposable
 # root under /tmp rather than the much longer per-user $TMPDIR.
@@ -387,16 +387,26 @@ if [ "$PERMISSION_FIXTURE" = upgrade ]; then
     ENTRY_PID=$!
     for _attempt in $(seq 1 160); do
         tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/permission-prompt.screen"
-        grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null && break
+        zellij_session action list-panes --json --all --command --geometry --state --tab \
+            > "$ROOT/permission-prompt-panes.json" 2>/dev/null || true
+        if grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null &&
+            jq -e --arg wasm_url "$WASM_URL" \
+                'any(.[]; .is_plugin and .plugin_url == $wasm_url and .is_focused == true)' \
+                "$ROOT/permission-prompt-panes.json" >/dev/null 2>&1; then
+            break
+        fi
         kill -0 "$ENTRY_PID" 2>/dev/null || break
         sleep 0.05
     done
-    grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null || {
+    if ! grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null ||
+        ! jq -e --arg wasm_url "$WASM_URL" \
+            'any(.[]; .is_plugin and .plugin_url == $wasm_url and .is_focused == true)' \
+            "$ROOT/permission-prompt-panes.json" >/dev/null 2>&1; then
         cat "$ROOT/entry.err" >&2 || true
         sed -n '1,80p' "$ROOT/permission-prompt.screen" >&2 || true
         zellij_session action list-panes --json --all --command --geometry --state --tab >&2 || true
-        fail "old permission cache did not produce the native expanded-permission prompt"
-    }
+        fail "old permission cache did not expose an actionable native expanded-permission prompt"
+    fi
     send_literal y
     set +e
     wait "$ENTRY_PID"
