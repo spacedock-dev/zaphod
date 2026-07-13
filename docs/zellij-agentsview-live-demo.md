@@ -14,12 +14,16 @@ sidecar after it creates and verifies the fresh tab. No step writes standing
 Run these commands in an ordinary control terminal outside the attached
 `WORK` client, not inside the Subspace review float. Keep this terminal open;
 the direct command targets `WORK` remotely, so the same terminal remains
-available for the final checks.
+available for the final checks. Open it in the selected checkout, then derive
+all paths for this run:
 
 ```bash
-FQ=/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-zellij-config-activation
-AGENTSVIEW_BIN=/opt/homebrew/bin/agentsview
+set -euo pipefail
+FQ="$(git rev-parse --show-toplevel)"
+AGENTSVIEW_BIN="$(command -v agentsview)"
 AGENTSVIEW_URL=http://127.0.0.1:8080
+MARKER="fq-$(date +%s)"
+printf 'selected checkout: %s\nagent prompt marker: %s\n' "$FQ" "$MARKER"
 ```
 
 Check the real server. Start it only if no server is running:
@@ -73,26 +77,30 @@ Do not start another sidecar. The entry output must contain `TAB_ID`,
 ## 3. Create one real agent session
 
 The direct command activates a fresh managed tab. In that tab's shell pane,
-type:
+run `pwd`. It must print the selected checkout path shown in step 1. If it
+does not, the first officer supplies that derived path for a short `cd`
+command. Then type:
 
 ```bash
-cd /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-zellij-config-activation
 codex
 ```
 
-At the Codex prompt, send this short request:
+At the Codex prompt, send this short request, replacing `<MARKER>` with the
+exact marker printed in step 1:
 
 ```text
-fq-live-row: inspect README.md without edits, then wait for my next instruction.
+<MARKER>: inspect README.md without edits, then wait for my next instruction.
 ```
 
 Keep the agent session open. AgentsView must index a session whose `cwd` is
-the worktree above and whose first message starts with `fq-live-row`.
+the selected checkout and whose first message starts with the unique marker.
 
 The rail's terminal-pane status line and its subscription section are separate
 signals. A shell pane may show `unknown . unknown`; that line does not prove or
 disprove subscription. The required visible proof is a separate `AGENTS`
-section with a `codex` session row and the `fq-live-row` summary.
+section with a `codex` session row and the exact marker in its summary. The
+captain records that visual observation in chat; Zellij 0.44.x does not expose
+plugin-pane rendering through `dump-screen`.
 
 ## 4. Capture the subscription proof
 
@@ -100,38 +108,38 @@ Return to the ordinary terminal. Wait for the real session to reach the served
 API:
 
 ```bash
-until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?include_one_shot=true&include_children=true&limit=1000" > /tmp/fq-agentsview-sessions.json && jq -e --arg cwd "$FQ" '[.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith("fq-live-row")))] | length >= 1' /tmp/fq-agentsview-sessions.json; do
+until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?include_one_shot=true&include_children=true&limit=1000" > /tmp/fq-agentsview-sessions.json && jq -e --arg cwd "$FQ" --arg marker "$MARKER" '[.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($marker)))] | length == 1' /tmp/fq-agentsview-sessions.json > /dev/null; do
   sleep 5
 done
 ```
 
-Capture the exact managed target and its rendered plugin screen:
+Capture the exact managed target:
 
 ```bash
 TAB_ID="$(sed -n 's/^TAB_ID=//p' /tmp/fq-entry.out)"
 WASM_URL="$(sed -n 's/^WASM_URL=//p' /tmp/fq-entry.out)"
 SIDECAR_LOG="$(sed -n 's/^SIDECAR_LOG=//p' /tmp/fq-entry.out)"
+test -n "$TAB_ID"
+test -n "$WASM_URL"
+test -n "$SIDECAR_LOG"
 "$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-panes --json --all --command --geometry --state --tab > /tmp/fq-panes.json
 "$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-tabs --json --all --state --layout > /tmp/fq-tabs.json
-RAIL_PANE="plugin_$(jq -r --arg id "$TAB_ID" --arg url "$WASM_URL" '.[] | select((.tab_id | tostring) == $id and .is_plugin and .plugin_url == $url and (.is_floating | not) and (.is_suppressed | not)) | .id' /tmp/fq-panes.json)"
-"$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action dump-screen --pane-id "$RAIL_PANE" > /tmp/fq-rail.screen
 ```
 
-Verify one stable-ID resident, one active target tab, a rendered session row,
-no startup refusal, and unchanged standing KDL:
+Verify one stable-ID resident, one active target tab, no startup refusal, and
+unchanged standing KDL:
 
 ```bash
-jq --arg id "$TAB_ID" --arg url "$WASM_URL" '[.[] | select((.tab_id | tostring) == $id and .is_plugin and .plugin_url == $url and (.is_floating | not) and (.is_suppressed | not))] | length' /tmp/fq-panes.json
-jq --arg id "$TAB_ID" '[.[] | select((.tab_id | tostring) == $id and .active)] | length' /tmp/fq-tabs.json
-grep -F 'AGENTS' /tmp/fq-rail.screen
-grep -F 'fq-live-row' /tmp/fq-rail.screen
+jq -e --arg id "$TAB_ID" --arg url "$WASM_URL" '[.[] | select((.tab_id | tostring) == $id and .is_plugin and .plugin_url == $url and (.is_floating | not) and (.is_suppressed | not))] | length == 1' /tmp/fq-panes.json > /dev/null
+jq -e --arg id "$TAB_ID" '[.[] | select((.tab_id | tostring) == $id and .active)] | length == 1' /tmp/fq-tabs.json > /dev/null
+jq -e --arg cwd "$FQ" --arg marker "$MARKER" '[.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($marker)))] | length == 1' /tmp/fq-agentsview-sessions.json > /dev/null
 test -f "$SIDECAR_LOG"
-if grep -F 'connection refused' "$SIDECAR_LOG"; then exit 1; fi
+! grep -qF 'connection refused' "$SIDECAR_LOG"
 shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-after.sha256
 cmp /tmp/fq-kdl-before.sha256 /tmp/fq-kdl-after.sha256
 ```
 
-Both `jq` commands must print `1`; both `grep` commands must print a matching
-line; the refusal check and `cmp` must exit zero. The visible rail, served API,
-and dumped plugin screen must all identify the same real `fq-live-row` agent
-session. Reject the demo if any condition fails.
+Every command must exit zero. The captain must also report the visible
+`AGENTS` header, `codex` row, and exact per-run marker in chat. The visible
+rail and served API must identify the same real agent session. Reject the demo
+if any condition fails.
