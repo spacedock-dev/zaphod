@@ -14,18 +14,32 @@ enum ValidationError {
     Identity,
 }
 
-fn zaphod_locations<'a>(document: &'a KdlDocument, locations: &mut Vec<&'a str>) {
+fn has_exact_rail(node: &kdl::KdlNode) -> bool {
+    let Some(children) = node.children() else {
+        return false;
+    };
+    let rails: Vec<_> = children
+        .nodes()
+        .iter()
+        .filter(|child| child.name().value() == "rail")
+        .collect();
+    rails.len() == 1
+        && rails[0].entries().len() == 1
+        && rails[0].get(0).and_then(|entry| entry.value().as_string()) == Some("1")
+}
+
+fn zaphod_identities<'a>(document: &'a KdlDocument, identities: &mut Vec<(&'a str, bool)>) {
     for node in document.nodes() {
         if node.name().value() == "plugin" {
             if let Some(location) = node.get("location").and_then(|entry| entry.value().as_string()) {
                 let path = location.split(['?', '#']).next().unwrap_or(location);
                 if path.rsplit('/').next() == Some("zellij-sidebar.wasm") {
-                    locations.push(location);
+                    identities.push((location, has_exact_rail(node)));
                 }
             }
         }
         if let Some(children) = node.children() {
-            zaphod_locations(children, locations);
+            zaphod_identities(children, identities);
         }
     }
 }
@@ -38,13 +52,17 @@ fn validate_layout(input: &str, expected_url: &str, expect_present: bool) -> Res
     if roots.len() != 1 || roots[0].name().value() != "layout" || roots[0].children().is_none() {
         return Err(ValidationError::Malformed);
     }
-    let mut locations = Vec::new();
-    zaphod_locations(&document, &mut locations);
+    let mut identities = Vec::new();
+    zaphod_identities(&document, &mut identities);
     if expect_present {
-        if locations.is_empty() || locations.iter().any(|location| *location != expected_url) {
+        if identities.is_empty()
+            || identities
+                .iter()
+                .any(|(location, exact_rail)| *location != expected_url || !exact_rail)
+        {
             return Err(ValidationError::Identity);
         }
-    } else if !locations.is_empty() {
+    } else if !identities.is_empty() {
         return Err(ValidationError::Identity);
     }
     Ok(())
