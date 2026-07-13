@@ -240,6 +240,32 @@ func refreshSessions(
 	return nil
 }
 
+func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
+	// A newly added ReadCliPipes grant may put the ordinary permission prompt
+	// in front of the recipient. Leave the attached user time to approve it
+	// once while staying inside the entry script's overall startup bound.
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	for {
+		probeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		args := cfg.zellijArgs("pipe", "--name", "agent-event-ready", "--args", "recipient-tab-id="+cfg.TabID)
+		command := exec.CommandContext(probeCtx, cfg.ZellijBin, args...)
+		command.Stdin = strings.NewReader("probe")
+		output, err := command.Output()
+		cancel()
+		if err == nil && strings.TrimSpace(string(output)) == "ready" {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return fmt.Errorf("recipient-ready timeout for stable tab %s", cfg.TabID)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
 func streamEvents(
 	ctx context.Context,
 	client *http.Client,
@@ -302,21 +328,17 @@ func streamEvents(
 		if ready {
 			return nil
 		}
+		if err := waitForRecipient(ctx, cfg); err != nil {
+			return err
+		}
+		if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
+			return err
+		}
 		if err := startupSignal(cfg.StartupFD); err != nil {
 			return fmt.Errorf("stream-ready signal: %w", err)
 		}
 		ready = true
-		// Two idempotent initial deliveries bracket recipient arming. The plugin
-		// keys rows by session id, so the retry cannot create duplicates.
-		if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(150 * time.Millisecond):
-		}
-		return refreshSessions(ctx, client, cfg, stableTabID, stderr)
+		return nil
 	}
 
 	eventName := ""

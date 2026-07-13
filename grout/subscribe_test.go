@@ -22,6 +22,7 @@ import (
 func fakeSubscriberZellij(t *testing.T, dir, log, panes string) string {
 	t.Helper()
 	panesPath := filepath.Join(dir, "panes.json")
+	readyPath := filepath.Join(dir, "recipient-ready")
 	if err := os.WriteFile(panesPath, []byte(panes), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -29,6 +30,8 @@ func fakeSubscriberZellij(t *testing.T, dir, log, panes string) string {
 		"for arg in \"$@\"; do\n"+
 		"  if [ \"$arg\" = list-panes ]; then cat "+panesPath+"; exit 0; fi\n"+
 		"  if [ \"$arg\" = pipe ]; then\n"+
+		"    case \"$*\" in *agent-event-ready*) : > "+readyPath+"; echo ready; exit 0 ;; esac\n"+
+		"    [ -f "+readyPath+" ] || exit 70\n"+
 		"    { echo \"$#\"; for value in \"$@\"; do printf '%s\\n' \"$value\"; done; } >> "+log+"\n"+
 		"    exit 0\n"+
 		"  fi\n"+
@@ -71,10 +74,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/sessions":
 			w.Header().Set("Content-Type", "application/json")
-			if lists.Add(1) == 1 {
-				fmt.Fprint(w, `{"sessions":[]}`)
-				return
-			}
+			lists.Add(1)
 			fmt.Fprint(w, `{"sessions":[{"id":"session-1","cwd":"/work/managed","agent":"codex","termination_status":"awaiting_user","first_message":"needs review","created_at":"2026-07-13T00:00:00Z"}]}`)
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -132,13 +132,13 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	if err := <-errCh; !errors.Is(err, ErrSourceEOF) {
 		t.Fatalf("runSubscribe error = %v, want source EOF", err)
 	}
-	if got := lists.Load(); got != 3 {
-		t.Fatalf("source list count = %d, want initial, arming retry, plus data_changed refresh", got)
+	if got := lists.Load(); got != 2 {
+		t.Fatalf("source list count = %d, want initial plus data_changed refresh", got)
 	}
 
 	invs := readInvocations(t, argvLog)
 	if len(invs) != 2 {
-		t.Fatalf("zellij pipe invocations = %d, want arming retry plus data_changed row", len(invs))
+		t.Fatalf("zellij pipe invocations = %d, want initial plus data_changed row", len(invs))
 	}
 	argv := invs[len(invs)-1]
 	wantPrefix := []string{
@@ -298,7 +298,7 @@ func TestSubscribeTimesOutStalledInitialRefresh(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
 		t.Fatalf("stalled refresh error = %v, want finite deadline", err)
 	}
-	if readErr != nil || string(payload) != "ready\n" {
-		t.Fatalf("stream readiness = %q, %v; want ready before bounded replay", payload, readErr)
+	if readErr != nil || len(payload) != 0 {
+		t.Fatalf("stalled initial refresh signaled readiness: %q, %v", payload, readErr)
 	}
 }

@@ -671,8 +671,16 @@ impl ZellijPlugin for Sidebar {
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         trace!(self, "pipe recv name={}", pipe_message.name);
-        // CLI pipe callers terminate via the server's auto-unblock once this
-        // returns; an explicit unblock would need the ReadCliPipes grant.
+        if pipe_message.name == "agent-event-ready" {
+            if self.accepts_agent_event(&pipe_message.args) {
+                if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+                    cli_pipe_output(pipe_id, "ready");
+                }
+            }
+            return false;
+        }
+        // Ordinary event callers need no response; Zellij auto-unblocks them
+        // after this returns. Only the readiness branch above writes output.
         if pipe_message.name == "agent-event" {
             if !self.accepts_agent_event(&pipe_message.args) {
                 trace!(
@@ -737,6 +745,9 @@ impl ZellijPlugin for Sidebar {
                 PermissionType::ReadApplicationState,
                 PermissionType::ChangeApplicationState,
                 PermissionType::ReadPaneContents,
+                // The private direct-entry subscriber waits for one CLI-pipe
+                // acknowledgment before it can safely deliver initial rows.
+                PermissionType::ReadCliPipes,
                 // The rail installs a current-client-only MessagePluginId
                 // route after it is visibly initialized; it never saves it
                 // to the user's config file.

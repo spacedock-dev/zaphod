@@ -182,6 +182,7 @@ mkdir -p "$(dirname "$PERMISSION_CACHE")"
         '    ReadApplicationState' \
         '    ChangeApplicationState' \
         '    ReadPaneContents' \
+        '    ReadCliPipes' \
         '    Reconfigure' \
         '    RunCommands'
     printf '%s\n' '}'

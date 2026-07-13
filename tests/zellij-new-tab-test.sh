@@ -381,7 +381,8 @@ test_sidecar_stream_timeout_reaps_process() {
     TEST_ROOT="$root"
     setup_fixture "$root"
     set +e
-    FAKE_SIDECAR_HANG_STARTUP=1 run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
+    FAKE_SIDECAR_HANG_STARTUP=1 ZAPHOD_SIDECAR_START_TIMEOUT=1 \
+        run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
     status=$?
     set -e
     [ "$status" -ne 0 ] || fail "sidecar stream timeout unexpectedly succeeded"

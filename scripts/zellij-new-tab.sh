@@ -25,6 +25,7 @@ fail() {
 SESSION_NAME="${ZELLIJ_SESSION_NAME:-}"
 TAB_NAME="Zaphod"
 AGENTSVIEW_URL="${ZAPHOD_AGENTSVIEW_URL:-http://127.0.0.1:8080}"
+SIDECAR_START_TIMEOUT="${ZAPHOD_SIDECAR_START_TIMEOUT:-30}"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --session)
@@ -53,6 +54,8 @@ done
 
 [ -n "$SESSION_NAME" ] ||
     fail "a Zellij session is required; pass --session NAME or set ZELLIJ_SESSION_NAME"
+[[ "$SIDECAR_START_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
+    fail "ZAPHOD_SIDECAR_START_TIMEOUT must be a positive integer"
 
 ZELLIJ_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 CONFIG_FILE="${ZELLIJ_CONFIG_FILE:-$ZELLIJ_ROOT/config.kdl}"
@@ -191,12 +194,13 @@ start_private_sidecar() {
         fail "sidecar-start-failed: could not launch private zaphod sidecar"
     fi
     set +e
-    IFS= read -r -t 10 startup_message < "$SIDECAR_START_FIFO"
+    IFS= read -r -t "$SIDECAR_START_TIMEOUT" startup_message < "$SIDECAR_START_FIFO"
     startup_status=$?
     set -e
     rm -f "$SIDECAR_START_FIFO"
     SIDECAR_START_FIFO=""
     if [ "$startup_status" -ne 0 ] || [ "$startup_message" != "ready" ]; then
+        sed -n '1,20p' "$SIDECAR_LOG" >&2 || true
         fail "sidecar-start-failed: private zaphod sidecar did not establish the AgentsView stream"
     fi
 }
