@@ -48,6 +48,9 @@ type SubscribeConfig struct {
 	SourceTimeout     time.Duration
 	PipeTimeout       time.Duration
 	SummaryClampBytes int
+	// Package-private deterministic concurrency seams used only by tests.
+	afterScan            func()
+	beforeReadinessCheck func()
 }
 
 type zellijPane struct {
@@ -364,6 +367,9 @@ func streamEvents(
 	go func() {
 		for scanner.Scan() {
 			streamActivity.Add(1)
+			if cfg.afterScan != nil {
+				cfg.afterScan()
+			}
 			select {
 			case lines <- scanResult{line: scanner.Text()}:
 			case <-streamCtx.Done():
@@ -459,6 +465,9 @@ func streamEvents(
 			}
 		case <-settleC:
 			settleC = nil
+			if cfg.beforeReadinessCheck != nil {
+				cfg.beforeReadinessCheck()
+			}
 			scanned := streamActivity.Load()
 			if scanned != settleGeneration || !startupStreamQuiet(scanned, consumedActivity, eventName) {
 				startSettle()

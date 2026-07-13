@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -52,6 +53,113 @@ func TestStartupStreamQuietRequiresEveryScannedLineConsumed(t *testing.T) {
 	}
 	if !startupStreamQuiet(1, 1, "") {
 		t.Fatal("a fully consumed event boundary was not treated as quiet")
+	}
+}
+
+func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
+	dir := t.TempDir()
+	panesPath := filepath.Join(dir, "panes.json")
+	if err := os.WriteFile(panesPath, []byte(`[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \"$*\" in\n"+
+		"  *list-panes*) cat "+panesPath+" ;;\n"+
+		"  *agent-event-ready*) echo ready ;;\n"+
+		"  *agent-snapshot*) cat >/dev/null; echo accepted ;;\n"+
+		"esac\n")
+	emitPartial := make(chan struct{})
+	finishEvent := make(chan struct{})
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			<-emitPartial
+			fmt.Fprint(w, "event: data_changed\n")
+			w.(http.Flusher).Flush()
+			<-finishEvent
+			fmt.Fprint(w, "data: {}\n\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions":
+			fmt.Fprint(w, `{"sessions":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer source.Close()
+	checkStarted := make(chan struct{})
+	releaseCheck := make(chan struct{})
+	var checkOnce sync.Once
+	scanned := make(chan struct{})
+	var scanNotified atomic.Bool
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runSubscribe(ctx, SubscribeConfig{
+			ServerURL: source.URL, ZellijBin: zellij,
+			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
+			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
+			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
+			afterScan: func() {
+				if scanNotified.CompareAndSwap(false, true) {
+					close(scanned)
+				}
+			},
+			beforeReadinessCheck: func() {
+				checkOnce.Do(func() {
+					close(checkStarted)
+					<-releaseCheck
+				})
+			},
+		}, nil)
+	}()
+	ready := make(chan string, 1)
+	go func() {
+		payload := make([]byte, 6)
+		n, _ := reader.Read(payload)
+		ready <- string(payload[:n])
+	}()
+	select {
+	case <-checkStarted:
+	case <-time.After(time.Second):
+		t.Fatal("readiness check did not reach the settle boundary")
+	}
+	close(emitPartial)
+	select {
+	case <-scanned:
+	case <-time.After(time.Second):
+		t.Fatal("partial event line was not scanned while readiness was paused")
+	}
+	close(releaseCheck)
+	select {
+	case payload := <-ready:
+		t.Fatalf("queued scanned line allowed readiness: %q", payload)
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(finishEvent)
+	select {
+	case payload := <-ready:
+		if payload != "ready\n" {
+			t.Fatalf("startup payload = %q", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("consumed event and catch-up did not release readiness")
+	}
+	cancel()
+	_ = writer.Close()
+	_ = reader.Close()
+	if err := <-errCh; err != nil {
+		t.Fatalf("subscriber cancellation = %v", err)
 	}
 }
 
