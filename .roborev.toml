@@ -1,0 +1,2 @@
+# This linked state checkout must never enqueue automatic code reviews.
+excluded_branches = ["spacedock-state/agent-rail-dev"]
