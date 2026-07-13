@@ -203,8 +203,8 @@ ZAPHOD_PERMISSION_FIXTURE=upgrade ./tests/zellij-tmux-smoke-test.sh
 ```
 
 They use the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
-The second test proves that a stable-tab recipient reaches only its target
-rail even when a bystander rail has the same terminal CWD.
+The second test deliberately gives two same-CWD rails one recipient token and
+proves that the stable-tab guard still delivers only to the target rail.
 
 ### Historical worktree profile
 

@@ -86,12 +86,13 @@ Run the companion two-rail check with:
 ```
 
 It creates two rails in one isolated Zellij session with the same terminal
-CWD, obtains their native stable tab IDs, and sends one private, versioned
-named-pipe broadcast derived from the target's recipient token. Only the
-target rail may render the marker; the bystander stays active and remains
-unchanged. This tests both the private channel and the receiver's stable-tab
-admission rule rather than CWD, pane ID, title, or display position. It uses
-the same tmux-hosted boundary and native Zellij state—no custom PTY controller.
+CWD and, as an adversarial fixture, the same recipient token. After obtaining
+their distinct stable tab IDs, it sends one private, versioned named-pipe
+broadcast addressed to the target ID. Both rails receive the broadcast, but
+only the target may render the marker. This tests stable-tab admission rather
+than CWD, pane ID, title, display position, or sender-side channel isolation.
+It uses the same tmux-hosted boundary and native Zellij state—no custom PTY
+controller.
 
 For headless coverage, the script gives Zellij a disposable `HOME` and writes
 a deliberate pre-grant to its temporary permission cache. The cache key is the

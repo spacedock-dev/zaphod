@@ -155,7 +155,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
-    '                    recipient_token "bystander-token"' \
+    '                    recipient_token "target-token"' \
     '                }' \
     '            }' \
     "            pane cwd=\"$ESCAPED_CWD\"" \
@@ -248,9 +248,9 @@ BYSTANDER_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
 [ "$TARGET_TAB_ID" != "$BYSTANDER_TAB_ID" ] ||
     fail "two rails did not receive distinct stable server tab IDs"
 
-# Deliver while the same-CWD bystander is active. A broadcast reaches both
-# plugin instances, so active-tab state and later screens prove the receiver
-# guard, not a sender-side shortcut.
+# Deliver while the same-CWD bystander is active. Both rails deliberately
+# share the private token, so the broadcast reaches both plugin instances.
+# Active-tab state and later screens therefore prove the stable-tab guard.
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-target\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"blocked\",\"summary\":\"BB_RECIPIENT_MARKER\"}"
