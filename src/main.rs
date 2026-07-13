@@ -2514,6 +2514,7 @@ mod tests {
 
     fn agent_event_for_tab(payload: &str, recipient_tab_id: &str) -> PipeMessage {
         let mut message = agent_event(Some(payload));
+        message.name = "zaphod-agent-v1-test-token-event".to_owned();
         message
             .args
             .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
@@ -2525,7 +2526,7 @@ mod tests {
 
     fn agent_snapshot(payload: Option<&str>, recipient_tab_id: &str) -> PipeMessage {
         let mut message = agent_event(payload);
-        message.name = "agent-snapshot".to_owned();
+        message.name = "zaphod-agent-v1-test-token-snapshot".to_owned();
         message
             .args
             .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
@@ -2633,6 +2634,22 @@ mod tests {
         floating.own_floating = true;
         assert!(!floating.pipe(agent_event_for_tab(session_line(), "0")));
         assert!(floating.sessions.is_empty());
+    }
+
+    #[test]
+    fn legacy_agent_event_name_is_inert_even_for_exact_recipient() {
+        let mut sidebar = Sidebar::default();
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
+        let mut legacy = agent_event(Some(session_line()));
+        legacy
+            .args
+            .insert("recipient-tab-id".to_owned(), "73".to_owned());
+        legacy
+            .args
+            .insert("recipient-token".to_owned(), "test-token".to_owned());
+
+        assert!(!sidebar.pipe(legacy));
+        assert!(sidebar.sessions.is_empty());
     }
 
     #[test]

@@ -100,6 +100,20 @@ func TestRecipientProbeAllowsMoreThanQuarterSecond(t *testing.T) {
 	}
 }
 
+func TestRecipientProbeUsesPrivateVersionedPipe(t *testing.T) {
+	dir := t.TempDir()
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \"$*\" in *'--name zaphod-agent-v1-test-token-ready'*) echo ready ;; esac\n")
+	err := waitForRecipient(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "s", TabID: "73", RecipientToken: "test-token",
+		PipeTimeout: time.Second, recipientWaitTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("private ready pipe was not used: %v", err)
+	}
+}
+
 func TestRecipientProbeHonorsOverallWaitDeadline(t *testing.T) {
 	dir := t.TempDir()
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nsleep 1 &\nwait\n")
@@ -392,13 +406,16 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	if len(invs) != 2 {
 		t.Fatalf("zellij pipe invocations = %d, want initial plus data_changed row", len(invs))
 	}
+	if got := strings.Join(invs[0], "\x00"); !strings.Contains(got, "pipe\x00--name\x00zaphod-agent-v1-test-token-snapshot") {
+		t.Fatalf("snapshot argv = %q, want private versioned pipe", invs[0])
+	}
 	argv := invs[len(invs)-1]
 	wantPrefix := []string{
 		"--config-dir", "/isolated/config",
 		"--config", "/isolated/config/config.kdl",
 		"--data-dir", "/isolated/data",
 		"--session", "WORK",
-		"pipe", "--name", "agent-event",
+		"pipe", "--name", "zaphod-agent-v1-test-token-event",
 		"--args", "recipient-tab-id=73,recipient-token=test-token",
 		"--",
 	}
