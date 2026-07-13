@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -44,6 +45,7 @@ type SubscribeConfig struct {
 	TabID             string
 	RailURL           string
 	CheckoutCWD       string
+	RecipientToken    string
 	StartupFD         int
 	SourceTimeout     time.Duration
 	PipeTimeout       time.Duration
@@ -89,7 +91,7 @@ func canonicalTabID(value string) (uint64, error) {
 func (cfg SubscribeConfig) validate() (uint64, error) {
 	if cfg.ServerURL == "" || cfg.ZellijBin == "" || cfg.ZellijConfigDir == "" ||
 		cfg.ZellijConfigFile == "" || cfg.ZellijDataDir == "" || cfg.ZellijSession == "" ||
-		cfg.RailURL == "" || cfg.CheckoutCWD == "" {
+		cfg.RailURL == "" || cfg.CheckoutCWD == "" || cfg.RecipientToken == "" {
 		return 0, fmt.Errorf("subscribe requires server, Zellij profile, session, tab id, and rail URL")
 	}
 	if !filepath.IsAbs(cfg.CheckoutCWD) {
@@ -249,7 +251,7 @@ func deliverSessions(
 			continue
 		}
 		row := BuildSessionRow(session, time.Now(), cfg.SummaryClampBytes)
-		if err := EmitRowForTab(ctx, cfg.emitConfig(), row.Kind, row, cfg.TabID, stderr); err != nil {
+		if err := EmitRowForTab(ctx, cfg.emitConfig(), row.Kind, row, cfg.TabID, cfg.RecipientToken, stderr); err != nil {
 			return err
 		}
 	}
@@ -274,7 +276,7 @@ func deliverSnapshot(
 		}
 		rows = append(rows, BuildSessionRow(session, time.Now(), cfg.SummaryClampBytes))
 	}
-	return EmitSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, stderr)
+	return EmitSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, stderr)
 }
 
 func refreshSessions(
@@ -299,7 +301,7 @@ func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
 	defer deadline.Stop()
 	for {
 		probeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
-		args := cfg.zellijArgs("pipe", "--name", "agent-event-ready", "--args", "recipient-tab-id="+cfg.TabID)
+		args := cfg.zellijArgs("pipe", "--name", "agent-event-ready", "--args", "recipient-tab-id="+cfg.TabID+",recipient-token="+cfg.RecipientToken)
 		command := exec.CommandContext(probeCtx, cfg.ZellijBin, args...)
 		command.Stdin = strings.NewReader("probe")
 		output, err := command.Output()
@@ -362,21 +364,26 @@ func streamEvents(
 		done bool
 	}
 	lines := make(chan scanResult)
+	var streamBoundary sync.Mutex
 	var streamEnded atomic.Bool
 	var streamActivity atomic.Uint64
 	go func() {
 		for scanner.Scan() {
+			streamBoundary.Lock()
 			streamActivity.Add(1)
 			if cfg.afterScan != nil {
 				cfg.afterScan()
 			}
+			streamBoundary.Unlock()
 			select {
 			case lines <- scanResult{line: scanner.Text()}:
 			case <-streamCtx.Done():
 				return
 			}
 		}
+		streamBoundary.Lock()
 		streamEnded.Store(true)
+		streamBoundary.Unlock()
 		select {
 		case lines <- scanResult{err: scanner.Err(), done: true}:
 		case <-streamCtx.Done():
@@ -468,23 +475,29 @@ func streamEvents(
 			if cfg.beforeReadinessCheck != nil {
 				cfg.beforeReadinessCheck()
 			}
+			streamBoundary.Lock()
 			scanned := streamActivity.Load()
 			if scanned != settleGeneration || !startupStreamQuiet(scanned, consumedActivity, eventName) {
+				streamBoundary.Unlock()
 				startSettle()
 				continue
 			}
 			if pendingDataChange {
+				streamBoundary.Unlock()
 				pendingDataChange = false
 				startCatchup()
 				continue
 			}
 			if streamEnded.Load() {
+				streamBoundary.Unlock()
 				return ErrSourceEOF
 			}
 			if err := startupSignal(cfg.StartupFD); err != nil {
+				streamBoundary.Unlock()
 				return fmt.Errorf("stream-ready signal: %w", err)
 			}
 			ready = true
+			streamBoundary.Unlock()
 		case result := <-lines:
 			if !result.done {
 				consumedActivity++

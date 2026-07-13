@@ -119,7 +119,7 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 			ServerURL: source.URL, ZellijBin: zellij,
 			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
 			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
-			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
 			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
 			afterScan: func() {
 				if scanNotified.CompareAndSwap(false, true) {
@@ -246,6 +246,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 			TabID:             "73",
 			RailURL:           railURL,
 			CheckoutCWD:       "/work/managed",
+			RecipientToken:    "test-token",
 			StartupFD:         startupFD,
 			PipeTimeout:       time.Second,
 			SummaryClampBytes: 512,
@@ -296,7 +297,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 		"--data-dir", "/isolated/data",
 		"--session", "WORK",
 		"pipe", "--name", "agent-event",
-		"--args", "recipient-tab-id=73",
+		"--args", "recipient-tab-id=73,recipient-token=test-token",
 		"--",
 	}
 	if len(argv) != len(wantPrefix)+1 || strings.Join(argv[:len(wantPrefix)], "\x00") != strings.Join(wantPrefix, "\x00") {
@@ -330,6 +331,7 @@ func TestSubscribeFailsClosedWhenItsVerifiedTargetIsGone(t *testing.T) {
 		TabID:             "73",
 		RailURL:           "file:/candidate/zellij-sidebar.wasm",
 		CheckoutCWD:       "/work/managed",
+		RecipientToken:    "test-token",
 		StartupFD:         -1,
 		PipeTimeout:       time.Second,
 		SummaryClampBytes: 512,
@@ -385,6 +387,7 @@ func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
 				TabID:             "73",
 				RailURL:           "file:/candidate/zellij-sidebar.wasm",
 				CheckoutCWD:       "/work/managed",
+				RecipientToken:    "test-token",
 				StartupFD:         int(writer.Fd()),
 				PipeTimeout:       time.Second,
 				SummaryClampBytes: 512,
@@ -436,6 +439,7 @@ func TestSubscribeTimesOutStalledInitialRefresh(t *testing.T) {
 		TabID:             "73",
 		RailURL:           "file:/candidate/zellij-sidebar.wasm",
 		CheckoutCWD:       "/work/managed",
+		RecipientToken:    "test-token",
 		StartupFD:         int(writer.Fd()),
 		SourceTimeout:     100 * time.Millisecond,
 		PipeTimeout:       time.Second,
@@ -465,7 +469,7 @@ func TestTabDeliveryRetriesUntilExactRecipientAcknowledges(t *testing.T) {
 		ZellijBin:   zellij,
 		PipeName:    "agent-event",
 		PipeTimeout: time.Second,
-	}, "session", SessionRow{Kind: "session", ID: "retry"}, "73", nil)
+	}, "session", SessionRow{Kind: "session", ID: "retry"}, "73", "test-token", nil)
 	if err != nil {
 		t.Fatalf("acknowledged retry failed: %v", err)
 	}
@@ -535,7 +539,7 @@ func TestSubscribeRejectsEOFDuringHandshake(t *testing.T) {
 				ServerURL: source.URL, ZellijBin: zellij,
 				ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
 				ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
-				RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+				RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
 				StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
 			}, nil)
 			_ = writer.Close()
@@ -578,7 +582,11 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.(http.Flusher).Flush()
-			<-change
+			select {
+			case <-change:
+			case <-r.Context().Done():
+				return
+			}
 			fmt.Fprint(w, "event: data_changed\ndata: {}\n\n")
 			w.(http.Flusher).Flush()
 			close(changeSent)
@@ -602,13 +610,14 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runSubscribe(ctx, SubscribeConfig{
 			ServerURL: source.URL, ZellijBin: zellij,
 			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
 			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
-			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
 			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
 		}, nil)
 	}()
@@ -688,11 +697,19 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.(http.Flusher).Flush()
-			<-change
+			select {
+			case <-change:
+			case <-r.Context().Done():
+				return
+			}
 			fmt.Fprint(w, "event: data_changed\n")
 			w.(http.Flusher).Flush()
 			close(changeStarted)
-			<-finishChange
+			select {
+			case <-finishChange:
+			case <-r.Context().Done():
+				return
+			}
 			fmt.Fprint(w, "data: {}\n\n")
 			w.(http.Flusher).Flush()
 			close(changeSent)
@@ -712,13 +729,15 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- runSubscribe(context.Background(), SubscribeConfig{
+		errCh <- runSubscribe(ctx, SubscribeConfig{
 			ServerURL: source.URL, ZellijBin: zellij,
 			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
 			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
-			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
 			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
 		}, nil)
 	}()

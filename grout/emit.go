@@ -21,10 +21,10 @@ func pipeArgs(name, payload string) []string {
 // pipeArgsForTab leaves delivery as a named-pipe broadcast while carrying the
 // stable server tab ID for every receiver to verify. It never names a plugin:
 // Zellij would launch an absent plugin for --plugin, which is not delivery.
-func pipeArgsForTab(name, payload, recipientTabID string) []string {
+func pipeArgsForTab(name, payload, recipientTabID, recipientToken string) []string {
 	return []string{
 		"pipe", "--name", name,
-		"--args", "recipient-tab-id=" + recipientTabID,
+		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-token=" + recipientToken,
 		"--", payload,
 	}
 }
@@ -63,13 +63,14 @@ func EmitRowForTab(
 	kind string,
 	row any,
 	recipientTabID string,
+	recipientToken string,
 	stderr io.Writer,
 ) error {
 	payload, err := json.Marshal(row)
 	if err != nil {
 		return err
 	}
-	args := pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID)
+	args := pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID, recipientToken)
 	return emitAcknowledged(ctx, cfg, kind, args, "", stderr)
 }
 
@@ -80,6 +81,7 @@ func EmitSnapshotForTab(
 	cfg Config,
 	rows []SessionRow,
 	recipientTabID string,
+	recipientToken string,
 	stderr io.Writer,
 ) error {
 	payload, err := json.Marshal(rows)
@@ -88,7 +90,7 @@ func EmitSnapshotForTab(
 	}
 	args := []string{
 		"pipe", "--name", "agent-snapshot",
-		"--args", "recipient-tab-id=" + recipientTabID,
+		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-token=" + recipientToken,
 	}
 	return emitAcknowledged(ctx, cfg, "snapshot", args, string(payload), stderr)
 }
@@ -148,7 +150,7 @@ func emitRow(
 	defer cancel()
 	args := pipeArgs(cfg.PipeName, string(payload))
 	if recipientTabID != "" {
-		args = pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID)
+		args = pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID, "")
 	}
 	args = append(zellijProfileArgs(cfg), args...)
 	cmd := exec.CommandContext(ctx, cfg.ZellijBin, args...)

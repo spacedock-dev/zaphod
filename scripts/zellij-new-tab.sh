@@ -81,6 +81,7 @@ zellij_cmd() {
 }
 
 TEMP_ROOT=""
+RECIPIENT_TOKEN=""
 SIDECAR_PID=""
 SIDECAR_HANDED_OFF=0
 SIDECAR_START_FIFO=""
@@ -185,6 +186,7 @@ start_private_sidecar() {
         --tab-id "$TAB_ID" \
         --rail-url "$WASM_URL" \
         --checkout-cwd "$REPO_ROOT" \
+        --recipient-token "$RECIPIENT_TOKEN" \
         --startup-fd 3 \
         3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
     start_status=$?
@@ -208,7 +210,8 @@ start_private_sidecar() {
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
     fail "could not create a temporary Zaphod layout directory"
 RENDERED_LAYOUT="$TEMP_ROOT/zaphod.kdl"
-zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT"
+RECIPIENT_TOKEN="zaphod-$$-$RANDOM-$(date +%s)"
+zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT" "$RECIPIENT_TOKEN"
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
 
 TAB_ID="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \

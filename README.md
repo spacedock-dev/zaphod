@@ -146,6 +146,8 @@ This direct command is also the current session-row entry point. After
 tiled, non-suppressed Zaphod rail with the returned stable tab ID and this
 checkout's canonical WASM URL. Only then does it start one private
 `target/zaphod subscribe` process with the same Zellij profile and session.
+The inline rail and sidecar also share a fresh per-entry recipient token, so a
+second rail in the same stable tab cannot acknowledge or receive its rows.
 The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
 `--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
 The startup handshake allows 30 seconds for the sidecar to verify the exact

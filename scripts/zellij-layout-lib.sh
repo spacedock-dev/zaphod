@@ -30,10 +30,13 @@ zaphod_render_layout() {
     local template="$1"
     local wasm_url="$2"
     local output="$3"
-    local replacement
+    local recipient_token="${4:-}" replacement token_replacement
     replacement="${wasm_url//&/\\&}"
     replacement="${replacement//|/\\|}"
-    sed "s|__ZAPHOD_WASM__|$replacement|g" "$template" > "$output"
+    token_replacement="${recipient_token//&/\\&}"
+    token_replacement="${token_replacement//|/\\|}"
+    sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
+        -e "s|__ZAPHOD_RECIPIENT__|$token_replacement|g" "$template" > "$output"
 }
 
 zaphod_kdl_escape() {

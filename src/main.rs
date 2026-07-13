@@ -501,10 +501,14 @@ impl Sidebar {
         let Some(armed) = self.agent_recipient else {
             return false;
         };
+        let Some(configured_token) = self.config.get("recipient_token").filter(|token| !token.is_empty()) else {
+            return false;
+        };
         !self.own_floating
             && self.own_tab == Some(armed.own_position)
             && armed.manifest_generation == self.agent_manifest_generation
             && Self::recipient_tab_id(args) == Some(armed.stable_tab_id)
+            && args.get("recipient-token") == Some(configured_token)
     }
 }
 
@@ -2514,6 +2518,9 @@ mod tests {
             .args
             .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
         message
+            .args
+            .insert("recipient-token".to_owned(), "test-token".to_owned());
+        message
     }
 
     fn agent_snapshot(payload: Option<&str>, recipient_tab_id: &str) -> PipeMessage {
@@ -2523,9 +2530,13 @@ mod tests {
             .args
             .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
         message
+            .args
+            .insert("recipient-token".to_owned(), "test-token".to_owned());
+        message
     }
 
     fn arm_agent_recipient(sidebar: &mut Sidebar, own_position: usize, tabs: &[TabInfo]) {
+		sidebar.config.insert("recipient_token".to_owned(), "test-token".to_owned());
         sidebar.own_tab = Some(own_position);
         sidebar.own_floating = false;
         sidebar.observe_agent_manifest();
@@ -2650,6 +2661,14 @@ mod tests {
         assert!(!foreign.pipe(agent_snapshot(Some(&payload), "73")));
         assert!(foreign.sessions.is_empty());
         assert!(foreign.gates.is_empty());
+
+        let mut same_tab_competitor = Sidebar::default();
+        arm_agent_recipient(&mut same_tab_competitor, 1, &tabs);
+        same_tab_competitor
+            .config
+            .insert("recipient_token".to_owned(), "other-token".to_owned());
+        assert!(!same_tab_competitor.pipe(agent_snapshot(Some(&payload), "73")));
+        assert!(same_tab_competitor.sessions.is_empty());
     }
 
     #[test]

@@ -144,6 +144,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
+    '                    recipient_token "target-token"' \
     '                }' \
     '            }' \
     "            pane cwd=\"$ESCAPED_CWD\"" \
@@ -154,6 +155,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
+    '                    recipient_token "bystander-token"' \
     '                }' \
     '            }' \
     "            pane cwd=\"$ESCAPED_CWD\"" \
@@ -253,7 +255,7 @@ zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-target\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"blocked\",\"summary\":\"BB_RECIPIENT_MARKER\"}"
 PIPE_ACK_FILE="$ROOT/pipe-ack"
-zellij_session pipe --name agent-event --args "recipient-tab-id=$TARGET_TAB_ID" -- "$PAYLOAD" > "$PIPE_ACK_FILE"
+zellij_session pipe --name agent-event --args "recipient-tab-id=$TARGET_TAB_ID,recipient-token=target-token" -- "$PAYLOAD" > "$PIPE_ACK_FILE"
 [ "$(cat "$PIPE_ACK_FILE")" = accepted ] || fail "target rail did not acknowledge the accepted row"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 

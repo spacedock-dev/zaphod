@@ -213,12 +213,14 @@ assert_temporary_files_cleaned() {
 }
 
 assert_private_sidecar_started() {
-    local expected_url="$1" expected="$TEST_ROOT/expected-sidecar-argv" sidecar_pid
+    local expected_url="$1" expected="$TEST_ROOT/expected-sidecar-argv" sidecar_pid recipient_token
     for _attempt in $(seq 1 100); do
         [ ! -e "$FAKE_SIDECAR_ARGV" ] || break
         sleep 0.05
     done
     [ -f "$FAKE_SIDECAR_ARGV" ] || fail "entry point did not start its private sidecar"
+    recipient_token="$(sed -n 's/.*recipient_token "\([^"]*\)".*/\1/p' "$FAKE_ZELLIJ_LAYOUT" | head -1)"
+    [ -n "$recipient_token" ] || fail "inline layout did not carry a recipient token"
     printf '%s\n' \
         subscribe --server http://127.0.0.1:8080 \
         --zellij-bin zellij \
@@ -229,6 +231,7 @@ assert_private_sidecar_started() {
         --tab-id 73 \
         --rail-url "$expected_url" \
         --checkout-cwd "$FIXTURE_PHYSICAL" \
+        --recipient-token "$recipient_token" \
         --startup-fd 3 > "$expected"
     diff -u "$expected" "$FAKE_SIDECAR_ARGV" >&2 ||
         fail "private sidecar did not receive the exact verified profile/tab/rail tuple"

@@ -97,7 +97,7 @@ func run(cfg Config, stderr io.Writer) error {
 }
 
 func subscribeUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL --checkout-cwd PATH")
+	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL --checkout-cwd PATH --recipient-token TOKEN")
 }
 
 func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error) {
@@ -112,6 +112,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 	tabID := flags.String("tab-id", "", "stable Zellij tab ID")
 	railURL := flags.String("rail-url", "", "canonical sidebar WASM URL")
 	checkoutCWD := flags.String("checkout-cwd", "", "selected checkout root")
+	recipientToken := flags.String("recipient-token", "", "private direct-entry recipient token")
 	startupFD := flags.Int("startup-fd", -1, "private direct-script stream-ready confirmation fd")
 	if err := flags.Parse(args); err != nil {
 		return SubscribeConfig{}, err
@@ -133,6 +134,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 		{"--tab-id", *tabID},
 		{"--rail-url", *railURL},
 		{"--checkout-cwd", *checkoutCWD},
+		{"--recipient-token", *recipientToken},
 	} {
 		if flag.value == "" {
 			missing = append(missing, flag.name)
@@ -154,6 +156,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 		TabID:             *tabID,
 		RailURL:           *railURL,
 		CheckoutCWD:       *checkoutCWD,
+		RecipientToken:    *recipientToken,
 		StartupFD:         *startupFD,
 		PipeTimeout:       5 * time.Second,
 		SummaryClampBytes: 512,
