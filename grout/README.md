@@ -1,23 +1,19 @@
 # grout
 
-Grout binds agent state to the rail: it turns agentsview session data and
-subspace decision logs into typed rail rows and pipes them into the zellij
-session (prototype decisions 1–4,
-`docs/archive/plan-agent-rail-prototype-2026-07-07.md`). The plugin never
-learns about agentsview; grout never learns about zellij beyond invoking
-`zellij pipe`. This is the sprint-0 skeleton: one one-shot run — fetch one
-session, read one gate log, emit two rows, exit.
+Grout is Zaphod's internal adapter package. It turns AgentsView session data
+into typed rail rows and invokes `zellij pipe`; the plugin never learns about
+AgentsView. `build.sh` compiles the package into the checkout-local
+`target/zaphod` artifact.
 
-## Usage
+The only executable surface is the private `zaphod subscribe` sidecar started
+by `scripts/zellij-new-tab.sh` after it verifies a fresh rail. Do not run it
+or `go run ./grout` as a user command. The sidecar receives its exact Zellij
+profile, session, stable tab ID, and canonical rail URL from that script,
+then sends session rows through the named `agent-event` pipe. Gate delivery is
+outside this sidecar's first slice.
 
-Run from the repo root, inside the target zellij session:
-
-    go run ./grout <session-id> <gate-log>
-
-Both positionals required — no default session or gate log, so runs
-behave identically from any cwd; missing arguments exit 2 with usage.
-One JSON object per line, one line per `zellij pipe` invocation, pipe name
-`agent-event`:
+The existing `agent-event` protocol carries session and gate rows, but this
+first sidecar emits only the session form:
 
     {"kind":"session","id":"…","cwd":"…","agent":"…","state":"…","summary":"…","ts":"2026-07-07T05:00:00Z"}
     {"kind":"gate","log_path":"/abs/…/x.decisions.jsonl","workflow":"…","entity":"…","entity_title":"…","stage":"…","round":1,"recommendation":"…","ts":"2026-07-07T05:00:00Z"}
@@ -35,11 +31,13 @@ tool_call_pending, absent; `truncated` exists in code, unobserved).
 
 ## Failure posture
 
-Exit 0 when every row's pipe exited 0 within budget; 1 otherwise. Each pipe
-runs under a 5s kill timer: on timeout the child is killed, the reason goes
-to stderr (`pipe timeout after 5s: kind=session`), and the next row is still
-attempted — fire-and-forget, no retry. Broadcast is by pipe name only, never
-`--plugin`, which would launch a non-running plugin in the background.
+The sidecar owns one initial list, one SSE connection, its target probes, and
+short-lived pipe children. A `data_changed` event re-lists sessions. Target
+loss, source EOF, a source error, or a pipe error ends the sidecar; it does
+not reconnect, retry, retarget, or clean up external resources. Each pipe
+runs under a 5s kill timer. Delivery remains a named-pipe broadcast with an
+exact `recipient-tab-id`, never `--plugin`, which would launch an absent
+plugin.
 
 ## Fixture provenance
 

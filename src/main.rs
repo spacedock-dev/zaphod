@@ -452,7 +452,12 @@ impl Sidebar {
         if own.next().is_some() {
             return;
         }
-        if tabs.iter().filter(|candidate| candidate.tab_id == tab.tab_id).count() != 1 {
+        if tabs
+            .iter()
+            .filter(|candidate| candidate.tab_id == tab.tab_id)
+            .count()
+            != 1
+        {
             return;
         }
         self.agent_recipient = Some(AgentRecipient {
@@ -670,7 +675,10 @@ impl ZellijPlugin for Sidebar {
         // returns; an explicit unblock would need the ReadCliPipes grant.
         if pipe_message.name == "agent-event" {
             if !self.accepts_agent_event(&pipe_message.args) {
-                trace!(self, "agent-event dropped: recipient is absent, stale, or foreign");
+                trace!(
+                    self,
+                    "agent-event dropped: recipient is absent, stale, or foreign"
+                );
                 return false;
             }
             // Only plugin state moves here — no host calls in pipe() (SPEC

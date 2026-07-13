@@ -1,5 +1,5 @@
-// ABOUTME: Grout sprint-0 skeleton — one-shot run that fetches one agentsview
-// ABOUTME: session, reads one gate log, and pipes both rows into zellij.
+// ABOUTME: Private native sidecar entry plus internal row-building seams.
+// ABOUTME: Only zaphod subscribe is executable; its target tuple is explicit.
 
 package main
 
