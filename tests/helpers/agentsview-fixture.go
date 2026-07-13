@@ -1,10 +1,11 @@
-// ABOUTME: Serves an isolated empty AgentsView API plus a live SSE heartbeat.
+// ABOUTME: Serves an isolated AgentsView session API plus a live SSE heartbeat.
 // ABOUTME: The tmux/Zellij smoke owns this process and never uses ambient port 8080.
 
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -17,9 +18,10 @@ import (
 
 func main() {
 	readyFile := flag.String("ready-file", "", "path that receives the fixture URL")
+	cwd := flag.String("cwd", "", "session cwd returned by the fixture")
 	flag.Parse()
-	if *readyFile == "" {
-		fmt.Fprintln(os.Stderr, "--ready-file is required")
+	if *readyFile == "" || *cwd == "" {
+		fmt.Fprintln(os.Stderr, "--ready-file and --cwd are required")
 		os.Exit(2)
 	}
 
@@ -30,7 +32,11 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"sessions":[]}`)
+		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": []map[string]any{{
+			"id": "smoke-session", "cwd": *cwd, "agent": "codex",
+			"termination_status": "awaiting_user", "first_message": "SMOKE_SSE_ROW",
+			"created_at": "2026-07-13T00:00:00Z",
+		}}})
 	})
 	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

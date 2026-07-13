@@ -40,7 +40,7 @@ write_fake_build() {
         'if [ "${FAKE_SIDECAR_EXEC_FAILURE:-}" = 1 ]; then' \
         '    printf "%s\\n" "#!/definitely/missing-zaphod-interpreter" > "$(dirname "$0")/target/zaphod"' \
         'else' \
-        '    printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "startup_fd=\"\"" "previous=\"\"" "for arg in \"\$@\"; do" "    if [ \"\$previous\" = --startup-fd ]; then startup_fd=\"\$arg\"; fi" "    previous=\"\$arg\"" "done" "[ -n \"\$startup_fd\" ]" "if [ \"\${FAKE_SIDECAR_HANG_STARTUP:-}\" = 1 ]; then" "    printf '\''%s\\n'\'' \"\$\$\" > \"\$FAKE_SIDECAR_PID_FILE\"" "    trap '\''exit 0'\'' TERM INT" "    while :; do sleep 1; done" "fi" "printf '\''ready\\n'\'' >&\"\$startup_fd\"" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" > "$(dirname "$0")/target/zaphod"' \
+        '    printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "startup_fd=\"\"" "previous=\"\"" "for arg in \"\$@\"; do" "    if [ \"\$previous\" = --startup-fd ]; then startup_fd=\"\$arg\"; fi" "    previous=\"\$arg\"" "done" "[ -n \"\$startup_fd\" ]" "printf '\''%s\\n'\'' \"\$\$\" > \"\$FAKE_SIDECAR_PID_FILE\"" "if [ \"\${FAKE_SIDECAR_HANG_STARTUP:-}\" = 1 ]; then" "    trap '\''exit 0'\'' TERM INT" "    while :; do sleep 1; done" "fi" "printf '\''ready\\n'\'' >&\"\$startup_fd\"" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" "trap '\''exit 0'\'' TERM INT" "while :; do sleep 1; done" > "$(dirname "$0")/target/zaphod"' \
         'fi' \
         'chmod +x "$(dirname "$0")/target/zaphod"' \
         > "$fixture/build.sh"
@@ -213,7 +213,7 @@ assert_temporary_files_cleaned() {
 }
 
 assert_private_sidecar_started() {
-    local expected_url="$1" expected="$TEST_ROOT/expected-sidecar-argv"
+    local expected_url="$1" expected="$TEST_ROOT/expected-sidecar-argv" sidecar_pid
     for _attempt in $(seq 1 100); do
         [ ! -e "$FAKE_SIDECAR_ARGV" ] || break
         sleep 0.05
@@ -232,6 +232,13 @@ assert_private_sidecar_started() {
         --startup-fd 3 > "$expected"
     diff -u "$expected" "$FAKE_SIDECAR_ARGV" >&2 ||
         fail "private sidecar did not receive the exact verified profile/tab/rail tuple"
+    sidecar_pid="$(cat "$FAKE_SIDECAR_PID_FILE")"
+    kill -TERM "$sidecar_pid" 2>/dev/null || true
+    for _attempt in $(seq 1 100); do
+        kill -0 "$sidecar_pid" 2>/dev/null || return 0
+        sleep 0.05
+    done
+    fail "successful fixture sidecar did not stop after the assertion"
 }
 
 test_selected_checkout_creates_one_inline_tab_without_writes() {
@@ -390,6 +397,26 @@ test_sidecar_stream_timeout_reaps_process() {
     echo "PASS: sidecar stream timeout terminates and reaps its process"
 }
 
+test_failed_tuple_handoff_reaps_ready_sidecar() {
+    local root status sidecar_pid
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    set +e
+    run_entry --session WORK 1>&- 2> "$FIXTURE_ERROR"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "partial tuple handoff unexpectedly succeeded"
+    sidecar_pid="$(cat "$FAKE_SIDECAR_PID_FILE")"
+    for _attempt in $(seq 1 100); do
+        kill -0 "$sidecar_pid" 2>/dev/null || break
+        sleep 0.05
+    done
+    ! kill -0 "$sidecar_pid" 2>/dev/null || fail "failed tuple handoff left process $sidecar_pid running"
+    assert_standing_kdl_unchanged
+    echo "PASS: failed tuple handoff terminates and reaps its ready sidecar"
+}
+
 test_selected_checkout_creates_one_inline_tab_without_writes
 test_setup_failure_stops_before_new_tab
 test_new_tab_failure_leaves_standing_kdl_unchanged
@@ -397,3 +424,4 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged
 test_unready_resident_starts_no_sidecar
 test_sidecar_exec_failure_is_visible
 test_sidecar_stream_timeout_reaps_process
+test_failed_tuple_handoff_reaps_ready_sidecar

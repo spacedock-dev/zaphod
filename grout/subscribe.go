@@ -44,6 +44,7 @@ type SubscribeConfig struct {
 	RailURL           string
 	CheckoutCWD       string
 	StartupFD         int
+	SourceTimeout     time.Duration
 	PipeTimeout       time.Duration
 	SummaryClampBytes int
 }
@@ -169,12 +170,14 @@ func serverEndpoint(serverURL, suffix string) (string, error) {
 	return base.String(), nil
 }
 
-func fetchSessions(ctx context.Context, client *http.Client, serverURL string) ([]sessionInfo, error) {
+func fetchSessions(ctx context.Context, client *http.Client, serverURL string, timeout time.Duration) ([]sessionInfo, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	endpoint, err := serverEndpoint(serverURL, "/api/v1/sessions")
 	if err != nil {
 		return nil, fmt.Errorf("source endpoint: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +217,7 @@ func refreshSessions(
 	if err != nil {
 		return err
 	}
-	sessions, err := fetchSessions(ctx, client, cfg.ServerURL)
+	sessions, err := fetchSessions(ctx, client, cfg.ServerURL, cfg.SourceTimeout)
 	if err != nil {
 		return err
 	}
@@ -303,8 +306,16 @@ func streamEvents(
 			return fmt.Errorf("stream-ready signal: %w", err)
 		}
 		ready = true
-		// Replay happens after the stream is known live, so data_changed frames
-		// arriving during a large initial list remain queued instead of lost.
+		// Two idempotent initial deliveries bracket recipient arming. The plugin
+		// keys rows by session id, so the retry cannot create duplicates.
+		if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
 		return refreshSessions(ctx, client, cfg, stableTabID, stderr)
 	}
 
@@ -328,17 +339,11 @@ func streamEvents(
 				return fmt.Errorf("source stream: %w", result.err)
 			}
 			if result.line == "" {
-				wasReady := ready
-				if eventName == "data_changed" || eventName == "heartbeat" {
-					if err := markReady(); err != nil {
-						return err
-					}
-				}
-				if eventName == "data_changed" && wasReady {
+				if eventName == "data_changed" && ready {
 					if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
 						return err
 					}
-				} else if eventName == "heartbeat" && wasReady {
+				} else if eventName == "heartbeat" && ready {
 					if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
 						return err
 					}
@@ -367,6 +372,9 @@ func runSubscribe(ctx context.Context, cfg SubscribeConfig, stderr io.Writer) er
 	}
 	if cfg.SummaryClampBytes <= 0 {
 		cfg.SummaryClampBytes = 512
+	}
+	if cfg.SourceTimeout <= 0 {
+		cfg.SourceTimeout = 5 * time.Second
 	}
 	if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
 		return err

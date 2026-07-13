@@ -132,15 +132,15 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	if err := <-errCh; !errors.Is(err, ErrSourceEOF) {
 		t.Fatalf("runSubscribe error = %v, want source EOF", err)
 	}
-	if got := lists.Load(); got != 2 {
-		t.Fatalf("source list count = %d, want initial plus data_changed refresh", got)
+	if got := lists.Load(); got != 3 {
+		t.Fatalf("source list count = %d, want initial, arming retry, plus data_changed refresh", got)
 	}
 
 	invs := readInvocations(t, argvLog)
-	if len(invs) != 1 {
-		t.Fatalf("zellij pipe invocations = %d, want one target-local session row", len(invs))
+	if len(invs) != 2 {
+		t.Fatalf("zellij pipe invocations = %d, want arming retry plus data_changed row", len(invs))
 	}
-	argv := invs[0]
+	argv := invs[len(invs)-1]
 	wantPrefix := []string{
 		"--config-dir", "/isolated/config",
 		"--config", "/isolated/config/config.kdl",
@@ -197,9 +197,11 @@ func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		contentType string
+		body        string
 	}{
 		{name: "wrong content type", contentType: "application/json"},
 		{name: "immediate eof", contentType: "text/event-stream"},
+		{name: "heartbeat then eof", contentType: "text/event-stream", body: "event: heartbeat\ndata: {}\n\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -213,6 +215,7 @@ func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
 					fmt.Fprint(w, `{"sessions":[]}`)
 				case "/api/v1/events":
 					w.Header().Set("Content-Type", tc.contentType)
+					fmt.Fprint(w, tc.body)
 				default:
 					http.NotFound(w, r)
 				}
@@ -250,5 +253,52 @@ func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
 				t.Fatalf("invalid stream signaled readiness: %q", payload)
 			}
 		})
+	}
+}
+
+func TestSubscribeTimesOutStalledInitialRefresh(t *testing.T) {
+	dir := t.TempDir()
+	zellij := fakeSubscriberZellij(t, dir, filepath.Join(dir, "argv.log"), `[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions":
+			<-r.Context().Done()
+		}
+	}))
+	defer source.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runSubscribe(context.Background(), SubscribeConfig{
+		ServerURL:         source.URL,
+		ZellijBin:         zellij,
+		ZellijConfigDir:   "/isolated/config",
+		ZellijConfigFile:  "/isolated/config/config.kdl",
+		ZellijDataDir:     "/isolated/data",
+		ZellijSession:     "WORK",
+		TabID:             "73",
+		RailURL:           "file:/candidate/zellij-sidebar.wasm",
+		CheckoutCWD:       "/work/managed",
+		StartupFD:         int(writer.Fd()),
+		SourceTimeout:     100 * time.Millisecond,
+		PipeTimeout:       time.Second,
+		SummaryClampBytes: 512,
+	}, nil)
+	_ = writer.Close()
+	payload, readErr := io.ReadAll(reader)
+	_ = reader.Close()
+	if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+		t.Fatalf("stalled refresh error = %v, want finite deadline", err)
+	}
+	if readErr != nil || string(payload) != "ready\n" {
+		t.Fatalf("stream readiness = %q, %v; want ready before bounded replay", payload, readErr)
 	}
 }

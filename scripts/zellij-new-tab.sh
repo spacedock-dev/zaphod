@@ -79,11 +79,11 @@ zellij_cmd() {
 
 TEMP_ROOT=""
 SIDECAR_PID=""
-SIDECAR_READY=0
+SIDECAR_HANDED_OFF=0
 SIDECAR_START_FIFO=""
 
 stop_unready_sidecar() {
-    [ "$SIDECAR_READY" -eq 0 ] || return 0
+    [ "$SIDECAR_HANDED_OFF" -eq 0 ] || return 0
     [ -n "$SIDECAR_PID" ] || return 0
     kill -TERM "$SIDECAR_PID" 2>/dev/null || true
     wait "$SIDECAR_PID" 2>/dev/null || true
@@ -199,7 +199,6 @@ start_private_sidecar() {
     if [ "$startup_status" -ne 0 ] || [ "$startup_message" != "ready" ]; then
         fail "sidecar-start-failed: private zaphod sidecar did not establish the AgentsView stream"
     fi
-    SIDECAR_READY=1
 }
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
@@ -219,3 +218,4 @@ printf 'TAB_ID=%s\n' "$TAB_ID"
 printf 'WASM_URL=%s\n' "$WASM_URL"
 printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
 printf 'SIDECAR_PID=%s\n' "$SIDECAR_PID"
+SIDECAR_HANDED_OFF=1

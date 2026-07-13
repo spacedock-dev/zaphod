@@ -149,7 +149,7 @@ ISOLATED_CONFIG_BEFORE="$(file_state "$CONFIG_FILE")"
 ISOLATED_LAYOUT_BEFORE="$(file_state "$ISOLATED_LAYOUT")"
 
 go build -o "$ROOT/agentsview-fixture" "$SCRIPT_DIR/helpers/agentsview-fixture.go"
-"$ROOT/agentsview-fixture" --ready-file "$ROOT/agentsview-url" >"$ROOT/agentsview.out" 2>"$ROOT/agentsview.err" &
+"$ROOT/agentsview-fixture" --ready-file "$ROOT/agentsview-url" --cwd "$REPO_ROOT" >"$ROOT/agentsview.out" 2>"$ROOT/agentsview.err" &
 AGENTSVIEW_PID=$!
 for _attempt in $(seq 1 100); do
     [ ! -s "$ROOT/agentsview-url" ] || break
@@ -376,6 +376,16 @@ wait_for_settled_candidate_resident \
     "$ROOT/candidate-before.kdl" \
     "$ROOT/candidate-before.screen" \
     "$ROOT/candidate-tabs-before.json"
+for _attempt in $(seq 1 100); do
+    tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/agents-row.screen"
+    if grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null &&
+        grep -F 'SMOKE_SSE_ROW' "$ROOT/agents-row.screen" >/dev/null; then
+        break
+    fi
+    sleep 0.05
+done
+grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row section never rendered"
+grep -F 'SMOKE_SSE_ROW' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row was lost before recipient arming"
 TAB_COUNT_AFTER="$(jq -er 'length' "$ROOT/candidate-tabs-before.json")"
 [ "$TAB_COUNT_AFTER" -eq "$((TAB_COUNT_BEFORE + 1))" ] ||
     fail "direct entry changed tab count from $TAB_COUNT_BEFORE to $TAB_COUNT_AFTER (expected one fresh tab)"
