@@ -314,6 +314,10 @@ func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
 	}
 }
 
+func startupStreamQuiet(scanned, consumed uint64, eventName string) bool {
+	return scanned == consumed && eventName == ""
+}
+
 func streamEvents(
 	ctx context.Context,
 	client *http.Client,
@@ -385,6 +389,7 @@ func streamEvents(
 	var settleTimer *time.Timer
 	var settleC <-chan time.Time
 	var settleGeneration uint64
+	var consumedActivity uint64
 	pendingDataChange := false
 	startSettle := func() {
 		if settleTimer != nil {
@@ -454,7 +459,8 @@ func streamEvents(
 			}
 		case <-settleC:
 			settleC = nil
-			if streamActivity.Load() != settleGeneration || eventName != "" {
+			scanned := streamActivity.Load()
+			if scanned != settleGeneration || !startupStreamQuiet(scanned, consumedActivity, eventName) {
 				startSettle()
 				continue
 			}
@@ -471,6 +477,9 @@ func streamEvents(
 			}
 			ready = true
 		case result := <-lines:
+			if !result.done {
+				consumedActivity++
+			}
 			if !ready && settleC != nil {
 				startSettle()
 			}

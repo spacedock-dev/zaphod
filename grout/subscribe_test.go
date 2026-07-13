@@ -43,6 +43,18 @@ func fakeSubscriberZellij(t *testing.T, dir, log, panes string) string {
 		"echo unexpected zellij invocation >&2\nexit 64\n")
 }
 
+func TestStartupStreamQuietRequiresEveryScannedLineConsumed(t *testing.T) {
+	if startupStreamQuiet(1, 0, "") {
+		t.Fatal("a scanned line queued for consumption was treated as quiet")
+	}
+	if startupStreamQuiet(1, 1, "data_changed") {
+		t.Fatal("an incomplete SSE event was treated as quiet")
+	}
+	if !startupStreamQuiet(1, 1, "") {
+		t.Fatal("a fully consumed event boundary was not treated as quiet")
+	}
+}
+
 func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	dir := t.TempDir()
 	argvLog := filepath.Join(dir, "zellij-argv.log")
