@@ -154,6 +154,23 @@ func (cfg SubscribeConfig) zellijArgs(command ...string) []string {
 	return append(args, command...)
 }
 
+func nativePaneReplyProvenance(attempt int, stdout []byte, stderr string) string {
+	const prefixLimit = 256
+	stdoutPrefix := stdout
+	if len(stdoutPrefix) > prefixLimit {
+		stdoutPrefix = stdoutPrefix[:prefixLimit]
+	}
+	stderrPrefix := []byte(stderr)
+	if len(stderrPrefix) > prefixLimit {
+		stderrPrefix = stderrPrefix[:prefixLimit]
+	}
+	return fmt.Sprintf(
+		"command=list-panes attempt=%d/3 stdout_len=%d stdout_prefix=%s stderr_len=%d stderr_prefix=%s",
+		attempt, len(stdout), strconv.QuoteToASCII(string(stdoutPrefix)), len(stderr),
+		strconv.QuoteToASCII(string(stderrPrefix)),
+	)
+}
+
 // probeTarget checks the only target identity that the sidecar may use: its
 // original stable server tab ID plus the exact canonical rail URL. Native
 // list-panes may omit terminal cwd, so the direct entry's absolute checkout
@@ -165,19 +182,31 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--command", "--geometry", "--state", "--tab")
 	var output []byte
 	var panes []zellijPane
+	var stderrOutput string
+	lastAttempt := 0
 	for attempt := 0; attempt < 3; attempt++ {
 		command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
+		var commandStderr strings.Builder
+		command.Stderr = &commandStderr
 		var err error
 		output, err = command.Output()
+		stderrOutput = commandStderr.String()
+		lastAttempt = attempt + 1
 		if err != nil {
 			if ctx.Err() != nil {
 				return targetSnapshot{}, ctx.Err()
 			}
-			return targetSnapshot{}, fmt.Errorf("%w: native list-panes: %v", ErrTargetLost, err)
+			return targetSnapshot{}, fmt.Errorf(
+				"%w: native list-panes: %v; %s", ErrTargetLost, err,
+				nativePaneReplyProvenance(lastAttempt, output, stderrOutput),
+			)
 		}
 		if len(strings.TrimSpace(string(output))) > 0 {
 			if err := json.Unmarshal(output, &panes); err != nil {
-				return targetSnapshot{}, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
+				return targetSnapshot{}, fmt.Errorf(
+					"%w: malformed native pane state: %v; %s", ErrTargetLost, err,
+					nativePaneReplyProvenance(lastAttempt, output, stderrOutput),
+				)
 			}
 			if len(panes) > 0 {
 				break
@@ -193,7 +222,10 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	}
 	if panes == nil {
 		if err := json.Unmarshal(output, &panes); err != nil {
-			return targetSnapshot{}, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
+			return targetSnapshot{}, fmt.Errorf(
+				"%w: malformed native pane state: %v; %s", ErrTargetLost, err,
+				nativePaneReplyProvenance(lastAttempt, output, stderrOutput),
+			)
 		}
 	}
 	resident := 0

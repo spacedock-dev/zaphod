@@ -653,8 +653,8 @@ func TestProbeTargetMalformedErrorPreservesBoundedNativeReplyProvenance(t *testi
 	}
 	message := err.Error()
 	for _, want := range []string{
-		"command=list-panes", "attempt=1/3", "stdout_len=318", "stderr_len=16",
-		`stdout_prefix="layout { pane; }\\n`, `stderr_prefix="route saturated\\n"`,
+		"command=list-panes", "attempt=1/3", "stdout_len=317", "stderr_len=16",
+		`stdout_prefix="layout { pane; }\n`, `stderr_prefix="route saturated\n"`,
 	} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("malformed error = %q, want provenance %q", message, want)
