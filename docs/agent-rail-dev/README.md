@@ -215,6 +215,35 @@ with repository evidence and replacement-panel adjudication, or `needs
 decision` disposition. Any code-changing commit invalidates the old panel and
 requires a passing exact-head replacement before validation.
 
+#### Review convergence budget
+
+Implementation gets three failed authoritative `code_completion` synthesis
+parents for one stable durable contract. One completed synthesis parent with a
+FAIL verdict is one round. Quick reviews, expected-red commits, individual
+panel members, execution failures, and replacement adjudication on an unchanged
+range do not count as additional implementation rounds.
+
+After the third failed round, the FO stops the automatic fix/review loop before
+launching another `code_completion` panel and presents a convergence gate. The
+gate names the current frozen head and green evidence, every failed parent and
+finding cluster, the operator-visible end value still at risk, repair cost and
+risk, and one proposed disposition for each surviving finding: `must fix now`,
+`accept bounded risk and file follow-up`, `rebut with evidence`, or `needs
+decision`.
+
+An edge case may move to follow-up only when it is bounded, fail-safe,
+observable or recoverable, does not violate an acceptance criterion, and does
+not weaken identity or authority, data integrity, owned-process cleanup, or the
+truth of advertised readiness. Deferral requires explicit captain approval and
+a filed task with the reproducer, affected boundary, user impact, and acceptance
+criteria before validation resumes. Security, corruption, authority confusion,
+resource leaks or hangs, and false-positive success remain release-blocking.
+
+Feedback resets the three-round budget only when it materially changes the
+operator-visible end value and the FO first updates the durable task contract
+and regenerates the implementation dispatch. Conversational clarification,
+code churn, a new head, or reviewer disagreement does not reset the budget.
+
 ### `validation`
 
 The demo is the gate. A fresh agent — no shared context with the implementer
