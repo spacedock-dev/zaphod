@@ -8,6 +8,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 # shellcheck source=scripts/zellij-layout-lib.sh
 source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
 
+# A smoke launched from a loaded Zellij pane must not carry that client's
+# identity into its disposable server or native CLI calls.
+unset ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID
+
 fail() {
     echo "FAIL: $*" >&2
     exit 1
@@ -37,6 +41,7 @@ HOME_DIR=""
 PERMISSION_CACHE=""
 PERMISSION_FIXTURE="${ZAPHOD_PERMISSION_FIXTURE:-pregranted}"
 SUBSCRIBER_MODE="${ZAPHOD_SUBSCRIBER_MODE:-automatic}"
+CALLER_ENV="${ZAPHOD_CALLER_ENV:-unspecified}"
 ENTRY_START_TIMEOUT=30
 ISOLATED_CONFIG_BEFORE=""
 ISOLATED_LAYOUT=""
@@ -53,12 +58,12 @@ SIDECAR_START_FIFO=""
 ENTRY_PID=""
 
 zellij_control() {
-    env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
         zellij --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
 }
 
 zellij_session() {
-    env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
         zellij --session "$SESSION_NAME" \
         --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
 }
@@ -220,7 +225,7 @@ mkdir -p "$(dirname "$PERMISSION_CACHE")"
 
 start_tmux_zellij() {
     local command
-    printf -v command 'env HOME=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
+    printf -v command 'env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID HOME=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
         "$HOME_DIR" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
     tmux_command new-session -d -x 160 -y 45 -s "$TMUX_SESSION" "$command"
 }
@@ -384,6 +389,8 @@ wait_for_nonempty_panes "$ROOT/foreign-ready.json"
 dismiss_startup_tip
 zellij_control setup --check >/dev/null
 capture_tabs "$ROOT/foreign-tabs-before.json"
+zaphod_valid_tab_inventory "$ROOT/foreign-tabs-before.json" ||
+    fail "isolated foreign tab inventory was not a complete stable-ID record"
 TAB_COUNT_BEFORE="$(jq -er 'length' "$ROOT/foreign-tabs-before.json")"
 FOREIGN_TAB_ID="$(jq -er '.[] | select(.active) | .tab_id' "$ROOT/foreign-tabs-before.json")"
 capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreign-ready.screen"
@@ -391,7 +398,8 @@ jq -e --arg wasm_url "$WASM_URL" \
     'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
     fail "isolated profile unexpectedly started on the selected checkout rail"
 entry_command() {
-    env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
+    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+        ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
         ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
@@ -404,17 +412,56 @@ foreground_entry() {
     local target_pane_id=""
     local startup_message=""
     local startup_status=0
+    local new_tab_status=0
+    local tabs_after_status=1
+    local target_status=1
     local attempt
 
     zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" \
         "$rendered_layout" "$recipient_token"
     zaphod_validate_layout_identity "$rendered_layout" "$WASM_URL"
-    TAB_ID="$(zellij_session action new-tab --name 'Zaphod foreground subscriber' \
-        --cwd "$REPO_ROOT" --layout-string "$(cat "$rendered_layout")")"
-    [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || fail "foreground entry did not return a stable tab ID"
+    set +e
+    zellij_session action new-tab --name 'Zaphod foreground subscriber' \
+        --cwd "$REPO_ROOT" --layout-string "$(cat "$rendered_layout")" \
+        > "$ROOT/foreground-new-tab.stdout" 2> "$ROOT/foreground-new-tab.stderr"
+    new_tab_status=$?
+    set -e
+    if [ "$new_tab_status" -ne 0 ]; then
+        printf 'FAIL: foreground %s\n' \
+            "$(zaphod_bounded_reply_provenance new-tab "$new_tab_status" \
+                "$ROOT/foreground-new-tab.stdout" "$ROOT/foreground-new-tab.stderr")" >&2
+        return 1
+    fi
+    TAB_ID=""
+    : > "$ROOT/foreground-tabs-after.json"
+    : > "$ROOT/foreground-tabs-after.err"
     for attempt in $(seq 1 80); do
+        set +e
+        zellij_session action list-tabs --json --all --state --layout \
+            > "$ROOT/foreground-tabs-after.json" 2> "$ROOT/foreground-tabs-after.err"
+        tabs_after_status=$?
+        set -e
+        if [ "$tabs_after_status" -eq 0 ] && zaphod_valid_tab_inventory "$ROOT/foreground-tabs-after.json"; then
+            TAB_ID="$(zaphod_new_tab_id_from_inventories "$ROOT/foreign-tabs-before.json" \
+                "$ROOT/foreground-tabs-after.json" 2>/dev/null || true)"
+            [ -z "$TAB_ID" ] || break
+        fi
+        sleep 0.05
+    done
+    if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]]; then
+        printf 'FAIL: foreground stable-ID discovery: %s; %s\n' \
+            "$(zaphod_bounded_reply_provenance new-tab "$new_tab_status" \
+                "$ROOT/foreground-new-tab.stdout" "$ROOT/foreground-new-tab.stderr")" \
+            "$(zaphod_bounded_reply_provenance list-tabs-after "$tabs_after_status" \
+                "$ROOT/foreground-tabs-after.json" "$ROOT/foreground-tabs-after.err")" >&2
+        return 1
+    fi
+    for attempt in $(seq 1 80); do
+        set +e
         zellij_session action list-panes --json --all --command --geometry --state --tab \
-            > "$ROOT/foreground-target.json" 2>"$ROOT/foreground-target.err" || true
+            > "$ROOT/foreground-target.json" 2>"$ROOT/foreground-target.err"
+        target_status=$?
+        set -e
         target_pane_id="$(jq -er --arg tab_id "$TAB_ID" --arg wasm_url "$WASM_URL" \
             '[.[] | select((.tab_id | tostring) == $tab_id and .is_plugin and .plugin_url == $wasm_url and (.is_floating | not) and (.is_suppressed | not))] | if length == 1 then .[0].id | tostring else empty end' \
             "$ROOT/foreground-target.json" 2>/dev/null || true)"
@@ -422,7 +469,9 @@ foreground_entry() {
         sleep 0.05
     done
     [ -n "$target_pane_id" ] || {
-        cat "$ROOT/foreground-target.err" >&2 || true
+        zaphod_bounded_reply_provenance list-panes "$target_status" \
+            "$ROOT/foreground-target.json" "$ROOT/foreground-target.err" >&2
+        printf '\n' >&2
         fail "foreground entry never exposed its exact target rail"
     }
     case "$target_pane_id" in
@@ -435,7 +484,8 @@ foreground_entry() {
     SIDECAR_LOG="$ROOT/foreground-subscriber.log"
     SIDECAR_START_FIFO="$ROOT/foreground-subscriber-start"
     mkfifo "$SIDECAR_START_FIFO"
-    env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" "$REPO_ROOT/target/zaphod" subscribe \
+    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+        ZELLIJ_SOCKET_DIR="$SOCKET_DIR" "$REPO_ROOT/target/zaphod" subscribe \
         --server "$AGENTSVIEW_URL" \
         --zellij-bin "$(command -v zellij)" \
         --zellij-config-dir "$CONFIG_DIR" \
@@ -635,5 +685,5 @@ jq -e --arg wasm_url "$WASM_URL" \
     fail "standing Zellij layout changed during tmux smoke: $STANDING_LAYOUT"
 kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited during smoke assertions"
 
-printf 'PASS: %s target/zaphod subscribe rendered SMOKE_INITIAL_ROW then SMOKE_SECOND_ROW, stayed alive, preserved routing, and cleaned up\n' \
-    "$SUBSCRIBER_MODE"
+printf 'PASS: %s caller with %s target/zaphod subscribe rendered SMOKE_INITIAL_ROW then SMOKE_SECOND_ROW, stayed alive, preserved routing, and cleaned up\n' \
+    "$CALLER_ENV" "$SUBSCRIBER_MODE"
