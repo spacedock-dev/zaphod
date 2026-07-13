@@ -40,6 +40,22 @@ const STATUS_MIN_COLS: usize = 8;
 // the user is still watching land.
 const TOGGLE_COOLDOWN: Duration = Duration::from_millis(600);
 
+fn permissions_for_config(config: &BTreeMap<String, String>) -> Vec<PermissionType> {
+    let mut permissions = vec![
+        PermissionType::ReadApplicationState,
+        PermissionType::ChangeApplicationState,
+        PermissionType::ReadPaneContents,
+    ];
+    if config
+        .get("recipient_token")
+        .is_some_and(|token| !token.is_empty())
+    {
+        permissions.push(PermissionType::ReadCliPipes);
+    }
+    permissions.extend([PermissionType::Reconfigure, PermissionType::RunCommands]);
+    permissions
+}
+
 #[derive(Default)]
 struct Sidebar {
     rows: Vec<Row>,
@@ -787,21 +803,7 @@ impl ZellijPlugin for Sidebar {
         self.last_cols = cols;
         if !self.permissions_requested {
             self.permissions_requested = true;
-            request_permission(&[
-                PermissionType::ReadApplicationState,
-                PermissionType::ChangeApplicationState,
-                PermissionType::ReadPaneContents,
-                // The private direct-entry subscriber waits for one CLI-pipe
-                // acknowledgment before it can safely deliver initial rows.
-                PermissionType::ReadCliPipes,
-                // The rail installs a current-client-only MessagePluginId
-                // route after it is visibly initialized; it never saves it
-                // to the user's config file.
-                PermissionType::Reconfigure,
-                // OpenCommandPaneFloating — the gate row's subspace-tui
-                // float — sits behind the RunCommands grant.
-                PermissionType::RunCommands,
-            ]);
+            request_permission(&permissions_for_config(&self.config));
         }
         if cols < STATUS_MIN_COLS {
             for line in sliver_lines(&self.rows, &self.sessions, &self.gates) {
