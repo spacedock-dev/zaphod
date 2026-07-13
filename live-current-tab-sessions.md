@@ -965,3 +965,18 @@ tab-bound session route, as this record already states.
 ### Summary
 
 The direct script now builds the checkout-local WASM and native sidecar, verifies one exact resident rail, then starts one private tab-bound subscriber. The rail admits a broadcast only after a fresh pane-to-stable-tab mapping; CWD binds focus only after that admission. README and harness docs describe the direct entry, `Alt Shift z` tab-only boundary, and tmux proof without reviving the discarded PTY, lease, helper-pane, controller, or pooling designs.
+
+## Stage Report: validation
+
+- DONE: Independently reproduce each offline proof at the committed implementation head, including Rust, Go, artifact/entry, and isolated two-rail smoke evidence.
+  At `10a78ba`, Rust 135/135 and `cargo check --tests` passed; Go, artifact, direct-entry fake, two-rail tmux, and existing tmux smoke all passed.
+- DONE: Run an adversarial audit of recipient admission and sidecar startup failures; verify no helper pane, lease, controller, or standing-config mutation is introduced.
+  Throwaway-clone mutation made the same-CWD bystander test fail; post-stream target loss returned `target-lost` without re-list, pipe, or retarget; failed exec stayed visible and retained the tab.
+- DONE: Prepare the exact captain-live managed-tab drill that shows one real session row and click-back focus, then record a gate-ready result.
+  Concise review brief: `gates/live-current-tab-sessions-validation.md`; it gives the direct-script drill and names the small native-click evidence boundary.
+- SKIPPED: Drive the interactive row/click observation.
+  The validation contract reserves that visible drill for the captain; no synthetic pipe or manual sidecar command substitutes for it.
+
+### Summary
+
+The committed head passes every offline criterion independently. The gate is ready for a concise captain drill: create one managed tab with the direct script, let a real AgentsView session arrive, and click it back to its same-tab terminal.
