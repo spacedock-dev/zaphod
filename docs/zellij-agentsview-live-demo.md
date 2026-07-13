@@ -54,6 +54,15 @@ cd "$FQ"
 CONFIG_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 CONFIG_FILE="${ZELLIJ_CONFIG_FILE:-$CONFIG_ROOT/config.kdl}"
 LAYOUT_FILE="$CONFIG_ROOT/layouts/zaphod.kdl"
+ZELLIJ_BIN="${ZELLIJ_BIN:-zellij}"
+if [ -n "${ZELLIJ_DATA_DIR:-}" ]; then
+  DATA_DIR="$ZELLIJ_DATA_DIR"
+elif [ "$(uname -s)" = Darwin ]; then
+  DATA_DIR="$HOME/Library/Application Support/org.Zellij-Contributors.Zellij"
+else
+  DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zellij"
+fi
+ZELLIJ_PROFILE_ARGS=(--config-dir "$CONFIG_ROOT" --config "$CONFIG_FILE" --data-dir "$DATA_DIR")
 shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-before.sha256
 ./scripts/zellij-new-tab.sh --session WORK --name 'Zaphod fq AgentsView drill' --agentsview-url "$AGENTSVIEW_URL" | tee /tmp/fq-entry.out
 ```
@@ -102,10 +111,10 @@ Capture the exact managed target and its rendered plugin screen:
 TAB_ID="$(sed -n 's/^TAB_ID=//p' /tmp/fq-entry.out)"
 WASM_URL="$(sed -n 's/^WASM_URL=//p' /tmp/fq-entry.out)"
 SIDECAR_LOG="$(sed -n 's/^SIDECAR_LOG=//p' /tmp/fq-entry.out)"
-zellij --session WORK action list-panes --json --all --command --geometry --state --tab > /tmp/fq-panes.json
-zellij --session WORK action list-tabs --json --all --state --layout > /tmp/fq-tabs.json
+"$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-panes --json --all --command --geometry --state --tab > /tmp/fq-panes.json
+"$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-tabs --json --all --state --layout > /tmp/fq-tabs.json
 RAIL_PANE="plugin_$(jq -r --arg id "$TAB_ID" --arg url "$WASM_URL" '.[] | select((.tab_id | tostring) == $id and .is_plugin and .plugin_url == $url and (.is_floating | not) and (.is_suppressed | not)) | .id' /tmp/fq-panes.json)"
-zellij --session WORK action dump-screen --pane-id "$RAIL_PANE" > /tmp/fq-rail.screen
+"$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action dump-screen --pane-id "$RAIL_PANE" > /tmp/fq-rail.screen
 ```
 
 Verify one stable-ID resident, one active target tab, a rendered session row,
