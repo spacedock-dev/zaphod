@@ -34,10 +34,10 @@ func fakeSubscriberZellij(t *testing.T, dir, log, panes string) string {
 		"for arg in \"$@\"; do\n"+
 		"  if [ \"$arg\" = list-panes ]; then cat "+panesPath+"; exit 0; fi\n"+
 		"  if [ \"$arg\" = pipe ]; then\n"+
-		"    case \"$*\" in *agent-event-ready*) : > "+readyPath+"; echo ready; exit 0 ;; esac\n"+
+		"    case \"$*\" in *zaphod-agent-v1-*-ready*) : > "+readyPath+"; echo ready; exit 0 ;; esac\n"+
 		"    [ -f "+readyPath+" ] || exit 70\n"+
 		"    { echo \"$#\"; for value in \"$@\"; do printf '%s\\n' \"$value\"; done; } >> "+log+"\n"+
-		"    case \"$*\" in *agent-snapshot*) cat > "+snapshotPath+"; echo accepted; exit 0 ;; esac\n"+
+		"    case \"$*\" in *zaphod-agent-v1-*-snapshot*) cat > "+snapshotPath+"; echo accepted; exit 0 ;; esac\n"+
 		"    echo accepted\n"+
 		"    exit 0\n"+
 		"  fi\n"+
@@ -102,15 +102,18 @@ func TestRecipientProbeAllowsMoreThanQuarterSecond(t *testing.T) {
 
 func TestRecipientProbeUsesPrivateVersionedPipe(t *testing.T) {
 	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "args")
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"printf '%s\\n' \"$*\" > "+argsPath+"\n"+
 		"case \"$*\" in *'--name zaphod-agent-v1-test-token-ready'*) echo ready ;; esac\n")
 	err := waitForRecipient(context.Background(), SubscribeConfig{
 		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
 		ZellijDataDir: "/d", ZellijSession: "s", TabID: "73", RecipientToken: "test-token",
-		PipeTimeout: time.Second, recipientWaitTimeout: 100 * time.Millisecond,
+		PipeTimeout: time.Second, recipientWaitTimeout: time.Second,
 	})
 	if err != nil {
-		t.Fatalf("private ready pipe was not used: %v", err)
+		args, _ := os.ReadFile(argsPath)
+		t.Fatalf("private ready pipe was not used: %v; argv=%q", err, args)
 	}
 }
 
@@ -143,8 +146,8 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
 		"case \"$*\" in\n"+
 		"  *list-panes*) cat "+panesPath+" ;;\n"+
-		"  *agent-event-ready*) echo ready ;;\n"+
-		"  *agent-snapshot*) cat >/dev/null; echo accepted ;;\n"+
+		"  *zaphod-agent-v1-*-ready*) echo ready ;;\n"+
+		"  *zaphod-agent-v1-*-snapshot*) cat >/dev/null; echo accepted ;;\n"+
 		"esac\n")
 	emitPartial := make(chan struct{})
 	finishEvent := make(chan struct{})
@@ -689,9 +692,9 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
 		"case \"$*\" in\n"+
 		"  *list-panes*) cat "+panesPath+" ;;\n"+
-		"  *agent-event-ready*) echo ready ;;\n"+
-		"  *agent-snapshot*) : > "+deliveryStarted+"; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
-		"  *agent-event*) : > "+catchupDelivered+"; echo accepted ;;\n"+
+		"  *zaphod-agent-v1-*-ready*) echo ready ;;\n"+
+		"  *zaphod-agent-v1-*-snapshot*) : > "+deliveryStarted+"; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
+		"  *zaphod-agent-v1-*-event*) : > "+catchupDelivered+"; echo accepted ;;\n"+
 		"esac\n")
 	change := make(chan struct{})
 	changeSent := make(chan struct{})
@@ -802,9 +805,9 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
 		"case \"$*\" in\n"+
 		"  *list-panes*) cat "+panesPath+" ;;\n"+
-		"  *agent-event-ready*) echo ready ;;\n"+
-		"  *agent-snapshot*) : > "+snapshotStarted+"; while [ ! -f "+releaseSnapshot+" ]; do sleep 0.01; done; echo accepted ;;\n"+
-		"  *agent-event*) echo accepted ;;\n"+
+		"  *zaphod-agent-v1-*-ready*) echo ready ;;\n"+
+		"  *zaphod-agent-v1-*-snapshot*) : > "+snapshotStarted+"; while [ ! -f "+releaseSnapshot+" ]; do sleep 0.01; done; echo accepted ;;\n"+
+		"  *zaphod-agent-v1-*-event*) echo accepted ;;\n"+
 		"esac\n")
 	change := make(chan struct{})
 	changeStarted := make(chan struct{})

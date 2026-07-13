@@ -18,6 +18,10 @@ func pipeArgs(name, payload string) []string {
 	return []string{"pipe", "--name", name, "--", payload}
 }
 
+func privateAgentPipeName(recipientToken, kind string) string {
+	return "zaphod-agent-v1-" + recipientToken + "-" + kind
+}
+
 // pipeArgsForTab leaves delivery as a named-pipe broadcast while carrying the
 // stable server tab ID for every receiver to verify. It never names a plugin:
 // Zellij would launch an absent plugin for --plugin, which is not delivery.
@@ -70,7 +74,7 @@ func EmitRowForTab(
 	if err != nil {
 		return err
 	}
-	args := pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID, recipientToken)
+	args := pipeArgsForTab(privateAgentPipeName(recipientToken, "event"), string(payload), recipientTabID, recipientToken)
 	return emitAcknowledged(ctx, cfg, kind, args, "", stderr)
 }
 
@@ -89,7 +93,7 @@ func EmitSnapshotForTab(
 		return err
 	}
 	args := []string{
-		"pipe", "--name", "agent-snapshot",
+		"pipe", "--name", privateAgentPipeName(recipientToken, "snapshot"),
 		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-token=" + recipientToken,
 	}
 	return emitAcknowledged(ctx, cfg, "snapshot", args, string(payload), stderr)

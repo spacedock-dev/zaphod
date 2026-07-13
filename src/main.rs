@@ -510,6 +510,13 @@ impl Sidebar {
             && Self::recipient_tab_id(args) == Some(armed.stable_tab_id)
             && args.get("recipient-token") == Some(configured_token)
     }
+
+    fn private_agent_pipe_name(&self, kind: &str) -> Option<String> {
+        self.config
+            .get("recipient_token")
+            .filter(|token| !token.is_empty())
+            .map(|token| format!("zaphod-agent-v1-{token}-{kind}"))
+    }
 }
 
 impl ZellijPlugin for Sidebar {
@@ -688,7 +695,7 @@ impl ZellijPlugin for Sidebar {
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         trace!(self, "pipe recv name={}", pipe_message.name);
-        if pipe_message.name == "agent-event-ready" {
+        if self.private_agent_pipe_name("ready").as_deref() == Some(pipe_message.name.as_str()) {
             if self.accepts_agent_event(&pipe_message.args) {
                 if let PipeSource::Cli(pipe_id) = &pipe_message.source {
                     cli_pipe_output(pipe_id, "ready");
@@ -696,7 +703,7 @@ impl ZellijPlugin for Sidebar {
             }
             return false;
         }
-        if pipe_message.name == "agent-snapshot" {
+        if self.private_agent_pipe_name("snapshot").as_deref() == Some(pipe_message.name.as_str()) {
             if !self.accepts_agent_event(&pipe_message.args) {
                 return false;
             }
@@ -714,7 +721,7 @@ impl ZellijPlugin for Sidebar {
         }
         // Ordinary event callers need no response; Zellij auto-unblocks them
         // after this returns. Only the readiness branch above writes output.
-        if pipe_message.name == "agent-event" {
+        if self.private_agent_pipe_name("event").as_deref() == Some(pipe_message.name.as_str()) {
             if !self.accepts_agent_event(&pipe_message.args) {
                 trace!(
                     self,
