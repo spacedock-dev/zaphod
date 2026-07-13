@@ -333,6 +333,23 @@ complete, and the gate is ready for the captain's direct-script-only demo.
   subscription end value, so no task reframe is required. Do not launch another
   `code_completion` panel without a new captain approval.
 
+- **Cycle 5 — 2026-07-14: REVISED during the captain lifecycle smoke, routed to implementation.**
+  At frozen head `25d950c`, the captain ran
+  `tests/zellij-subscription-lifecycle-smoke-test.sh` first from a loaded Zellij
+  panel and received `FAIL: isolated profile unexpectedly started on the
+  selected checkout rail`, then from an ordinary terminal outside Zellij and
+  received `FAIL: foreground entry did not return a stable tab ID`. Both fail
+  before the promised second-row lifecycle proof, while cleanup deletes the
+  captured native reply. Make the smoke isolate inherited Zellij client state
+  itself, work from both supported caller environments, and preserve bounded
+  stdout/stderr provenance when stable-tab discovery fails. Verify whether the
+  missing tab ID is caused by the foreground harness omitting production entry
+  context or by an invalid assumption about `new-tab` stdout; use one proven
+  stable-ID mechanism across the production and diagnostic paths. Re-run both
+  captain-equivalent invocations and the full lifecycle matrix before offering
+  another manual test. This is proof-harness repair within the existing end
+  value; no task reframe and no new `code_completion` panel are authorized.
+
 ## Stage Report: implementation addendum (review-convergence pause)
 
 - DONE: Freeze the revised implementation at
