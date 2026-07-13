@@ -5,6 +5,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 var (
@@ -171,6 +173,17 @@ func nativePaneReplyProvenance(attempt int, stdout []byte, stderr string) string
 	)
 }
 
+// isNativeLayoutReply recognizes the bounded, complete wrong-action record
+// observed when Zellij returned dump-layout output to list-panes. The caller
+// may retry this one shape, but never accepts it as pane state.
+func isNativeLayoutReply(output []byte) bool {
+	const maxLayoutReply = 1 << 20
+	trimmed := bytes.TrimSpace(output)
+	return len(trimmed) <= maxLayoutReply && utf8.Valid(trimmed) &&
+		bytes.HasPrefix(trimmed, []byte("layout {")) && bytes.HasSuffix(trimmed, []byte("}")) &&
+		!bytes.ContainsRune(trimmed, '\x00')
+}
+
 // probeTarget checks the only target identity that the sidecar may use: its
 // original stable server tab ID plus the exact canonical rail URL. Native
 // list-panes may omit terminal cwd, so the direct entry's absolute checkout
@@ -201,8 +214,16 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 				nativePaneReplyProvenance(lastAttempt, output, stderrOutput),
 			)
 		}
-		if len(strings.TrimSpace(string(output))) > 0 {
+		if len(bytes.TrimSpace(output)) > 0 {
 			if err := json.Unmarshal(output, &panes); err != nil {
+				if isNativeLayoutReply(output) && attempt < 2 {
+					select {
+					case <-ctx.Done():
+						return targetSnapshot{}, ctx.Err()
+					case <-time.After(50 * time.Millisecond):
+					}
+					continue
+				}
 				return targetSnapshot{}, fmt.Errorf(
 					"%w: malformed native pane state: %v; %s", ErrTargetLost, err,
 					nativePaneReplyProvenance(lastAttempt, output, stderrOutput),
