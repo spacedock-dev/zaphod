@@ -52,6 +52,32 @@ zaphod_new_tab_id_from_inventories() {
     '
 }
 
+zaphod_valid_tab_inventory() {
+    local inventory="$1"
+    jq -e '
+        type == "array" and
+        all(.[]; (.tab_id | type) == "number" and .tab_id >= 0 and (.tab_id | floor) == .tab_id) and
+        ((map(.tab_id) | length) == (map(.tab_id) | unique | length))
+    ' "$inventory" >/dev/null
+}
+
+# Format command provenance without retaining an unbounded shell value. Reply
+# bodies stay in owned temporary files; only their byte counts and first 256
+# bytes, JSON-escaped by jq, cross the failure boundary.
+zaphod_bounded_reply_provenance() {
+    local label="$1"
+    local status="$2"
+    local stdout_file="$3"
+    local stderr_file="$4"
+    local stdout_len stderr_len stdout_prefix stderr_prefix
+    stdout_len="$(wc -c < "$stdout_file" | tr -d '[:space:]')"
+    stderr_len="$(wc -c < "$stderr_file" | tr -d '[:space:]')"
+    stdout_prefix="$(head -c 256 "$stdout_file" | jq -Rs .)"
+    stderr_prefix="$(head -c 256 "$stderr_file" | jq -Rs .)"
+    printf '%s status=%s stdout_len=%s stdout_prefix=%s stderr_len=%s stderr_prefix=%s' \
+        "$label" "$status" "$stdout_len" "$stdout_prefix" "$stderr_len" "$stderr_prefix"
+}
+
 zaphod_render_layout() {
     local template="$1"
     local wasm_url="$2"

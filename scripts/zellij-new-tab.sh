@@ -226,15 +226,25 @@ TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
     fail "could not create a temporary Zaphod layout directory"
 RENDERED_LAYOUT="$TEMP_ROOT/zaphod.kdl"
 TABS_BEFORE="$TEMP_ROOT/tabs-before.json"
+TABS_BEFORE_STDERR="$TEMP_ROOT/tabs-before.stderr"
 TABS_AFTER="$TEMP_ROOT/tabs-after.json"
+TABS_AFTER_STDERR="$TEMP_ROOT/tabs-after.stderr"
 NEW_TAB_STDOUT="$TEMP_ROOT/new-tab.stdout"
 NEW_TAB_STDERR="$TEMP_ROOT/new-tab.stderr"
 RECIPIENT_TOKEN="zaphod-$$-$RANDOM-$(date +%s)"
 zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT" "$RECIPIENT_TOKEN"
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
 
+set +e
 ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
-    action list-tabs --json --all --state --layout > "$TABS_BEFORE"
+    action list-tabs --json --all --state --layout > "$TABS_BEFORE" 2> "$TABS_BEFORE_STDERR"
+TABS_BEFORE_STATUS=$?
+set -e
+if [ "$TABS_BEFORE_STATUS" -ne 0 ] || ! zaphod_valid_tab_inventory "$TABS_BEFORE"; then
+    printf 'tab-inventory-unready: %s\n' \
+        "$(zaphod_bounded_reply_provenance list-tabs-before "$TABS_BEFORE_STATUS" "$TABS_BEFORE" "$TABS_BEFORE_STDERR")" >&2
+    exit 1
+fi
 set +e
 ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
     --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")" \
@@ -242,20 +252,34 @@ ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action 
 NEW_TAB_STATUS=$?
 set -e
 if [ "$NEW_TAB_STATUS" -ne 0 ]; then
-    cat "$NEW_TAB_STDERR" >&2
+    printf 'new-tab-failed: %s\n' \
+        "$(zaphod_bounded_reply_provenance new-tab "$NEW_TAB_STATUS" "$NEW_TAB_STDOUT" "$NEW_TAB_STDERR")" >&2
     exit "$NEW_TAB_STATUS"
 fi
 TAB_ID=""
+TABS_AFTER_STATUS=1
+: > "$TABS_AFTER"
+: > "$TABS_AFTER_STDERR"
 for _attempt in $(seq 1 80); do
-    if ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
-        action list-tabs --json --all --state --layout > "$TABS_AFTER" 2>/dev/null; then
+    set +e
+    ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+        action list-tabs --json --all --state --layout > "$TABS_AFTER" 2> "$TABS_AFTER_STDERR"
+    TABS_AFTER_STATUS=$?
+    set -e
+    if [ "$TABS_AFTER_STATUS" -eq 0 ] && zaphod_valid_tab_inventory "$TABS_AFTER"; then
         TAB_ID="$(zaphod_new_tab_id_from_inventories "$TABS_BEFORE" "$TABS_AFTER" 2>/dev/null || true)"
         [ -z "$TAB_ID" ] || break
     fi
     sleep 0.05
 done
-if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || ! wait_for_sidecar_target; then
-    echo "sidecar-target-unready" >&2
+if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    printf 'sidecar-target-unready: %s; %s\n' \
+        "$(zaphod_bounded_reply_provenance new-tab "$NEW_TAB_STATUS" "$NEW_TAB_STDOUT" "$NEW_TAB_STDERR")" \
+        "$(zaphod_bounded_reply_provenance list-tabs-after "$TABS_AFTER_STATUS" "$TABS_AFTER" "$TABS_AFTER_STDERR")" >&2
+    exit 1
+fi
+if ! wait_for_sidecar_target; then
+    echo "sidecar-target-unready: stable tab $TAB_ID did not expose exactly one candidate rail" >&2
     exit 1
 fi
 focus_sidecar_target || fail "sidecar-target-unfocusable: could not expose the target rail permission prompt"

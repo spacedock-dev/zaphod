@@ -377,7 +377,7 @@ test_unready_resident_starts_no_sidecar() {
     status=$?
     set -e
     [ "$status" -ne 0 ] || fail "unready resident unexpectedly succeeded"
-    grep -Fx sidecar-target-unready "$FIXTURE_ERROR" >/dev/null || fail "missing unready error"
+    grep -F 'sidecar-target-unready:' "$FIXTURE_ERROR" >/dev/null || fail "missing unready error"
     [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = 1 ] || fail "unready path changed tab count"
     [ ! -e "$FAKE_SIDECAR_ARGV" ] || fail "unready path started sidecar"
     assert_standing_kdl_unchanged
