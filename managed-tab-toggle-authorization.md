@@ -246,3 +246,6 @@ read a fresh live stable tab identity, so a stale `MessagePluginId` delivery
 cannot authorize a former rail. The one smoke failure was a zero-byte native
 dump accepted as evidence; the test now retries that non-observation without
 changing its lookalike-inertness assertion or adding any product mechanism.
+A later isolated-server readiness failure occurred before any candidate tab
+existed; an unchanged immediate rerun passed, so no startup retry was folded
+into this authorization repair and the first officer has the evidence.
