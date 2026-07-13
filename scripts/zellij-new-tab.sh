@@ -85,6 +85,7 @@ RECIPIENT_TOKEN=""
 SIDECAR_PID=""
 SIDECAR_HANDED_OFF=0
 SIDECAR_START_FIFO=""
+SIDECAR_TARGET_PANE_ID=""
 
 stop_unready_sidecar() {
     [ "$SIDECAR_HANDED_OFF" -eq 0 ] || return 0
@@ -137,12 +138,12 @@ SIDECAR_PATH="$REPO_ROOT/target/zaphod"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive a canonical URL for $WASM_PATH"
 
-sidecar_target_ready() {
-    local panes candidate_count
+sidecar_target_pane_id() {
+    local panes candidate_id
     panes="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
         action list-panes --json --all --command --geometry --state --tab 2>/dev/null)" ||
         return 1
-    candidate_count="$(printf '%s' "$panes" | jq -er \
+    candidate_id="$(printf '%s' "$panes" | jq -er \
         --arg tab_id "$TAB_ID" \
         --arg wasm_url "$WASM_URL" \
         '[.[] | select(
@@ -151,17 +152,31 @@ sidecar_target_ready() {
             and .plugin_url == $wasm_url
             and .is_floating == false
             and .is_suppressed == false
-        )] | length' 2>/dev/null)" || return 1
-    [ "$candidate_count" = "1" ]
+        )] | if length == 1 then .[0].id | tostring else error("expected one target") end' \
+        2>/dev/null)" || return 1
+    case "$candidate_id" in
+        plugin_*) printf '%s\n' "$candidate_id" ;;
+        0|[1-9]|[1-9][0-9]*) printf 'plugin_%s\n' "$candidate_id" ;;
+        *) return 1 ;;
+    esac
 }
 
 wait_for_sidecar_target() {
-    local attempt
+    local attempt candidate_id
     for attempt in $(seq 1 80); do
-        sidecar_target_ready && return 0
+        if candidate_id="$(sidecar_target_pane_id)"; then
+            SIDECAR_TARGET_PANE_ID="$candidate_id"
+            return 0
+        fi
         sleep 0.05
     done
     return 1
+}
+
+focus_sidecar_target() {
+    [ -n "$SIDECAR_TARGET_PANE_ID" ] || return 1
+    ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+        action focus-pane-id "$SIDECAR_TARGET_PANE_ID"
 }
 
 start_private_sidecar() {
@@ -220,6 +235,7 @@ if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || ! wait_for_sidecar_target; then
     echo "sidecar-target-unready" >&2
     exit 1
 fi
+focus_sidecar_target || fail "sidecar-target-unfocusable: could not expose the target rail permission prompt"
 start_private_sidecar
 printf 'TAB_ID=%s\n' "$TAB_ID"
 printf 'WASM_URL=%s\n' "$WASM_URL"

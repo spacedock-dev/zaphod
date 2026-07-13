@@ -36,6 +36,7 @@ SOCKET_DIR=""
 HOME_DIR=""
 PERMISSION_CACHE=""
 PERMISSION_FIXTURE="${ZAPHOD_PERMISSION_FIXTURE:-pregranted}"
+ENTRY_START_TIMEOUT=30
 ISOLATED_CONFIG_BEFORE=""
 ISOLATED_LAYOUT=""
 ISOLATED_LAYOUT_BEFORE=""
@@ -140,6 +141,7 @@ case "$PERMISSION_FIXTURE" in
     pregranted|upgrade) ;;
     *) fail "ZAPHOD_PERMISSION_FIXTURE must be pregranted or upgrade" ;;
 esac
+[ "$PERMISSION_FIXTURE" = pregranted ] || ENTRY_START_TIMEOUT=5
 
 # Zellij's Unix socket is capped at 103 bytes on macOS. Keep this disposable
 # root under /tmp rather than the much longer per-user $TMPDIR.
@@ -376,7 +378,7 @@ jq -e --arg wasm_url "$WASM_URL" \
 entry_command() {
     env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
-        ZAPHOD_SIDECAR_START_TIMEOUT=5 \
+        ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
         --agentsview-url "$AGENTSVIEW_URL"
 }
@@ -385,12 +387,14 @@ if [ "$PERMISSION_FIXTURE" = upgrade ]; then
     ENTRY_PID=$!
     for _attempt in $(seq 1 160); do
         tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/permission-prompt.screen"
-        grep -F 'asks permission to:' "$ROOT/permission-prompt.screen" >/dev/null && break
+        grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null && break
         kill -0 "$ENTRY_PID" 2>/dev/null || break
         sleep 0.05
     done
-    grep -F 'asks permission to:' "$ROOT/permission-prompt.screen" >/dev/null || {
+    grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null || {
         cat "$ROOT/entry.err" >&2 || true
+        sed -n '1,80p' "$ROOT/permission-prompt.screen" >&2 || true
+        zellij_session action list-panes --json --all --command --geometry --state --tab >&2 || true
         fail "old permission cache did not produce the native expanded-permission prompt"
     }
     send_literal y
@@ -403,6 +407,8 @@ if [ "$PERMISSION_FIXTURE" = upgrade ]; then
         cat "$ROOT/entry.err" >&2 || true
         fail "literal permission approval did not complete direct entry"
     fi
+    grep -F 'ReadCliPipes' "$PERMISSION_CACHE" >/dev/null ||
+        fail "literal permission approval did not persist the expanded CLI-pipe grant"
 else
     entry_command > "$ROOT/entry.out"
 fi
@@ -439,7 +445,7 @@ jq -e --arg tab_id "$TAB_ID" 'any(.[]; .active and (.tab_id | tostring) == $tab_
     "$ROOT/candidate-tabs-before.json" >/dev/null || fail "direct entry did not activate its stable-ID tab"
 grep -F "plugin location=\"$WASM_URL\"" "$ROOT/candidate-before.kdl" >/dev/null ||
     fail "candidate URL did not appear in the native Zellij layout dump"
-grep -F 'asks permission to:' "$ROOT/candidate-before.screen" >/dev/null &&
+grep -F 'Allow? (y/n)' "$ROOT/candidate-before.screen" >/dev/null &&
     fail "candidate rail unexpectedly prompted instead of using the disposable pre-grant"
 grep -F 'PANES' "$ROOT/candidate-before.screen" >/dev/null ||
     fail "candidate Zaphod rail was not visibly rendered in the tmux client"

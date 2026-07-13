@@ -77,6 +77,11 @@ write_fake_zellij() {
         '            [ -n "$session" ] || { printf "missing explicit session\\n" >&2; exit 64; }' \
         '            case "${2:-}" in' \
         '                list-panes) cat "$FAKE_ZELLIJ_PANES"; exit 0 ;;' \
+        '                focus-pane-id)' \
+        '                    [ "${3:-}" = plugin_50 ] && [ "$#" -eq 3 ] || exit 64' \
+        '                    printf "focus-pane-id\\t%s\\t%s\\n" "$session" "$3" >> "$FAKE_ZELLIJ_CALLS"' \
+        '                    exit 0' \
+        '                    ;;' \
         '                new-tab) ;;' \
         '                *) printf "unexpected action: %s\\n" "${2:-}" >&2; exit 64 ;;' \
         '            esac' \
@@ -265,6 +270,8 @@ test_selected_checkout_creates_one_inline_tab_without_writes() {
     [ "$(cat "$FAKE_ZELLIJ_SESSION")" = WORK ] || fail "new-tab used the wrong session"
     [ "$(cat "$FAKE_ZELLIJ_NAME")" = 'Zaphod fixture' ] || fail "new-tab used the wrong name"
     [ "$(cat "$FAKE_ZELLIJ_CWD")" = "$FIXTURE_PHYSICAL" ] || fail "new-tab used the wrong cwd"
+    grep -Fx $'focus-pane-id\tWORK\tplugin_50' "$FAKE_ZELLIJ_CALLS" >/dev/null ||
+        fail "entry point did not expose the exact verified plugin pane"
     grep -F "plugin location=\"$expected_url\"" "$FAKE_ZELLIJ_LAYOUT" >/dev/null ||
         fail "inline layout did not contain selected checkout URL"
     assert_private_sidecar_started "$expected_url"
