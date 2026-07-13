@@ -1,7 +1,7 @@
 ---
 id: fqjswvmd93vek5y12zemf1k2
 title: Activation preserves valid Zellij KDL
-status: validation
+status: implementation
 source: staff review of fp merge 2026-07-12; captain direction
 sprint: s1-managed-tab-safety
 group: hardening
@@ -301,6 +301,20 @@ complete, and the gate is ready for the captain's direct-script-only demo.
   and fix why the rendered token-matched rail does not return the
   `agent-event-ready` CLI-pipe acknowledgement. Do not work around it with a
   manual sidecar or by starting an agent before recipient readiness.
+
+- **Cycle 3 — 2026-07-14: REJECTED by the authorized convergence panel, captain routed to implementation.**
+  Roborev `code_completion` parent `497` reviewed the exact range
+  `3b27e202176740ed976aa94aa8aa7cc91ee66118..faacfc11e6f5663ad7c1dfc5600c1f2739c2b7f8`;
+  correctness `494`, journey `495`, and proof `496` each ran once and failed.
+  Fix the three Medium findings: retry a native empty pane inventory (`[]`)
+  before declaring the target lost; publish completed SSE-token activity in
+  the same critical section as fragment and pending state; and request
+  `ReadCliPipes` only for rails configured with a non-empty recipient token so
+  tokenless installed-layout rails preserve their prior permission journey.
+  These are bounded implementation defects within the existing task contract,
+  so no reframe is required. Return a frozen head and green evidence to the
+  convergence gate; do not launch another `code_completion` panel without a
+  new captain approval.
 
 ## Stage Report: implementation addendum (review-convergence pause)
 
