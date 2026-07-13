@@ -547,3 +547,54 @@ records bounded diagnostics even when recovery succeeds, refreshes and renders
 the second indexed session, and remains fail closed for persistent malformed
 state and real target loss. Foreground diagnosis and automatic handoff both
 pass in isolated real Zellij/tmux sessions without changing standing KDL.
+
+## Stage Report: implementation (cycle 5)
+
+- DONE: The lifecycle smoke self-isolates inherited Zellij client/session state and starts the same disposable foreign profile when invoked both inside and outside Zellij.
+  Captain red at `25d950c` was `FAIL: isolated profile unexpectedly started on
+  the selected checkout rail`; deterministic red `c28ab6b` was `FAIL:
+  inherited Zellij client identity reached isolated smoke: ZELLIJ`.
+- DONE: Clear client identity before disposable server/control setup.
+  Green `1b1d972` captures then unsets `ZELLIJ`, `ZELLIJ_SESSION_NAME`, and
+  `ZELLIJ_PANE_ID`; every tmux/server/control child also uses explicit `env -u`.
+- DONE: Foreground and production entry use a proven stable-tab identity mechanism, and any discovery failure reports bounded captured stdout/stderr before cleanup.
+  Captain red outside Zellij was `FAIL: foreground entry did not return a
+  stable tab ID`; focused red `bf9d9b6` ended `sidecar-target-unready` when
+  successful `new-tab` stdout was empty.
+- DONE: Replace the stdout assumption with exact native inventory identity.
+  Green `3c74006` shares one validator across production and foreground: the
+  before inventory must remain present and exactly one nonnegative integer tab
+  ID must be added in the complete after inventory.
+- DONE: Preserve bounded discovery evidence before temporary cleanup.
+  Red `f4242e5` was `FAIL: ambiguous discovery omitted new-tab status
+  provenance`; green `53d0708` reports status, byte lengths, and JSON-escaped
+  256-byte stdout/stderr prefixes for new-tab and latest list-tabs replies.
+- DONE: Exercise the complete adjacent identity matrix.
+  Exact-one addition returned `73`; no addition, lost-and-added, two additions,
+  duplicate IDs, malformed JSON, and fractional IDs all failed closed.
+- DONE: Make the inside-caller journey meaningful at the production boundary.
+  Quick `741` correctly found that the inside label had been sanitized before
+  entry. Red `a56e666` was `FAIL: version probe inherited loaded Zellij client
+  identity`; green `d659c36` injects the captured loaded-client tuple into the
+  entry call, then production resolves `--session` and clears it before native
+  version/setup/inventory/action and sidecar child calls.
+- DONE: Captain-equivalent inside/outside invocations complete initial-row and distinct post-readiness second-row delivery with live subscriber, cleanup, unchanged standing KDL, and exact-head quick PASS; no code_completion panel is launched.
+  `tests/zellij-subscription-lifecycle-smoke-test.sh` passed outside-terminal
+  foreground and loaded-panel automatic entry; each rendered
+  `SMOKE_INITIAL_ROW`, then `SMOKE_SECOND_ROW`, and kept its subscriber alive.
+- DONE: Re-run the complete exact-head verification packet.
+  Entry passed 12/12; Go test/vet passed; Rust passed 138/138 plus check;
+  artifact, permission-upgrade, lifecycle, and two-rail smokes passed.
+- DONE: Preserve owned cleanup and operator KDL.
+  The interrupted four-server stress probe cleaned its active disposable root;
+  the exact two-environment packet cleaned all sessions, processes, sockets,
+  and roots. Standing hashes remain `8ce2a42d...a196` and `f1004741...d6e`.
+- DONE: Clear the replacement exact-tip quick gate.
+  Quick `747` reviewed `d659c36dbbbc716b2b1e158f108df470eaa2a639`;
+  member `746` and parent passed, no findings. No completion panel was launched.
+
+### Summary
+
+Both captain failures have durable regressions. Disposable setup cannot inherit
+client identity; validated inventory owns tab identity; both captain journeys
+deliver the second SSE row alive through the sanitized production boundary.
