@@ -92,6 +92,14 @@ struct Sidebar {
     // arrival order, never expired (grout is one-shot in sprint 0).
     sessions: Vec<SessionEvent>,
     gates: Vec<GateEvent>,
+    // A named pipe reaches every running copy of the plugin. Agent rows are
+    // therefore allowed through only after this rail's current PaneUpdate
+    // has been matched by a later, unambiguous TabUpdate. The server tab id
+    // is the pipe recipient; display position is only the bridge from the
+    // PaneManifest to that stable id.
+    agent_manifest_generation: u64,
+    agent_manifest_seen: bool,
+    agent_recipient: Option<AgentRecipient>,
     // Each terminal pane's cwd as last polled via get_pane_cwd — the data
     // session binding matches against. Keyed by pane id, so it survives the
     // manifest's row rebuilds; pruned to the current rows each poll pass. A
@@ -159,6 +167,17 @@ struct TabState {
     // FLOATING layer (tab/mod.rs swap_layout_info) — every tab's floating
     // list carries a birth "BASE" — so the tiled layer's state is unreadable.
     floating_visible: bool,
+}
+
+// A tab recipient proved from one PaneUpdate generation and a later complete
+// TabUpdate snapshot. `stable_tab_id` deliberately accepts zero: Zellij uses
+// zero for the first server tab, so Option—not a numeric sentinel—represents
+// an unavailable mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct AgentRecipient {
+    manifest_generation: u64,
+    own_position: usize,
+    stable_tab_id: usize,
 }
 
 // One sidebar plugin pane somewhere in the session, as seen in the manifest.
@@ -403,6 +422,74 @@ enum ClickAction {
 
 register_plugin!(Sidebar);
 
+impl Sidebar {
+    // Every PaneUpdate starts a new manifest generation. A TabUpdate from an
+    // earlier generation must never authorize delivery after the pane moved,
+    // was replaced, or became floating, so clear first and require a later
+    // complete tab snapshot to re-arm.
+    fn observe_agent_manifest(&mut self) {
+        self.agent_manifest_generation = self.agent_manifest_generation.wrapping_add(1);
+        self.agent_manifest_seen = true;
+        self.agent_recipient = None;
+    }
+
+    // Derive this rail's stable server tab id from one complete TabUpdate.
+    // `PaneManifest` keys are display positions; `TabInfo::tab_id` is the
+    // stable identity returned by `new-tab`. Both the position and the id
+    // must be unique in this snapshot or the broadcast remains inert.
+    fn observe_agent_tab_update(&mut self, tabs: &[TabInfo]) {
+        self.agent_recipient = None;
+        if !self.agent_manifest_seen {
+            return;
+        }
+        let Some(own_position) = self.own_tab else {
+            return;
+        };
+        let mut own = tabs.iter().filter(|tab| tab.position == own_position);
+        let Some(tab) = own.next() else {
+            return;
+        };
+        if own.next().is_some() {
+            return;
+        }
+        if tabs.iter().filter(|candidate| candidate.tab_id == tab.tab_id).count() != 1 {
+            return;
+        }
+        self.agent_recipient = Some(AgentRecipient {
+            manifest_generation: self.agent_manifest_generation,
+            own_position,
+            stable_tab_id: tab.tab_id,
+        });
+    }
+
+    // A pipe argument must be the canonical unsigned decimal spelling of a
+    // native server tab id: 0 is valid, but leading zeroes, signs, whitespace,
+    // and overflow are not alternate spellings that a sender can use.
+    fn recipient_tab_id(args: &BTreeMap<String, String>) -> Option<usize> {
+        let value = args.get("recipient-tab-id")?;
+        if value.is_empty()
+            || !value.as_bytes().iter().all(u8::is_ascii_digit)
+            || (value.len() > 1 && value.starts_with('0'))
+        {
+            return None;
+        }
+        value.parse().ok()
+    }
+
+    // `agent-event` is a session-wide named-pipe broadcast. This receiver
+    // guard is its only admission rule: no CWD, tab name, URL, pane id, or
+    // display position fallback may create a row or a focus binding.
+    fn accepts_agent_event(&self, args: &BTreeMap<String, String>) -> bool {
+        let Some(armed) = self.agent_recipient else {
+            return false;
+        };
+        !self.own_floating
+            && self.own_tab == Some(armed.own_position)
+            && armed.manifest_generation == self.agent_manifest_generation
+            && Self::recipient_tab_id(args) == Some(armed.stable_tab_id)
+    }
+}
+
 impl ZellijPlugin for Sidebar {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
         self.plugin_id = get_plugin_ids().plugin_id;
@@ -488,6 +575,7 @@ impl ZellijPlugin for Sidebar {
                         )
                     })
                     .collect();
+                self.observe_agent_tab_update(&tabs);
                 if let Some(pending) = self.pending_steer {
                     let disposition =
                         pending_steer_disposition(pending, self.active_tab, &self.tab_states);
@@ -518,6 +606,7 @@ impl ZellijPlugin for Sidebar {
             }
             Event::PaneUpdate(manifest) => {
                 self.own_tab = own_tab_position(&manifest, self.plugin_id);
+                self.observe_agent_manifest();
                 self.instances = sidebar_instances(&manifest);
                 let old = std::mem::take(&mut self.rows);
                 self.rows = rows_for_own_tab(&manifest, self.plugin_id);
@@ -580,6 +669,10 @@ impl ZellijPlugin for Sidebar {
         // CLI pipe callers terminate via the server's auto-unblock once this
         // returns; an explicit unblock would need the ReadCliPipes grant.
         if pipe_message.name == "agent-event" {
+            if !self.accepts_agent_event(&pipe_message.args) {
+                trace!(self, "agent-event dropped: recipient is absent, stale, or foreign");
+                return false;
+            }
             // Only plugin state moves here — no host calls in pipe() (SPEC
             // landmine #4); true re-renders, false leaves the screen alone.
             let Some(payload) = pipe_message.payload.as_deref() else {
@@ -2361,17 +2454,104 @@ mod tests {
         }
     }
 
+    fn agent_event_for_tab(payload: &str, recipient_tab_id: &str) -> PipeMessage {
+        let mut message = agent_event(Some(payload));
+        message
+            .args
+            .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
+        message
+    }
+
+    fn arm_agent_recipient(sidebar: &mut Sidebar, own_position: usize, tabs: &[TabInfo]) {
+        sidebar.own_tab = Some(own_position);
+        sidebar.own_floating = false;
+        sidebar.observe_agent_manifest();
+        sidebar.observe_agent_tab_update(tabs);
+    }
+
+    #[test]
+    fn agent_event_requires_a_fresh_unique_stable_tab_recipient() {
+        let tabs = [
+            tab_info(1, 0, true, None, false),
+            tab_info(2, 81, false, None, false),
+        ];
+        let mut target = Sidebar::default();
+        arm_agent_recipient(&mut target, 1, &tabs);
+
+        // Server tab ID zero is a real identity, not the default/unavailable
+        // value. The target accepts exactly its canonical decimal recipient.
+        assert!(target.pipe(agent_event_for_tab(session_line(), "0")));
+        assert_eq!(target.sessions.len(), 1);
+
+        let mut bystander = Sidebar::default();
+        arm_agent_recipient(&mut bystander, 2, &tabs);
+        assert!(!bystander.pipe(agent_event_for_tab(session_line(), "0")));
+        assert!(bystander.sessions.is_empty());
+
+        let mut missing = Sidebar::default();
+        arm_agent_recipient(&mut missing, 1, &tabs);
+        assert!(!missing.pipe(agent_event(Some(session_line()))));
+        assert!(missing.sessions.is_empty());
+
+        for bad_recipient in ["", "00", "01", "+0", " 0", "0 ", "-0", "nope", "82"] {
+            let mut rail = Sidebar::default();
+            arm_agent_recipient(&mut rail, 1, &tabs);
+            assert!(
+                !rail.pipe(agent_event_for_tab(session_line(), bad_recipient)),
+                "recipient {bad_recipient:?} must be inert"
+            );
+            assert!(rail.sessions.is_empty());
+        }
+
+        // A new PaneUpdate invalidates the mapping until a later TabUpdate
+        // proves the current manifest position again.
+        let mut stale = Sidebar::default();
+        arm_agent_recipient(&mut stale, 1, &tabs);
+        stale.observe_agent_manifest();
+        assert!(!stale.pipe(agent_event_for_tab(session_line(), "0")));
+        assert!(stale.sessions.is_empty());
+
+        // A duplicate stable ID is ambiguous even when one matching display
+        // position exists, so neither rail may apply the broadcast.
+        let duplicate = [
+            tab_info(1, 0, true, None, false),
+            tab_info(2, 0, false, None, false),
+        ];
+        let mut ambiguous = Sidebar::default();
+        arm_agent_recipient(&mut ambiguous, 1, &duplicate);
+        assert!(!ambiguous.pipe(agent_event_for_tab(session_line(), "0")));
+        assert!(ambiguous.sessions.is_empty());
+
+        let mut unavailable = Sidebar::default();
+        unavailable.own_tab = Some(1);
+        unavailable.own_floating = false;
+        unavailable.observe_agent_manifest();
+        unavailable.observe_agent_tab_update(&[tab_info(2, 81, false, None, false)]);
+        assert!(!unavailable.pipe(agent_event_for_tab(session_line(), "0")));
+        assert!(unavailable.sessions.is_empty());
+
+        let mut floating = Sidebar::default();
+        arm_agent_recipient(&mut floating, 1, &tabs);
+        floating.own_floating = true;
+        assert!(!floating.pipe(agent_event_for_tab(session_line(), "0")));
+        assert!(floating.sessions.is_empty());
+    }
+
     #[test]
     fn agent_event_lines_land_as_session_and_gate_rows() {
         let mut sidebar = Sidebar::default();
-        assert!(sidebar.pipe(agent_event(Some(session_line()))), "a new row re-renders");
-        assert!(sidebar.pipe(agent_event(Some(gate_line()))));
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
+        assert!(
+            sidebar.pipe(agent_event_for_tab(session_line(), "73")),
+            "a new row re-renders"
+        );
+        assert!(sidebar.pipe(agent_event_for_tab(gate_line(), "73")));
         assert_eq!(sidebar.sessions.len(), 1);
         assert_eq!(sidebar.sessions[0].agent, "claude");
         assert_eq!(sidebar.gates.len(), 1);
         assert_eq!(sidebar.gates[0].round, 2);
         // The identical line again changes nothing: no re-render.
-        assert!(!sidebar.pipe(agent_event(Some(session_line()))));
+        assert!(!sidebar.pipe(agent_event_for_tab(session_line(), "73")));
         assert_eq!(sidebar.sessions.len(), 1);
     }
 
@@ -2402,8 +2582,9 @@ mod tests {
         // matching cwd equals the session's cwd yield a bound session row
         // and an actionable gate row.
         let mut sidebar = Sidebar::default();
-        assert!(sidebar.pipe(agent_event(Some(session_line()))));
-        assert!(sidebar.pipe(agent_event(Some(gate_line()))));
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
+        assert!(sidebar.pipe(agent_event_for_tab(session_line(), "73")));
+        assert!(sidebar.pipe(agent_event_for_tab(gate_line(), "73")));
         sidebar.rows = vec![cwd_row(4), cwd_row(8)];
         sidebar.pane_cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp")]);
         // The session row's marker reflects the line's state; bound rows
