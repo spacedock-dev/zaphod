@@ -242,6 +242,7 @@ test_selected_checkout_creates_one_inline_tab_without_writes() {
         fail "entry point did not build the selected checkout"
     grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "entry point did not report stable tab ID"
     grep -Fx "WASM_URL=$expected_url" "$FIXTURE_OUTPUT" >/dev/null || fail "entry point did not report selected URL"
+    grep -Eq '^SIDECAR_PID=[1-9][0-9]*$' "$FIXTURE_OUTPUT" || fail "entry point did not report sidecar PID"
     [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = 1 ] || fail "entry point did not create exactly one tab"
     [ "$(cat "$FAKE_ZELLIJ_SESSION")" = WORK ] || fail "new-tab used the wrong session"
     [ "$(cat "$FAKE_ZELLIJ_NAME")" = 'Zaphod fixture' ] || fail "new-tab used the wrong name"
