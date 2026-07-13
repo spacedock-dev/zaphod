@@ -107,7 +107,12 @@ write_fake_zellij() {
         '            fi' \
         '            status="${FAKE_ZELLIJ_NEW_TAB_STATUS:-0}"' \
         '            [ "$status" -eq 0 ] || exit "$status"' \
-        '            printf "[{\"tab_id\":4},{\"tab_id\":%s}]\\n" "${FAKE_ZELLIJ_TAB_ID:-73}" > "$FAKE_ZELLIJ_TABS"' \
+        '            if [ "${FAKE_ZELLIJ_TABS_AFTER+x}" = x ]; then' \
+        '                printf "%s" "$FAKE_ZELLIJ_TABS_AFTER" > "$FAKE_ZELLIJ_TABS"' \
+        '            else' \
+        '                printf "[{\"tab_id\":4},{\"tab_id\":%s}]\\n" "${FAKE_ZELLIJ_TAB_ID:-73}" > "$FAKE_ZELLIJ_TABS"' \
+        '            fi' \
+        '            [ "${FAKE_ZELLIJ_NEW_TAB_STDERR+x}" != x ] || printf "%s" "$FAKE_ZELLIJ_NEW_TAB_STDERR" >&2' \
         '            if [ "${FAKE_ZELLIJ_NEW_TAB_STDOUT+x}" = x ]; then' \
         '                printf "%s" "$FAKE_ZELLIJ_NEW_TAB_STDOUT"' \
         '            else' \
@@ -459,6 +464,42 @@ test_empty_new_tab_stdout_uses_inventory_stable_id() {
     echo "PASS: empty new-tab stdout uses stable inventory identity"
 }
 
+test_ambiguous_tab_discovery_reports_bounded_native_provenance() {
+    local root status stdout_payload stderr_payload
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    stdout_payload="candidate-reply-$(printf '%0300d' 0)"
+    stderr_payload="route-warning-$(printf '%0300d' 0)"
+
+    set +e
+    FAKE_ZELLIJ_TABS_AFTER='[{"tab_id":4},{"tab_id":73},{"tab_id":74}]' \
+        FAKE_ZELLIJ_NEW_TAB_STDOUT="$stdout_payload" \
+        FAKE_ZELLIJ_NEW_TAB_STDERR="$stderr_payload" \
+        run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
+    status=$?
+    set -e
+
+    [ "$status" -ne 0 ] || fail "ambiguous tab discovery unexpectedly succeeded"
+    grep -F 'sidecar-target-unready: new-tab status=0' "$FIXTURE_ERROR" >/dev/null ||
+        fail "ambiguous discovery omitted new-tab status provenance"
+    grep -F "stdout_len=${#stdout_payload}" "$FIXTURE_ERROR" >/dev/null ||
+        fail "ambiguous discovery omitted stdout length"
+    grep -F "stderr_len=${#stderr_payload}" "$FIXTURE_ERROR" >/dev/null ||
+        fail "ambiguous discovery omitted stderr length"
+    grep -F 'stdout_prefix="candidate-reply-' "$FIXTURE_ERROR" >/dev/null ||
+        fail "ambiguous discovery omitted escaped stdout prefix"
+    grep -F 'stderr_prefix="route-warning-' "$FIXTURE_ERROR" >/dev/null ||
+        fail "ambiguous discovery omitted escaped stderr prefix"
+    ! grep -F "$stdout_payload" "$FIXTURE_ERROR" >/dev/null ||
+        fail "ambiguous discovery leaked unbounded stdout"
+    ! grep -F "$stderr_payload" "$FIXTURE_ERROR" >/dev/null ||
+        fail "ambiguous discovery leaked unbounded stderr"
+    assert_standing_kdl_unchanged
+    assert_temporary_files_cleaned
+    echo "PASS: ambiguous tab discovery reports bounded native provenance"
+}
+
 test_tokenless_layout_render_preserves_installed_identity() {
     local root output
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-tokenless.XXXXXX")"
@@ -484,4 +525,5 @@ test_sidecar_exec_failure_is_visible
 test_sidecar_stream_timeout_reaps_process
 test_failed_tuple_handoff_reaps_ready_sidecar
 test_empty_new_tab_stdout_uses_inventory_stable_id
+test_ambiguous_tab_discovery_reports_bounded_native_provenance
 test_tokenless_layout_render_preserves_installed_identity
