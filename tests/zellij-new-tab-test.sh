@@ -37,6 +37,8 @@ write_fake_build() {
         'printf "%s\\n" "$0" > "$BUILD_LOG"' \
         'mkdir -p "$(dirname "$0")/target/wasm32-wasip1/release"' \
         'printf "fixture wasm\\n" > "$(dirname "$0")/target/wasm32-wasip1/release/zellij-sidebar.wasm"' \
+        'printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" > "$(dirname "$0")/target/zaphod"' \
+        'chmod +x "$(dirname "$0")/target/zaphod"' \
         > "$fixture/build.sh"
     chmod +x "$fixture/build.sh"
 }
@@ -80,8 +82,20 @@ write_fake_zellij() {
         '            exit "${FAKE_ZELLIJ_SETUP_STATUS:-0}"' \
         '            ;;' \
         '        action)' \
-        '            [ "${2:-}" = "new-tab" ] || { printf "unexpected action invocation\\n" >&2; exit 64; }' \
         '            [ -n "$session" ] || { printf "missing explicit --session in fake zellij invocation\\n" >&2; exit 64; }' \
+        '            case "${2:-}" in' \
+        '                list-panes)' \
+        '                    [ -n "${FAKE_ZELLIJ_PANES:-}" ] || { printf "missing fake pane state\\n" >&2; exit 64; }' \
+        '                    cat "$FAKE_ZELLIJ_PANES"' \
+        '                    exit 0' \
+        '                    ;;' \
+        '                new-tab)' \
+        '                    ;;' \
+        '                *)' \
+        '                    printf "unexpected action invocation: %s\\n" "${2:-}" >&2' \
+        '                    exit 64' \
+        '                    ;;' \
+        '            esac' \
         '            shift 2' \
         '            if [ "${1:-}" != "--name" ] || [ -z "${2:-}" ]; then' \
         '                printf "missing --name in fake zellij invocation\\n" >&2' \
@@ -230,6 +244,8 @@ setup_fixture() {
     FAKE_ZELLIJ_NAME="$root/fake-name"
     FAKE_ZELLIJ_LAYOUT="$root/fake-layout.kdl"
     FAKE_ZELLIJ_NEW_TAB_COUNT="$root/fake-new-tab-count"
+    FAKE_ZELLIJ_PANES="$root/fake-panes.json"
+    FAKE_SIDECAR_ARGV="$root/fake-sidecar-argv"
 
     mkdir -p "$FIXTURE/scripts" "$FIXTURE/layouts" \
         "$FIXTURE_CONFIG_DIR/layouts" "$(dirname "$FIXTURE_CONFIG_FILE")" \
@@ -245,6 +261,11 @@ setup_fixture() {
     write_fake_zellij "$FIXTURE"
     write_routable_config "$FIXTURE_CONFIG_FILE"
     FIXTURE_PHYSICAL="$(cd "$FIXTURE" && pwd -P)"
+    printf '%s\n' \
+        '[' \
+        "{\"id\":50,\"tab_id\":73,\"is_plugin\":true,\"plugin_url\":\"file:$FIXTURE_PHYSICAL/target/wasm32-wasip1/release/zellij-sidebar.wasm\",\"is_floating\":false,\"is_suppressed\":false}," \
+        '{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":"/fixture"}' \
+        ']' > "$FAKE_ZELLIJ_PANES"
 }
 
 run_entry() {
@@ -255,6 +276,8 @@ run_entry() {
         FAKE_ZELLIJ_NAME="$FAKE_ZELLIJ_NAME" \
         FAKE_ZELLIJ_LAYOUT="$FAKE_ZELLIJ_LAYOUT" \
         FAKE_ZELLIJ_NEW_TAB_COUNT="$FAKE_ZELLIJ_NEW_TAB_COUNT" \
+        FAKE_ZELLIJ_PANES="$FAKE_ZELLIJ_PANES" \
+        FAKE_SIDECAR_ARGV="$FAKE_SIDECAR_ARGV" \
         ZELLIJ_CONFIG_DIR="$FIXTURE_CONFIG_DIR" \
         ZELLIJ_CONFIG_FILE="$FIXTURE_CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$FIXTURE_DATA_DIR" \
@@ -273,6 +296,8 @@ run_entry_without_data_root() {
             FAKE_ZELLIJ_NAME="$FAKE_ZELLIJ_NAME" \
             FAKE_ZELLIJ_LAYOUT="$FAKE_ZELLIJ_LAYOUT" \
             FAKE_ZELLIJ_NEW_TAB_COUNT="$FAKE_ZELLIJ_NEW_TAB_COUNT" \
+            FAKE_ZELLIJ_PANES="$FAKE_ZELLIJ_PANES" \
+            FAKE_SIDECAR_ARGV="$FAKE_SIDECAR_ARGV" \
             ZELLIJ_CONFIG_DIR="$FIXTURE_CONFIG_DIR" \
             ZELLIJ_CONFIG_FILE="$FIXTURE_CONFIG_FILE" \
             TMPDIR="$FIXTURE_TMP" \
@@ -315,6 +340,36 @@ assert_zellij_roots_are_isolated() {
             }
         }
     ' "$FAKE_ZELLIJ_CALLS" || fail "Zellij invocation escaped the isolated config/data roots"
+}
+
+assert_private_sidecar_started() {
+    local expected_url="$1" expected
+    for _attempt in $(seq 1 100); do
+        [ ! -e "$FAKE_SIDECAR_ARGV" ] || break
+        sleep 0.05
+    done
+    [ -f "$FAKE_SIDECAR_ARGV" ] || fail "entry point did not start its private zaphod sidecar"
+    expected="$TEST_ROOT/expected-sidecar-argv"
+    printf '%s\n' \
+        'subscribe' \
+        '--server' \
+        'http://127.0.0.1:8080' \
+        '--zellij-bin' \
+        'zellij' \
+        '--zellij-config-dir' \
+        "$FIXTURE_CONFIG_DIR" \
+        '--zellij-config' \
+        "$FIXTURE_CONFIG_FILE" \
+        '--zellij-data-dir' \
+        "$FIXTURE_DATA_DIR" \
+        '--zellij-session' \
+        'WORK' \
+        '--tab-id' \
+        '73' \
+        '--rail-url' \
+        "$expected_url" > "$expected"
+    diff -u "$expected" "$FAKE_SIDECAR_ARGV" >&2 ||
+        fail "private sidecar did not receive the exact verified profile/tab/rail tuple"
 }
 
 assert_activation_rolled_back() {
@@ -366,6 +421,7 @@ test_new_tab_activates_isolated_roots() {
         fail "entry point did not print the new tab ID"
     grep -Fx "WASM_URL=$expected_url" "$FIXTURE_OUTPUT" >/dev/null ||
         fail "entry point did not print the fixture WASM URL"
+    assert_private_sidecar_started "$expected_url"
     [ "$(cat "$FAKE_ZELLIJ_SESSION")" = 'WORK' ] ||
         fail "new-tab did not receive the requested session"
     [ "$(cat "$FAKE_ZELLIJ_NAME")" = 'Zaphod fixture' ] ||
@@ -524,6 +580,30 @@ test_new_tab_failure_rolls_back_activation() {
     echo "PASS: new-tab failure rolls isolated activation back"
 }
 
+test_unready_resident_starts_no_sidecar() {
+    local root code
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    # The tab was created, but no exact resident rail exists at its stable ID.
+    # The entry must leave that tab intact and never guess by URL/CWD/title.
+    printf '%s\n' '[]' > "$FAKE_ZELLIJ_PANES"
+
+    set +e
+    run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
+    code=$?
+    set -e
+    [ "$code" -ne 0 ] || fail "unready resident unexpectedly started a sidecar"
+    grep -Fx 'sidecar-target-unready' "$FIXTURE_ERROR" >/dev/null ||
+        fail "unready resident did not report sidecar-target-unready"
+    [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = '1' ] ||
+        fail "unready resident did not leave its successfully created fresh tab intact"
+    [ ! -e "$FAKE_SIDECAR_ARGV" ] ||
+        fail "unready resident started a sidecar before exact target discovery"
+
+    echo "PASS: unready resident leaves the tab intact and starts no sidecar"
+}
+
 test_new_tab_signal_rolls_back_activation() {
     local root ready release runner_pid status attempt
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
@@ -600,5 +680,6 @@ test_missing_legacy_toggle_is_normalized_to_noop
 test_conflicting_non_zaphod_toggle_fails_before_writes
 test_missing_zaphod_route_fails_before_writes
 test_new_tab_failure_rolls_back_activation
+test_unready_resident_starts_no_sidecar
 test_new_tab_signal_rolls_back_activation
 test_default_data_root_is_explicit
