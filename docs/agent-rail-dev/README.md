@@ -141,10 +141,21 @@ strict TDD, one behavior per commit.
 
 After the final candidate commit, implementation MUST run `roborev wait HEAD`
 for that commit's existing post-commit `quick` review. A Medium-or-higher
-finding blocks the expensive panel: disposition it in implementation, fix and
-commit when warranted, then wait on the new exact HEAD. Low findings remain
-advisory and do not force another round. Only after the exact-tip `quick`
-review clears that cost gate may implementation run the required panel:
+finding blocks the expensive panel. Disposition it as `fix`, `rebut`, or
+`needs decision`: a fix requires a new commit and a wait on that new exact
+HEAD; a rebuttal cites concrete repository evidence and runs a replacement
+exact-head `quick` panel:
+
+```bash
+roborev review --repo <canonical-project-root> --sha <reviewed-head> \
+  --panel quick --min-severity medium --wait
+```
+
+A PASS replacement adjudicates the rebuttal; `needs decision` stops for a real
+product, contract, or policy choice. Low findings remain advisory and do not
+force another round. Only after the exact-tip `quick` review, or an
+evidence-backed replacement for that same tip, clears the cost gate may
+implementation run the required panel:
 
 ```bash
 roborev review --repo <canonical-project-root> \
