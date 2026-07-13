@@ -140,6 +140,11 @@ for required in tmux jq shasum go; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required for the tmux smoke"
 done
 zaphod_require_zellij_0443
+for inherited_client_var in ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID; do
+    if printenv "$inherited_client_var" >/dev/null 2>&1; then
+        fail "inherited Zellij client identity reached isolated smoke: $inherited_client_var"
+    fi
+done
 case "$PERMISSION_FIXTURE" in
     pregranted|upgrade) ;;
     *) fail "ZAPHOD_PERMISSION_FIXTURE must be pregranted or upgrade" ;;
