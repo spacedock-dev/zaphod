@@ -126,6 +126,9 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	var checkOnce sync.Once
 	fragmentRead := make(chan struct{})
 	var readNotified atomic.Bool
+	keepaliveConsumed := make(chan struct{})
+	releaseNextScan := make(chan struct{})
+	var tokenOnce sync.Once
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +159,15 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 					}
 				})
 			},
+			beforeNextScan: func() {
+				tokenOnce.Do(func() {
+					close(keepaliveConsumed)
+					select {
+					case <-releaseNextScan:
+					case <-ctx.Done():
+					}
+				})
+			},
 		}, nil)
 	}()
 	ready := make(chan string, 1)
@@ -177,10 +189,16 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	}
 	close(releaseCheck)
 	select {
+	case <-keepaliveConsumed:
+	case <-time.After(time.Second):
+		t.Fatal("complete keepalive was not consumed before the next split")
+	}
+	select {
 	case payload := <-ready:
 		t.Fatalf("queued scanned line allowed readiness: %q", payload)
 	case <-time.After(75 * time.Millisecond):
 	}
+	close(releaseNextScan)
 	close(finishEvent)
 	select {
 	case payload := <-ready:

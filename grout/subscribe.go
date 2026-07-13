@@ -54,6 +54,7 @@ type SubscribeConfig struct {
 	afterScan            func()
 	beforeReadinessCheck func()
 	afterRead            func(int, error)
+	beforeNextScan       func()
 }
 
 type zellijPane struct {
@@ -424,6 +425,9 @@ func streamEvents(
 			case lines <- scanResult{line: scanner.Text()}:
 			case <-streamCtx.Done():
 				return
+			}
+			if cfg.beforeNextScan != nil {
+				cfg.beforeNextScan()
 			}
 		}
 		streamBoundary.Lock()
