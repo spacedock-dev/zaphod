@@ -350,6 +350,24 @@ complete, and the gate is ready for the captain's direct-script-only demo.
   another manual test. This is proof-harness repair within the existing end
   value; no task reframe and no new `code_completion` panel are authorized.
 
+- **Cycle 6 — 2026-07-14: REVISED after divergent concurrent lifecycle smokes, routed to implementation.**
+  At frozen head `d659c36`, the FO's exact isolated lifecycle command passed
+  both modes with exit 0 while the captain's concurrent run failed later with
+  `FAIL: candidate URL did not appear in the native Zellij layout dump`.
+  Immediately preceding pane-state assertions require the exact candidate URL,
+  stable tab, and resident shape, but `capture_state` and the settled-candidate
+  path accept a single unvalidated `dump-layout` reply and cleanup discards it.
+  Reproduce the divergence under concurrent or repeated real-Zellij load;
+  retain bounded failing dump provenance; and validate the complete native
+  layout record atomically before accepting it. Retry only an evidence-backed
+  transient reply for a bounded number of attempts while persistent missing or
+  malformed candidate identity remains terminal. Audit every changed
+  `dump-layout` reader in the lifecycle smoke for the same false-negative path.
+  The FO, not the captain, will run serial and concurrent stress verification
+  before another manual test is requested. This proof flake weakens the truth
+  of advertised readiness and must be fixed now; no task reframe or new
+  `code_completion` panel is authorized.
+
 ## Stage Report: implementation addendum (review-convergence pause)
 
 - DONE: Freeze the revised implementation at
