@@ -231,3 +231,28 @@ parsing the operator's read-only profile, while the script passes only its
 own rendered layout inline and proves the resulting tab through native state.
 The preceding ideation report remains historical evidence of the rejected
 parser-replacement route; the sections above and this cycle are controlling.
+
+## Stage Report: implementation
+
+- DONE: Selected-checkout entry creates exactly one verified stable-ID tab with the selected checkout's canonical WASM URL while standing config/layout hashes remain unchanged on success, failure, and TERM.
+  Commits `4a506d8` and `95cba63`; focused shell 6/6 passed, and the isolated Zellij-in-tmux journey passed with native pane/tab/layout state plus isolated and standing hashes.
+- DONE: The direct path no longer depends on the AWK transformer or a pre-existing Zaphod route; global Alt Shift z and persistent Alt / policy remain untouched and honestly documented.
+  `scripts/zellij-new-tab.sh` now uses native `setup --check` and one inline `new-tab`; commits `583abe5`, `010171e`, and `e238f7a` document fixed global key-policy ownership without adding a runtime route.
+- DONE: Red/green unit and isolated Zellij-in-tmux journey evidence is complete, followed by a cleared exact-tip quick review and passing exact-head code_completion synthesis evidence.
+  Red at `4a506d8`: `Zaphod config transformer not found` then `FAIL: selected-checkout fresh-tab entry failed`; green was 6/6 shell, 135/135 `cargo test`, `cargo check --tests`, and the tmux journey.
+- DONE: TERM evidence proves standing KDL stays read-only before cleanup and always reaps the blocked action.
+  Commits `7419848`, `ea61e22`, and `947582c` capture in-flight hashes, convert unreadable files to a sentinel, then TERM, release, reap, and assert; final focused suite passed 6/6.
+- DONE: Exact-tip quick cost gate is clear.
+  Quick parent `185` reviewed head `e238f7a90a62b068772742ccd5ac4a0fc6071727` with panel `quick`, one successful required member, PASS, and no findings.
+- DONE: Exact-head code_completion synthesis is authoritative and passing.
+  Parent `189` reviewed `3b27e202176740ed976aa94aa8aa7cc91ee66118..e238f7a90a62b068772742ccd5ac4a0fc6071727`; `correctness` job `186`, `journey` job `187`, and `proof` job `188` each ran once and passed; parent verdict PASS.
+- DONE: All review findings have dispositions.
+  TERM cleanup, stable foreign-tab identity, and stale docs were fixed; persistent `Alt /` and `Alt .` retargeting requests were rebutted as forbidden scope and explicitly accepted by quick parents `164` and `185`.
+
+### Summary
+
+The selected-checkout command now renders only its repository layout into a
+disposable value, creates one inline tab, verifies the returned stable tab ID
+and exact WASM URL, and starts the existing private subscriber. Operator KDL
+remains byte-identical, global key policy remains global, and all focused,
+native, journey, quick-review, and completion-panel evidence passes.
