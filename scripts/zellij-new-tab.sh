@@ -78,6 +78,7 @@ zellij_cmd() {
 }
 
 TEMP_ROOT=""
+SIDECAR_PID=""
 SIDECAR_START_FIFO=""
 
 cleanup() {
@@ -174,6 +175,7 @@ start_private_sidecar() {
         --startup-fd 3 \
         3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
     start_status=$?
+    SIDECAR_PID=$!
     set -e
     if [ "$start_status" -ne 0 ]; then
         fail "sidecar-start-failed: could not launch private zaphod sidecar"
@@ -205,3 +207,4 @@ start_private_sidecar
 printf 'TAB_ID=%s\n' "$TAB_ID"
 printf 'WASM_URL=%s\n' "$WASM_URL"
 printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
+printf 'SIDECAR_PID=%s\n' "$SIDECAR_PID"

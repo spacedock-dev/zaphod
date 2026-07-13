@@ -23,7 +23,8 @@ FQ="$(git rev-parse --show-toplevel)"
 AGENTSVIEW_BIN="$(command -v agentsview)"
 AGENTSVIEW_URL=http://127.0.0.1:8080
 MARKER="fq-$(date +%s)"
-printf 'selected checkout: %s\nagent prompt marker: %s\n' "$FQ" "$MARKER"
+SSE_MARKER="${MARKER}-sse"
+printf 'selected checkout: %s\ninitial marker: %s\nSSE marker: %s\n' "$FQ" "$MARKER" "$SSE_MARKER"
 ```
 
 Check the real server. Start it only if no server is running:
@@ -72,7 +73,7 @@ shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-before.sha256
 ```
 
 Do not start another sidecar. The entry output must contain `TAB_ID`,
-`WASM_URL`, and `SIDECAR_LOG`.
+`WASM_URL`, `SIDECAR_LOG`, and `SIDECAR_PID`.
 
 ## 3. Create one real agent session
 
@@ -102,7 +103,7 @@ section with a `codex` session row and the exact marker in its summary. The
 captain records that visual observation in chat; Zellij 0.44.x does not expose
 plugin-pane rendering through `dump-screen`.
 
-## 4. Capture the subscription proof
+## 4. Establish the initial row
 
 Return to the ordinary terminal. Wait for the real session to reach the served
 API:
@@ -113,33 +114,68 @@ until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?include_one_shot=true&include_c
 done
 ```
 
+The captain must now report a visible `AGENTS` header and `codex` row with the
+exact initial marker. This is only the baseline: the sidecar may have emitted
+it during its initial HTTP refresh, so it does not yet prove the SSE stream.
+
+## 5. Prove a post-baseline SSE refresh
+
+Return to the first Codex session, enter `/exit`, and wait for the shell prompt.
+Start `codex` again in the same pane and selected checkout. At its prompt, send
+this request, replacing `<SSE_MARKER>` with the exact SSE marker from step 1:
+
+```text
+<SSE_MARKER>: inspect README.md without edits, then wait for my next instruction.
+```
+
+This second session is created only after the first row is visible. Return to
+the ordinary terminal and require AgentsView to serve exactly one session for
+each marker:
+
+```bash
+until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?include_one_shot=true&include_children=true&limit=1000" > /tmp/fq-agentsview-sessions.json && jq -e --arg cwd "$FQ" --arg first "$MARKER" --arg second "$SSE_MARKER" '([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($first)))] | length == 1) and ([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($second)))] | length == 1)' /tmp/fq-agentsview-sessions.json > /dev/null; do
+  sleep 5
+done
+```
+
+The captain must now report a second visible `codex` row with the exact SSE
+marker. Because that session did not exist when the initial row was visible,
+its appearance in the rail proves that the sidecar consumed a later
+`data_changed` event and refreshed from the persistent SSE stream.
+
+## 6. Capture the final proof
+
 Capture the exact managed target:
 
 ```bash
 TAB_ID="$(sed -n 's/^TAB_ID=//p' /tmp/fq-entry.out)"
 WASM_URL="$(sed -n 's/^WASM_URL=//p' /tmp/fq-entry.out)"
 SIDECAR_LOG="$(sed -n 's/^SIDECAR_LOG=//p' /tmp/fq-entry.out)"
+SIDECAR_PID="$(sed -n 's/^SIDECAR_PID=//p' /tmp/fq-entry.out)"
 test -n "$TAB_ID"
 test -n "$WASM_URL"
 test -n "$SIDECAR_LOG"
+[[ "$SIDECAR_PID" =~ ^[1-9][0-9]*$ ]]
 "$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-panes --json --all --command --geometry --state --tab > /tmp/fq-panes.json
 "$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-tabs --json --all --state --layout > /tmp/fq-tabs.json
 ```
 
-Verify one stable-ID resident, one active target tab, no startup refusal, and
-unchanged standing KDL:
+Verify one stable-ID resident, one active target tab, both real sessions, a
+still-live sidecar with no terminal diagnostics, and unchanged standing KDL:
 
 ```bash
 jq -e --arg id "$TAB_ID" --arg url "$WASM_URL" '[.[] | select((.tab_id | tostring) == $id and .is_plugin and .plugin_url == $url and (.is_floating | not) and (.is_suppressed | not))] | length == 1' /tmp/fq-panes.json > /dev/null
 jq -e --arg id "$TAB_ID" '[.[] | select((.tab_id | tostring) == $id and .active)] | length == 1' /tmp/fq-tabs.json > /dev/null
-jq -e --arg cwd "$FQ" --arg marker "$MARKER" '[.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($marker)))] | length == 1' /tmp/fq-agentsview-sessions.json > /dev/null
+jq -e --arg cwd "$FQ" --arg first "$MARKER" --arg second "$SSE_MARKER" '([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($first)))] | length == 1) and ([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($second)))] | length == 1)' /tmp/fq-agentsview-sessions.json > /dev/null
 test -f "$SIDECAR_LOG"
-! grep -qF 'connection refused' "$SIDECAR_LOG"
+test ! -s "$SIDECAR_LOG"
+kill -0 "$SIDECAR_PID"
 shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-after.sha256
 cmp /tmp/fq-kdl-before.sha256 /tmp/fq-kdl-after.sha256
 ```
 
 Every command must exit zero. The captain must also report the visible
-`AGENTS` header, `codex` row, and exact per-run marker in chat. The visible
-rail and served API must identify the same real agent session. Reject the demo
+`AGENTS` header and both distinct `codex` rows with their exact per-run markers
+in chat. The second row is the required SSE refresh evidence. The visible rail
+and served API must identify the same two real agent sessions. Reject the demo
 if any condition fails.
