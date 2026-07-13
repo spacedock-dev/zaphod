@@ -801,9 +801,10 @@ candidate rail at the returned stable tab ID. Literal tmux keys prove managed
 `Alt /` behavior and foreign-tab inertness. The isolated profile's fixed
 `Alt Shift z` route remains byte-identical and is not selected-checkout
 evidence. Normal exit, TERM, INT, or HUP deletes the session, kills the tmux
-server, and removes the temporary root. Cleanup compares the existence and
-SHA-256 of both isolated and standing config/layout files; it reports mutation
-and never overwrites concurrent changes by trying to restore them.
+server, and removes the temporary root. The main journey compares the isolated
+config/layout hashes after direct entry; cleanup rechecks the standing files.
+The harness reports mutation and never overwrites concurrent changes by trying
+to restore them.
 
 Use live Zellij state as the oracle. `action list-panes --json -a -g -t` proves
 pane IDs, counts, kinds, geometry, and cwd. `action dump-layout` proves the URL,
