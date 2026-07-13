@@ -244,10 +244,13 @@ wait_for_candidate_width() {
 
 wait_for_foreign_active_tab() {
     local tabs="$1"
+    local foreign_tab_id="$2"
     local attempt
     for attempt in $(seq 1 80); do
         capture_tabs "$tabs"
-        if jq -e 'any(.[]; .active and .name != "zaphod")' "$tabs" >/dev/null 2>&1; then
+        if jq -e --arg foreign_tab_id "$foreign_tab_id" --arg managed_tab_id "$TAB_ID" \
+            'any(.[]; .active and (.tab_id | tostring) == $foreign_tab_id and (.tab_id | tostring) != $managed_tab_id)' \
+            "$tabs" >/dev/null 2>&1; then
             return
         fi
         sleep 0.05
@@ -315,6 +318,7 @@ dismiss_startup_tip
 zellij_control setup --check >/dev/null
 capture_tabs "$ROOT/foreign-tabs-before.json"
 TAB_COUNT_BEFORE="$(jq -er 'length' "$ROOT/foreign-tabs-before.json")"
+FOREIGN_TAB_ID="$(jq -er '.[] | select(.active) | .tab_id' "$ROOT/foreign-tabs-before.json")"
 capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreign-ready.screen"
 jq -e --arg wasm_url "$WASM_URL" \
     'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
@@ -390,7 +394,7 @@ cmp -s "$ROOT/candidate-before.screen" "$ROOT/candidate-after.screen" &&
 # same tmux client to its sidebar-less tab with a native Zellij action, then
 # send literal Alt / and require byte-identical foreign state.
 zellij_session action go-to-previous-tab
-wait_for_foreign_active_tab "$ROOT/foreign-tabs-after-route.json"
+wait_for_foreign_active_tab "$ROOT/foreign-tabs-after-route.json" "$FOREIGN_TAB_ID"
 capture_state "$ROOT/foreign-before.json" "$ROOT/foreign-before.kdl" "$ROOT/foreign-before.screen"
 send_literal "$(printf '\033/')"
 sleep 0.10
