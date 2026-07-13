@@ -356,8 +356,10 @@ func streamEvents(
 	}
 	lines := make(chan scanResult)
 	var streamEnded atomic.Bool
+	var streamActivity atomic.Uint64
 	go func() {
 		for scanner.Scan() {
+			streamActivity.Add(1)
 			select {
 			case lines <- scanResult{line: scanner.Text()}:
 			case <-streamCtx.Done():
@@ -382,6 +384,7 @@ func streamEvents(
 	var catchup <-chan error
 	var settleTimer *time.Timer
 	var settleC <-chan time.Time
+	var settleGeneration uint64
 	pendingDataChange := false
 	startSettle := func() {
 		if settleTimer != nil {
@@ -389,6 +392,7 @@ func streamEvents(
 		}
 		settleTimer = time.NewTimer(25 * time.Millisecond)
 		settleC = settleTimer.C
+		settleGeneration = streamActivity.Load()
 	}
 	startCatchup := func() {
 		result := make(chan error, 1)
@@ -450,6 +454,10 @@ func streamEvents(
 			}
 		case <-settleC:
 			settleC = nil
+			if streamActivity.Load() != settleGeneration || eventName != "" {
+				startSettle()
+				continue
+			}
 			if pendingDataChange {
 				pendingDataChange = false
 				startCatchup()
@@ -463,6 +471,9 @@ func streamEvents(
 			}
 			ready = true
 		case result := <-lines:
+			if !ready && settleC != nil {
+				startSettle()
+			}
 			if result.done {
 				if ctx.Err() != nil {
 					return nil

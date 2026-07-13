@@ -545,6 +545,8 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 		"  *agent-event*) echo accepted ;;\n"+
 		"esac\n")
 	change := make(chan struct{})
+	changeStarted := make(chan struct{})
+	finishChange := make(chan struct{})
 	changeSent := make(chan struct{})
 	var lists atomic.Int32
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -553,7 +555,11 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.(http.Flusher).Flush()
 			<-change
-			fmt.Fprint(w, "event: data_changed\ndata: {}\n\n")
+			fmt.Fprint(w, "event: data_changed\n")
+			w.(http.Flusher).Flush()
+			close(changeStarted)
+			<-finishChange
+			fmt.Fprint(w, "data: {}\n\n")
 			w.(http.Flusher).Flush()
 			close(changeSent)
 			<-r.Context().Done()
@@ -591,24 +597,40 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 	if _, err := os.Stat(snapshotStarted); err != nil {
 		t.Fatalf("initial snapshot delivery never began: %v", err)
 	}
-	close(change)
-	select {
-	case <-changeSent:
-	case <-time.After(time.Second):
-		t.Fatal("queued change was not emitted")
-	}
-	time.Sleep(50 * time.Millisecond)
 	if err := os.WriteFile(releaseSnapshot, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	close(change)
+	select {
+	case <-changeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("partial queued change was not emitted")
+	}
+	ready := make(chan string, 1)
+	go func() {
+		payload := make([]byte, 6)
+		n, _ := reader.Read(payload)
+		ready <- string(payload[:n])
+	}()
+	select {
+	case payload := <-ready:
+		t.Fatalf("partial queued change allowed readiness: %q", payload)
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(finishChange)
+	select {
+	case <-changeSent:
+	case <-time.After(time.Second):
+		t.Fatal("queued change was not completed")
+	}
 	err = <-errCh
 	_ = writer.Close()
-	payload, readErr := io.ReadAll(reader)
+	payload := <-ready
 	_ = reader.Close()
 	if err == nil || !strings.Contains(err.Error(), "503") {
 		t.Fatalf("queued catchup error = %v, want source failure", err)
 	}
-	if readErr != nil || len(payload) != 0 {
-		t.Fatalf("failed queued catchup signaled readiness: %q, %v", payload, readErr)
+	if len(payload) != 0 {
+		t.Fatalf("failed queued catchup signaled readiness: %q", payload)
 	}
 }
