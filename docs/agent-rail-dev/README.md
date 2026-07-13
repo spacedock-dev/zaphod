@@ -143,17 +143,23 @@ After the final candidate commit, implementation MUST run `roborev wait HEAD`
 for that commit's existing post-commit `quick` review. A Medium-or-higher
 finding blocks the expensive panel. Disposition it as `fix`, `rebut`, or
 `needs decision`: a fix requires a new commit and a wait on that new exact
-HEAD; a rebuttal cites concrete repository evidence and runs a replacement
-exact-head `quick` panel:
+HEAD; a rebuttal records the disputed finding and concrete repository evidence
+as a comment on the failed quick job, then runs a replacement exact-head
+`quick` panel:
 
 ```bash
+roborev comment <quick-job-id> \
+  "<finding; rebuttal; file:line evidence; request explicit adjudication>"
 roborev review --repo <canonical-project-root> --sha <reviewed-head> \
   --panel quick --min-severity medium --wait
 ```
 
-A PASS replacement adjudicates the rebuttal; `needs decision` stops for a real
-product, contract, or policy choice. Low findings remain advisory and do not
-force another round. Only after the exact-tip `quick` review, or an
+Roborev includes review comments when it reviews the same or a related commit.
+The replacement clears the rebuttal only when its output explicitly evaluates
+the disputed finding against the cited evidence and accepts the rebuttal; a
+bare PASS that omits the dispute is not adjudication. `needs decision` stops
+for a real product, contract, or policy choice. Low findings remain advisory
+and do not force another round. Only after the exact-tip `quick` review, or an
 evidence-backed replacement for that same tip, clears the cost gate may
 implementation run the required panel:
 

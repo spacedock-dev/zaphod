@@ -1,6 +1,7 @@
 # Roborev produces independent review evidence; Spacedock remains authoritative
 # for implementation, validation, stage routing, and human gates.
 agent = "codex"
+review_context_count = 3
 excluded_branches = ["spacedock-state/agent-rail-dev"]
 post_commit_review = "commit"
 review_guidelines = """
@@ -20,7 +21,7 @@ hook_review_panel = "quick"
 agent = "codex"
 reasoning = "fast"
 review_type = "default"
-instructions = "Identify Medium-or-higher correctness, regression, and missing-test findings quickly. Keep Low polish observations visible but clearly advisory."
+instructions = "Identify Medium-or-higher correctness, regression, and missing-test findings quickly. Keep Low polish observations visible but clearly advisory. When prior review comments rebut a finding, explicitly accept or reject that rebuttal against its cited repository evidence before giving the overall verdict."
 
 [review.subagents.correctness]
 agent = "codex"
