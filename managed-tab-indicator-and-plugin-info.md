@@ -1,12 +1,12 @@
 ---
 title: Managed-tab indicator and plugin provenance hotkey
-status: backlog
+status: ideation
 source: captain direction 2026-07-13
 sprint:
 group: managed-tab-ux
 sprint-readiness: defer
 score: 0.7
-started:
+started: 2026-07-13T12:30:05Z
 completed:
 verdict:
 worktree:
