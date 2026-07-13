@@ -163,6 +163,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	}
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--command", "--geometry", "--state", "--tab")
 	var output []byte
+	var panes []zellijPane
 	for attempt := 0; attempt < 3; attempt++ {
 		command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
 		var err error
@@ -174,7 +175,12 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 			return targetSnapshot{}, fmt.Errorf("%w: native list-panes: %v", ErrTargetLost, err)
 		}
 		if len(strings.TrimSpace(string(output))) > 0 {
-			break
+			if err := json.Unmarshal(output, &panes); err != nil {
+				return targetSnapshot{}, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
+			}
+			if len(panes) > 0 {
+				break
+			}
 		}
 		if attempt < 2 {
 			select {
@@ -184,9 +190,10 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 			}
 		}
 	}
-	var panes []zellijPane
-	if err := json.Unmarshal(output, &panes); err != nil {
-		return targetSnapshot{}, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
+	if panes == nil {
+		if err := json.Unmarshal(output, &panes); err != nil {
+			return targetSnapshot{}, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
+		}
 	}
 	resident := 0
 	terminals := 0
