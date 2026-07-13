@@ -19,18 +19,20 @@ fail() {
 
 [[ "$TIMEOUT_SECS" =~ ^[1-9][0-9]*$ ]] || fail "stress timeout must be a positive integer"
 [[ "$SERIAL_ROUNDS" =~ ^[1-9][0-9]*$ ]] || fail "serial rounds must be a positive integer"
+command -v perl >/dev/null 2>&1 || fail "perl is required for owned stress process groups"
 
 run_case() {
     local name="$1"
     local child watchdog status
-    "$SCRIPT_DIR/zellij-subscription-lifecycle-smoke-test.sh" \
+    perl -MPOSIX -e 'defined POSIX::setsid() or die "setsid failed: $!"; exec @ARGV or die "exec failed: $!"' \
+        "$SCRIPT_DIR/zellij-subscription-lifecycle-smoke-test.sh" \
         > "$ROOT/$name.out" 2> "$ROOT/$name.err" &
     child=$!
     (
         sleep "$TIMEOUT_SECS"
-        kill -TERM "$child" 2>/dev/null || exit 0
+        /bin/kill -TERM "-$child" 2>/dev/null || exit 0
         sleep 5
-        kill -KILL "$child" 2>/dev/null || true
+        /bin/kill -KILL "-$child" 2>/dev/null || true
     ) &
     watchdog=$!
     set +e
