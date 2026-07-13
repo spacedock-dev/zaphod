@@ -15,7 +15,10 @@ type Config struct {
 	SessionID         string        // required argv[1]
 	GateLog           string        // required argv[2]
 	ZellijBin         string        // "zellij"
-	ZellijSession     string        // "" = inherit env; non-empty sets ZELLIJ_SESSION_NAME on the child
+	ZellijConfigDir   string        // explicit Zellij profile root, when known
+	ZellijConfigFile  string        // explicit Zellij config file, when known
+	ZellijDataDir     string        // explicit Zellij data root, when known
+	ZellijSession     string        // explicit target session, when known
 	PipeName          string        // "agent-event" — protocol constant
 	PipeTimeout       time.Duration // 5 * time.Second — kill timer
 	SummaryClampBytes int           // 512
