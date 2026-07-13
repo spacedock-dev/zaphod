@@ -307,6 +307,7 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged() {
     runner_pid=$!
     for attempt in $(seq 1 100); do [ ! -e "$ready" ] || break; sleep 0.05; done
     [ -e "$ready" ] || { cat "$FIXTURE_ERROR" >&2; fail "TERM fixture never reached new-tab"; }
+    assert_standing_kdl_unchanged
     kill -TERM "$runner_pid"
     : > "$release"
     set +e
