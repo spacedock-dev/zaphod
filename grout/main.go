@@ -31,9 +31,8 @@ type Config struct {
 }
 
 // startupSignal writes one short confirmation to the direct script's private
-// FIFO after the SSE response, exact recipient, and bounded initial snapshot
-// are validated. Snapshot delivery follows handoff so replay cannot consume
-// the launcher's readiness deadline.
+// FIFO after the SSE response, exact recipient, and one bounded initial
+// snapshot delivery are all acknowledged.
 func startupSignal(fd int) error {
 	if fd == -1 {
 		return nil

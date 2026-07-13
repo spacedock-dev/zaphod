@@ -679,6 +679,24 @@ impl ZellijPlugin for Sidebar {
             }
             return false;
         }
+        if pipe_message.name == "agent-snapshot" {
+            if !self.accepts_agent_event(&pipe_message.args) {
+                return false;
+            }
+            let Some(payload) = pipe_message.payload.as_deref() else {
+                return false;
+            };
+            let Ok(events) = serde_json::from_str::<Vec<AgentEvent>>(payload) else {
+                return false;
+            };
+            let changed = events.into_iter().fold(false, |changed, event| {
+                apply_agent_event(&mut self.sessions, &mut self.gates, event) || changed
+            });
+            if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+                cli_pipe_output(pipe_id, "accepted");
+            }
+            return changed;
+        }
         // Ordinary event callers need no response; Zellij auto-unblocks them
         // after this returns. Only the readiness branch above writes output.
         if pipe_message.name == "agent-event" {

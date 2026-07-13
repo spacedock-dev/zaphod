@@ -403,7 +403,7 @@ func TestSubscribeRejectsEOFDuringHandshake(t *testing.T) {
 	}
 }
 
-func TestSubscribeSignalsReadyBeforeMultiRowReplay(t *testing.T) {
+func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	panesPath := filepath.Join(dir, "panes.json")
 	deliveryStarted := filepath.Join(dir, "delivery-started")
@@ -418,7 +418,7 @@ func TestSubscribeSignalsReadyBeforeMultiRowReplay(t *testing.T) {
 		"case \"$*\" in\n"+
 		"  *list-panes*) cat "+panesPath+" ;;\n"+
 		"  *agent-event-ready*) echo ready ;;\n"+
-		"  *agent-event*) : > "+deliveryStarted+"; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
+		"  *agent-snapshot*) : > "+deliveryStarted+"; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
 		"esac\n")
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -457,14 +457,6 @@ func TestSubscribeSignalsReadyBeforeMultiRowReplay(t *testing.T) {
 		n, _ := reader.Read(payload)
 		ready <- string(payload[:n])
 	}()
-	select {
-	case payload := <-ready:
-		if payload != "ready\n" {
-			t.Fatalf("startup payload = %q", payload)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("multi-row replay blocked startup readiness")
-	}
 	for attempt := 0; attempt < 100; attempt++ {
 		if _, err := os.Stat(deliveryStarted); err == nil {
 			break
@@ -472,10 +464,23 @@ func TestSubscribeSignalsReadyBeforeMultiRowReplay(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := os.Stat(deliveryStarted); err != nil {
-		t.Fatalf("initial replay never began after readiness: %v", err)
+		t.Fatalf("initial snapshot delivery never began: %v", err)
+	}
+	select {
+	case payload := <-ready:
+		t.Fatalf("startup signaled before snapshot acknowledgment: %q", payload)
+	case <-time.After(100 * time.Millisecond):
 	}
 	if err := os.WriteFile(releaseDelivery, nil, 0o600); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case payload := <-ready:
+		if payload != "ready\n" {
+			t.Fatalf("startup payload = %q", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("acknowledged multi-row snapshot did not release startup readiness")
 	}
 	cancel()
 	_ = writer.Close()

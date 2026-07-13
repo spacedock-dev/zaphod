@@ -69,13 +69,48 @@ func EmitRowForTab(
 	if err != nil {
 		return err
 	}
+	args := pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID)
+	return emitAcknowledged(ctx, cfg, kind, args, "", stderr)
+}
+
+// EmitSnapshotForTab sends the complete initial snapshot through stdin in one
+// bounded CLI invocation, avoiding both argv limits and per-row startup cost.
+func EmitSnapshotForTab(
+	ctx context.Context,
+	cfg Config,
+	rows []SessionRow,
+	recipientTabID string,
+	stderr io.Writer,
+) error {
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	args := []string{
+		"pipe", "--name", "agent-snapshot",
+		"--args", "recipient-tab-id=" + recipientTabID,
+	}
+	return emitAcknowledged(ctx, cfg, "snapshot", args, string(payload), stderr)
+}
+
+func emitAcknowledged(
+	ctx context.Context,
+	cfg Config,
+	kind string,
+	pipeArgs []string,
+	stdinPayload string,
+	stderr io.Writer,
+) error {
 	deliveryCtx, cancel := context.WithTimeout(ctx, cfg.PipeTimeout)
 	defer cancel()
-	args := append(zellijProfileArgs(cfg), pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID)...)
+	args := append(zellijProfileArgs(cfg), pipeArgs...)
 	for {
 		var stdout bytes.Buffer
 		cmd := exec.CommandContext(deliveryCtx, cfg.ZellijBin, args...)
 		cmd.WaitDelay = 2 * time.Second
+		if stdinPayload != "" {
+			cmd.Stdin = strings.NewReader(stdinPayload)
+		}
 		cmd.Stdout = &stdout
 		cmd.Stderr = stderr
 		err := cmd.Run()

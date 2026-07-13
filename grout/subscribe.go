@@ -253,6 +253,27 @@ func deliverSessions(
 	return nil
 }
 
+func deliverSnapshot(
+	ctx context.Context,
+	cfg SubscribeConfig,
+	stableTabID uint64,
+	sessions []sessionInfo,
+	stderr io.Writer,
+) error {
+	current, err := probeTarget(ctx, cfg, stableTabID)
+	if err != nil {
+		return err
+	}
+	rows := make([]SessionRow, 0, len(sessions))
+	for _, session := range sessions {
+		if _, stillLocal := current.cwds[session.Cwd]; !stillLocal {
+			continue
+		}
+		rows = append(rows, BuildSessionRow(session, time.Now(), cfg.SummaryClampBytes))
+	}
+	return EmitSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, stderr)
+}
+
 func refreshSessions(
 	ctx context.Context,
 	client *http.Client,
@@ -271,7 +292,7 @@ func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
 	// A newly added ReadCliPipes grant may put the ordinary permission prompt
 	// in front of the recipient. Leave the attached user time to approve it
 	// once while staying inside the entry script's overall startup bound.
-	deadline := time.NewTimer(20 * time.Second)
+	deadline := time.NewTimer(18 * time.Second)
 	defer deadline.Stop()
 	for {
 		probeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
@@ -355,13 +376,11 @@ func streamEvents(
 	defer readyTimer.Stop()
 	readyTimerC := readyTimer.C
 	type handshakeResult struct {
-		sessions []sessionInfo
-		err      error
+		err error
 	}
 	var handshake <-chan handshakeResult
 	var settleTimer *time.Timer
 	var settleC <-chan time.Time
-	var initialSessions []sessionInfo
 	pendingDataChange := false
 	startHandshake := func() {
 		result := make(chan handshakeResult, 1)
@@ -372,7 +391,10 @@ func streamEvents(
 				return
 			}
 			sessions, err := snapshotSessions(streamCtx, client, cfg, stableTabID)
-			result <- handshakeResult{sessions: sessions, err: err}
+			if err == nil {
+				err = deliverSnapshot(streamCtx, cfg, stableTabID, sessions, stderr)
+			}
+			result <- handshakeResult{err: err}
 		}()
 	}
 	defer func() {
@@ -394,7 +416,6 @@ func streamEvents(
 			if result.err != nil {
 				return result.err
 			}
-			initialSessions = result.sessions
 			// Keep consuming the stream for one final scheduling turn so an EOF
 			// already produced during the handshake wins before handoff.
 			settleTimer = time.NewTimer(25 * time.Millisecond)
@@ -408,12 +429,6 @@ func streamEvents(
 				return fmt.Errorf("stream-ready signal: %w", err)
 			}
 			ready = true
-			// Replay no longer consumes the launcher's readiness deadline. Each
-			// row still revalidates and requires its own recipient acknowledgment.
-			if err := deliverSessions(ctx, cfg, stableTabID, initialSessions, stderr); err != nil {
-				return err
-			}
-			initialSessions = nil
 			if pendingDataChange {
 				pendingDataChange = false
 				if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
