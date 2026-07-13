@@ -952,3 +952,16 @@ tab-bound session route, as this record already states.
   produced no result. That is stale: cycle 10 recorded a conclusive failure.
   Update the workflow metadata when this review is applied; this review does
   not mutate task state itself.
+
+## Stage Report: implementation
+
+- DONE: Implement the stable-tab receiver guard, including stable tab ID 0 and all fail-closed rejection paths.
+  `afb6b7d`; red `cargo test` was 133 passed, 2 failed (`agent_event_lines_land_as_session_and_gate_rows`, `pinned_protocol_lines_render_and_bind`) until they carried an explicit recipient; green at committed head: `cargo test --quiet` 135 passed and `cargo check --tests` passed.
+- DONE: Start one private sidecar only after the direct script has verified its fresh managed tab; do not create a helper pane, lease, controller, or public command.
+  `685415a`, `1db9b5a`, `dc47f01`, `9300975`, and `10a78ba`; initial subscriber red included `undefined: runSubscribe`, `SubscribeConfig`, and `ErrSourceEOF`; the later failed-exec regression red was exactly `FAIL: sidecar exec failure unexpectedly succeeded`, then the FIFO confirmation made the shell/Go suites green.
+- DONE: Prove target-only delivery with focused pure tests and the tmux-hosted two-rail smoke; preserve standing configuration.
+  `a64ecb8`; committed-head direct-entry smoke and isolated two-rail smoke passed, and the two-rail smoke passed three consecutive earlier runs with the same-CWD bystander inert; each harness checks standing configuration cleanup.
+
+### Summary
+
+The direct script now builds the checkout-local WASM and native sidecar, verifies one exact resident rail, then starts one private tab-bound subscriber. The rail admits a broadcast only after a fresh pane-to-stable-tab mapping; CWD binds focus only after that admission. README and harness docs describe the direct entry, `Alt Shift z` tab-only boundary, and tmux proof without reviving the discarded PTY, lease, helper-pane, controller, or pooling designs.
