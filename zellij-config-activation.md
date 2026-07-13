@@ -1,7 +1,7 @@
 ---
 id: fqjswvmd93vek5y12zemf1k2
 title: Activation preserves valid Zellij KDL
-status: ideation
+status: implementation
 source: staff review of fp merge 2026-07-12; captain direction
 sprint: s1-managed-tab-safety
 group: hardening
@@ -10,7 +10,7 @@ started: 2026-07-12T14:33:06Z
 completed:
 verdict:
 score: 0.98
-worktree:
+worktree: .worktrees/spacedock-ensign-zellij-config-activation
 issue:
 pr:
 mod-block:
