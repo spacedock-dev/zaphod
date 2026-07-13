@@ -2726,6 +2726,7 @@ dependencies = [
 name = "zellij-sidebar"
 version = "0.1.0"
 dependencies = [
+ "kdl",
  "serde",
  "serde_json",
  "zellij-tile",

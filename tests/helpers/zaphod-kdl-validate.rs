@@ -1,7 +1,94 @@
 // ABOUTME: Host-only complete KDL and Zaphod identity validator for real layout smoke evidence.
 // ABOUTME: Exit status distinguishes malformed records from valid but stale/wrong identity.
 
+use kdl::KdlDocument;
+use std::{env, fs, process};
+
+const MAX_LAYOUT_BYTES: u64 = 4 * 1024 * 1024;
+#[cfg(test)]
 const EXPECTED: &str = "file:/candidate/zellij-sidebar.wasm";
+
+#[derive(Debug, PartialEq, Eq)]
+enum ValidationError {
+    Malformed,
+    Identity,
+}
+
+fn zaphod_locations<'a>(document: &'a KdlDocument, locations: &mut Vec<&'a str>) {
+    for node in document.nodes() {
+        if node.name().value() == "plugin" {
+            if let Some(location) = node.get("location").and_then(|entry| entry.value().as_string()) {
+                let path = location.split(['?', '#']).next().unwrap_or(location);
+                if path.rsplit('/').next() == Some("zellij-sidebar.wasm") {
+                    locations.push(location);
+                }
+            }
+        }
+        if let Some(children) = node.children() {
+            zaphod_locations(children, locations);
+        }
+    }
+}
+
+fn validate_layout(input: &str, expected_url: &str, expect_present: bool) -> Result<(), ValidationError> {
+    let document = input
+        .parse::<KdlDocument>()
+        .map_err(|_| ValidationError::Malformed)?;
+    let roots = document.nodes();
+    if roots.len() != 1 || roots[0].name().value() != "layout" || roots[0].children().is_none() {
+        return Err(ValidationError::Malformed);
+    }
+    let mut locations = Vec::new();
+    zaphod_locations(&document, &mut locations);
+    if expect_present {
+        if locations.is_empty() || locations.iter().any(|location| *location != expected_url) {
+            return Err(ValidationError::Identity);
+        }
+    } else if !locations.is_empty() {
+        return Err(ValidationError::Identity);
+    }
+    Ok(())
+}
+
+fn usage() -> ! {
+    eprintln!("usage: zaphod-kdl-validate FILE EXPECTED_URL present|absent");
+    process::exit(2);
+}
+
+fn main() {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 4 {
+        usage();
+    }
+    let expect_present = match args[3].as_str() {
+        "present" => true,
+        "absent" => false,
+        _ => usage(),
+    };
+    let metadata = fs::metadata(&args[1]).unwrap_or_else(|error| {
+        eprintln!("layout read failed: {error}");
+        process::exit(2);
+    });
+    if metadata.len() > MAX_LAYOUT_BYTES {
+        eprintln!("malformed layout: {} bytes exceeds {MAX_LAYOUT_BYTES}", metadata.len());
+        process::exit(20);
+    }
+    let input = fs::read_to_string(&args[1]).unwrap_or_else(|error| {
+        eprintln!("malformed layout: {error}");
+        process::exit(20);
+    });
+    match validate_layout(&input, &args[2], expect_present) {
+        Ok(()) => {}
+        Err(ValidationError::Malformed) => {
+            eprintln!("malformed layout record");
+            process::exit(20);
+        }
+        Err(ValidationError::Identity) => {
+            eprintln!("layout Zaphod identity mismatch");
+            process::exit(21);
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -9,19 +96,19 @@ mod tests {
 
     #[test]
     fn complete_layout_with_exact_candidate_is_valid() {
-        let input = r#"layout { pane { plugin location="file:/candidate/zellij-sidebar.wasm" { rail "1" } } }"#;
+        let input = "layout {\n pane {\n  plugin location=\"file:/candidate/zellij-sidebar.wasm\" {\n   rail \"1\"\n  }\n }\n}\n";
         assert_eq!(validate_layout(input, EXPECTED, true), Ok(()));
     }
 
     #[test]
     fn complete_layout_without_candidate_is_valid_when_absent_is_expected() {
-        let input = r#"layout { pane { plugin location="zellij:tab-bar" } }"#;
+        let input = "layout {\n pane {\n  plugin location=\"zellij:tab-bar\"\n }\n}\n";
         assert_eq!(validate_layout(input, EXPECTED, false), Ok(()));
     }
 
     #[test]
     fn quoted_brace_is_parsed_as_data_not_structure() {
-        let input = r#"layout { pane command="printf" { args "{" } }"#;
+        let input = "layout {\n pane command=\"printf\" {\n  args \"{\"\n }\n}\n";
         assert_eq!(validate_layout(input, EXPECTED, false), Ok(()));
     }
 
@@ -39,7 +126,7 @@ mod tests {
 
     #[test]
     fn wrong_candidate_url_is_an_identity_mismatch() {
-        let input = r#"layout { plugin location="file:/wrong/zellij-sidebar.wasm" }"#;
+        let input = "layout {\n plugin location=\"file:/wrong/zellij-sidebar.wasm\"\n}\n";
         assert_eq!(
             validate_layout(input, EXPECTED, true),
             Err(ValidationError::Identity)
