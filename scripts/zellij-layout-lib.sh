@@ -78,6 +78,99 @@ zaphod_bounded_reply_provenance() {
         "$label" "$status" "$stdout_len" "$stdout_prefix" "$stderr_len" "$stderr_prefix"
 }
 
+zaphod_panes_prove_layout_expectation() {
+    local expected_url="$1"
+    local expectation="$2"
+    local panes_file="$3"
+    case "$expectation" in
+        present)
+            jq -e --arg expected_url "$expected_url" '
+                type == "array" and
+                ([.[] | select(
+                    .is_plugin == true and .plugin_url == $expected_url and
+                    .is_floating == false and .is_suppressed == false
+                )] | length) == 1
+            ' "$panes_file" >/dev/null
+            ;;
+        absent)
+            jq -e '
+                type == "array" and
+                all(.[];
+                    (.is_plugin != true) or
+                    ((.plugin_url // "") | test("(^|/)zellij-sidebar\\.wasm([?#].*)?$") | not)
+                )
+            ' "$panes_file" >/dev/null
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+# Capture one native dump-layout record, validate its entire KDL syntax and
+# Zaphod identity, then atomically publish it. A valid stale identity or a
+# complete JSON-array wrong-action may retry only when the authoritative pane
+# inventory already proves the exact candidate. All other failures are final.
+zaphod_capture_validated_layout() {
+    local validator="$1"
+    local expected_url="$2"
+    local expectation="$3"
+    local panes_file="$4"
+    local output_file="$5"
+    shift 5
+    local attempt_file="$output_file.attempt"
+    local stderr_file="$output_file.stderr"
+    local validator_stderr="$output_file.validator.stderr"
+    local empty_file="$output_file.empty"
+    local attempt command_status validator_status retryable provenance
+
+    rm -f "$output_file" "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+    : > "$empty_file"
+    if ! zaphod_panes_prove_layout_expectation "$expected_url" "$expectation" "$panes_file"; then
+        echo "native-layout-unready: authoritative pane inventory does not prove expected $expectation identity" >&2
+        rm -f "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+        return 1
+    fi
+    for attempt in 1 2 3; do
+        command_status=0
+        "$@" > "$attempt_file" 2> "$stderr_file" || command_status=$?
+        if [ "$command_status" -ne 0 ]; then
+            provenance="$(zaphod_bounded_reply_provenance "dump-layout attempt=$attempt/3" \
+                "$command_status" "$attempt_file" "$stderr_file")"
+            echo "native-layout-unready: $provenance" >&2
+            rm -f "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+            return 1
+        fi
+
+        validator_status=0
+        "$validator" "$attempt_file" "$expected_url" "$expectation" 2> "$validator_stderr" || validator_status=$?
+        if [ "$validator_status" -eq 0 ]; then
+            mv "$attempt_file" "$output_file"
+            rm -f "$stderr_file" "$validator_stderr" "$empty_file"
+            return 0
+        fi
+
+        provenance="$(zaphod_bounded_reply_provenance "dump-layout attempt=$attempt/3" \
+            "$command_status" "$attempt_file" "$stderr_file"); \
+$(zaphod_bounded_reply_provenance validator "$validator_status" "$empty_file" "$validator_stderr")"
+        retryable=0
+        if [ "$expectation" = present ]; then
+            if [ "$validator_status" -eq 21 ]; then
+                retryable=1
+            elif [ "$validator_status" -eq 20 ] && jq -e 'type == "array"' "$attempt_file" >/dev/null 2>&1; then
+                retryable=1
+            fi
+        fi
+        if [ "$retryable" -eq 1 ] && [ "$attempt" -lt 3 ]; then
+            echo "transient-native-layout-reply: $provenance" >&2
+            sleep 0.05
+            continue
+        fi
+        echo "native-layout-unready: $provenance" >&2
+        rm -f "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+        return 1
+    done
+    return 1
+}
+
 zaphod_render_layout() {
     local template="$1"
     local wasm_url="$2"
