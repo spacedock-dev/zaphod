@@ -492,6 +492,32 @@ func TestProbeTargetRetriesOneTransientEmptyNativeReply(t *testing.T) {
 	}
 }
 
+func TestProbeTargetRetriesOneTransientNativeEmptyInventory(t *testing.T) {
+	dir := t.TempDir()
+	seen := filepath.Join(dir, "seen")
+	panes := filepath.Join(dir, "panes.json")
+	if err := os.WriteFile(panes, []byte(`[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"if [ ! -e "+seen+" ]; then : > "+seen+"; printf '[]\\n'; exit 0; fi\n"+
+		"cat "+panes+"\n")
+	got, err := probeTarget(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "WORK", RailURL: "file:/candidate/zellij-sidebar.wasm",
+		CheckoutCWD: "/work/managed",
+	}, 73)
+	if err != nil {
+		t.Fatalf("transient native [] list-panes reply was terminal: %v", err)
+	}
+	if _, ok := got.cwds["/work/managed"]; !ok {
+		t.Fatalf("target cwd set = %#v, want managed checkout", got.cwds)
+	}
+}
+
 func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
