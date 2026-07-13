@@ -273,3 +273,18 @@ native, journey, quick-review, and completion-panel evidence passes.
 Fresh validation found no surviving defect at exact head `e238f7a`. Offline
 AC-1 through AC-4 pass independently, stored Roborev evidence is current and
 complete, and the gate is ready for the captain's direct-script-only demo.
+
+### Feedback Cycles
+
+- **Cycle 1 — 2026-07-13: REVISED at validation, routed to implementation.**
+  The captain requested a chat-guided demo because the Subspace TUI float does
+  not support clipboard copy/paste, and clarified that the intended live
+  journey includes the AgentsView subscription rather than only fresh-tab and
+  standing-KDL evidence. The live direct-entry run created stable tab `8` with
+  the exact selected-worktree rail and left standing KDL byte-identical, but
+  its sidecar log reported `127.0.0.1:8080: connection refused`; the shell pane
+  therefore remained `unknown . unknown` and did not prove a subscribed
+  session row. Rework the demo packet so the first officer walks it through in
+  chat against a real AgentsView-backed agent session, without pressing Alt
+  keys or changing standing config/layout, then return it to the same validator
+  for independent review and a new gate.
