@@ -116,7 +116,9 @@ write_valid_unrelated_config() {
         'keybinds clear-defaults=true {' \
         '    normal {' \
         '        bind "Alt Shift x" { WriteChars "{"; }' \
-        '        bind "Alt Shift z" { NewTab { layout "/fixed/operator/layout.kdl"; } }' \
+        '        bind "Alt Shift z" {' \
+        '            NewTab { layout "/fixed/operator/layout.kdl"; }' \
+        '        }' \
         '        bind "Alt /" { NewPane; }' \
         '    }' \
         '}' > "$config_file"

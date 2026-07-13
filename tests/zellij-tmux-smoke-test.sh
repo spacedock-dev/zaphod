@@ -35,6 +35,9 @@ DATA_DIR=""
 SOCKET_DIR=""
 HOME_DIR=""
 PERMISSION_CACHE=""
+ISOLATED_CONFIG_BEFORE=""
+ISOLATED_LAYOUT=""
+ISOLATED_LAYOUT_BEFORE=""
 SESSION_NAME=""
 TMUX_SERVER=""
 TMUX_SESSION="zaphod-smoke"
@@ -116,7 +119,12 @@ SOCKET_DIR="$ROOT/socket"
 SESSION_NAME="zs$$"
 TMUX_SERVER="zs$$"
 mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$SOCKET_DIR" "$ROOT/tmp"
-cp "$SCRIPT_DIR/fixtures/zellij-tmux-smoke-config.kdl" "$CONFIG_FILE"
+ISOLATED_LAYOUT="$CONFIG_DIR/layouts/zaphod.kdl"
+sed "s|<FIXED_OPERATOR_LAYOUT>|$ISOLATED_LAYOUT|" \
+    "$SCRIPT_DIR/fixtures/zellij-tmux-smoke-config.kdl" > "$CONFIG_FILE"
+printf '%s\n' 'layout { pane; }' > "$ISOLATED_LAYOUT"
+ISOLATED_CONFIG_BEFORE="$(file_state "$CONFIG_FILE")"
+ISOLATED_LAYOUT_BEFORE="$(file_state "$ISOLATED_LAYOUT")"
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 "$REPO_ROOT/build.sh" >/dev/null
@@ -261,22 +269,6 @@ dismiss_startup_tip() {
     fail "Zellij startup tip did not close; foreign-tab key assertion would be inconclusive"
 }
 
-wait_for_candidate() {
-    local output="$1"
-    local attempt
-    for attempt in $(seq 1 160); do
-        zellij_session action list-panes --json --all --command --geometry --state --tab \
-            > "$output" 2>"$ROOT/candidate-panes.err" || true
-        if jq -e --arg wasm_url "$WASM_URL" \
-            'any(.[]; .is_plugin and .plugin_url == $wasm_url)' "$output" >/dev/null 2>&1; then
-            return
-        fi
-        sleep 0.05
-    done
-    cat "$ROOT/candidate-panes.err" >&2 || true
-    fail "literal Alt Shift z did not create a candidate Zaphod tab"
-}
-
 # A pre-granted plugin still receives PermissionRequestResult asynchronously.
 # Do not baseline the literal Alt / until its own visible tiled resident has
 # handled that result: otherwise is_selectable can settle during the key test
@@ -293,10 +285,10 @@ wait_for_settled_candidate_resident() {
         zellij_session action list-tabs --json --all --state --layout \
             > "$tabs" 2>"$ROOT/settled-candidate-tabs.err" || true
         tmux_command capture-pane -p -t "$TMUX_PANE" > "$screen" || true
-        if jq -e --arg wasm_url "$WASM_URL" \
-            'any(.[]; .is_plugin and .plugin_url == $wasm_url and .tab_name == "zaphod" and .is_floating == false and .is_suppressed == false and .pane_columns == 28 and .is_selectable == false)' \
+        if jq -e --arg wasm_url "$WASM_URL" --arg tab_id "$TAB_ID" \
+            'any(.[]; .is_plugin and .plugin_url == $wasm_url and (.tab_id | tostring) == $tab_id and .is_floating == false and .is_suppressed == false and .pane_columns == 28 and .is_selectable == false)' \
             "$panes" >/dev/null 2>&1 && \
-            jq -e 'any(.[]; .active and .name == "zaphod")' "$tabs" >/dev/null 2>&1 && \
+            jq -e --arg tab_id "$TAB_ID" 'any(.[]; .active and (.tab_id | tostring) == $tab_id)' "$tabs" >/dev/null 2>&1 && \
             ! grep -F 'asks permission to:' "$screen" >/dev/null && \
             grep -F 'PANES' "$screen" >/dev/null; then
             jq -S . "$panes" > "$panes.sorted"
@@ -308,41 +300,33 @@ wait_for_settled_candidate_resident() {
     done
     cat "$ROOT/settled-candidate-panes.err" >&2 || true
     cat "$ROOT/settled-candidate-tabs.err" >&2 || true
+    jq -S . "$panes" >&2 || true
+    jq -S . "$tabs" >&2 || true
+    sed -n '1,80p' "$screen" >&2 || true
     fail "candidate did not settle as the active tiled 28-column, non-selectable post-grant resident"
 }
 
-# First run the real entry script against a short-lived attached Zellij
-# session. This persists the checked config and selected absolute layout path.
-start_tmux_zellij
-wait_for_nonempty_panes "$ROOT/bootstrap-panes.json"
-env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
-    ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
-    "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod smoke bootstrap' \
-    > "$ROOT/entry.out"
-grep -F 'TAB_ID=' "$ROOT/entry.out" >/dev/null || fail "entry script did not create its bootstrap tab"
-grep -Fx "WASM_URL=$WASM_URL" "$ROOT/entry.out" >/dev/null ||
-    fail "entry script did not report the candidate WASM URL"
-
-# Native keybinds are read at server startup. Restart the disposable server so
-# the current tmux client exercises the persistent Alt Shift z and Alt / routes.
-# Zellij 0.44.3 can return "Session not found" after a successful forced
-# kill; tmux teardown below is the authoritative client cleanup.
-zellij_control delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
-tmux_command kill-server >/dev/null 2>&1 || true
+# Run the selected-checkout entry against a real attached client. The fixture
+# already has a fixed global Alt Shift z shortcut and fail-closed Alt / policy;
+# the direct command must create its own inline tab without changing either.
 start_tmux_zellij
 wait_for_nonempty_panes "$ROOT/foreign-ready.json"
 dismiss_startup_tip
-
-# The fresh native entry key must create exactly one tab whose visible and
-# native state both identify this checkout's candidate WASM.
+zellij_control setup --check >/dev/null
 capture_tabs "$ROOT/foreign-tabs-before.json"
 TAB_COUNT_BEFORE="$(jq -er 'length' "$ROOT/foreign-tabs-before.json")"
 capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreign-ready.screen"
 jq -e --arg wasm_url "$WASM_URL" \
     'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
-    fail "fresh server unexpectedly started on a candidate Zaphod tab"
-send_literal "$(printf '\033Z')"
-wait_for_candidate "$ROOT/candidate.json"
+    fail "isolated profile unexpectedly started on the selected checkout rail"
+env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
+    ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
+    "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
+    > "$ROOT/entry.out"
+TAB_ID="$(sed -n 's/^TAB_ID=//p' "$ROOT/entry.out")"
+[[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || fail "entry script did not report a stable tab ID"
+grep -Fx "WASM_URL=$WASM_URL" "$ROOT/entry.out" >/dev/null ||
+    fail "entry script did not report the candidate WASM URL"
 wait_for_settled_candidate_resident \
     "$ROOT/candidate-before.json" \
     "$ROOT/candidate-before.kdl" \
@@ -350,12 +334,13 @@ wait_for_settled_candidate_resident \
     "$ROOT/candidate-tabs-before.json"
 TAB_COUNT_AFTER="$(jq -er 'length' "$ROOT/candidate-tabs-before.json")"
 [ "$TAB_COUNT_AFTER" -eq "$((TAB_COUNT_BEFORE + 1))" ] ||
-    fail "literal Alt Shift z changed tab count from $TAB_COUNT_BEFORE to $TAB_COUNT_AFTER (expected one fresh tab)"
+    fail "direct entry changed tab count from $TAB_COUNT_BEFORE to $TAB_COUNT_AFTER (expected one fresh tab)"
 jq -e --arg wasm_url "$WASM_URL" \
-    'any(.[]; .is_plugin and .plugin_url == $wasm_url and .tab_name == "zaphod")' \
+    --arg tab_id "$TAB_ID" \
+    '([.[] | select(.is_plugin and .plugin_url == $wasm_url and (.tab_id | tostring) == $tab_id and .is_floating == false and .is_suppressed == false)] | length) == 1' \
     "$ROOT/candidate-before.json" >/dev/null || fail "candidate pane did not appear in the native Zellij state"
-jq -e 'any(.[]; .active and .name == "zaphod")' "$ROOT/candidate-tabs-before.json" >/dev/null ||
-    fail "literal Alt Shift z did not activate the candidate tab"
+jq -e --arg tab_id "$TAB_ID" 'any(.[]; .active and (.tab_id | tostring) == $tab_id)' \
+    "$ROOT/candidate-tabs-before.json" >/dev/null || fail "direct entry did not activate its stable-ID tab"
 grep -F "plugin location=\"$WASM_URL\"" "$ROOT/candidate-before.kdl" >/dev/null ||
     fail "candidate URL did not appear in the native Zellij layout dump"
 grep -F 'asks permission to:' "$ROOT/candidate-before.screen" >/dev/null &&
@@ -366,6 +351,12 @@ jq -e --arg wasm_url "$WASM_URL" \
     'any(.[]; .is_plugin and .plugin_url == $wasm_url and .is_selectable == false)' \
     "$ROOT/candidate-before.json" >/dev/null ||
     fail "candidate baseline was captured before its pre-granted permission result settled"
+[ "$(file_state "$CONFIG_FILE")" = "$ISOLATED_CONFIG_BEFORE" ] ||
+    fail "direct entry changed the isolated profile config"
+[ "$(file_state "$ISOLATED_LAYOUT")" = "$ISOLATED_LAYOUT_BEFORE" ] ||
+    fail "direct entry changed the isolated profile layout"
+find "$ROOT/tmp" -mindepth 1 -maxdepth 1 -name 'zaphod-new-tab.*' -print -quit | \
+    grep -q . && fail "direct entry left its rendered-layout temporary root"
 
 # A pre-authorized rail requests its runtime MessagePluginId route, but the
 # request's return value is not authorization. One literal key must be
