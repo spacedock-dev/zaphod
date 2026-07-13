@@ -256,3 +256,20 @@ disposable value, creates one inline tab, verifies the returned stable tab ID
 and exact WASM URL, and starts the existing private subscriber. Operator KDL
 remains byte-identical, global key policy remains global, and all focused,
 native, journey, quick-review, and completion-panel evidence passes.
+
+## Stage Report: validation
+
+- DONE: Verify stored Roborev parent 189 against the frozen merge-base..e238f7a range, current head, code_completion panel, required-member execution, PASS verdict, and recorded finding dispositions without rerunning the unchanged panel.
+  Parent `189` covers `3b27e202176740ed976aa94aa8aa7cc91ee66118..e238f7a90a62b068772742ccd5ac4a0fc6071727`; correctness `186`, journey `187`, and proof `188` each ran once and passed; parent PASS; quick dispositions `164`/`185` PASS.
+- DONE: Independently reproduce AC-1 through AC-4, including exact selected-WASM stable-tab state and byte-identical standing KDL across success, injected failures, and TERM using the isolated Zellij-in-tmux harness.
+  Focused shell `6/6` and the real tmux/Zellij smoke passed; native panes/tabs/layout showed exactly one tiled selected-WASM resident at the returned stable ID, and all isolated/standing hashes matched.
+- DONE: Run a throwaway-checkout refutation audit against false positives/negatives, cleanup, caller impact, and semantic drift; prepare the captain demo/gate artifact with explicit per-AC verdicts.
+  Wrong-tab same-URL and duplicate-target attacks failed closed, a correct target plus foreign duplicate passed, cleanup removed all disposable state, Rust passed `135/135`, and `gates/zellij-config-activation-validation.md` contains the direct-script-only demo.
+- SKIPPED: Exercise the operator's standing WORK profile or press Alt keys there.
+  The dispatch forbids both; the captain's deferred complex-layout Alt/chrome issue is outside fq's approved no-write entry scope.
+
+### Summary
+
+Fresh validation found no surviving defect at exact head `e238f7a`. Offline
+AC-1 through AC-4 pass independently, stored Roborev evidence is current and
+complete, and the gate is ready for the captain's direct-script-only demo.
