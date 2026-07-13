@@ -111,6 +111,8 @@ fi
 [ -f "$CONFIG_FILE" ] || fail "Zaphod config not found: $CONFIG_FILE"
 [ -f "$REPO_ROOT/layouts/zaphod.kdl" ] || fail "Zaphod layout template not found: $REPO_ROOT/layouts/zaphod.kdl"
 
+# Native Zellij validates the profile. Persistent key policy remains global
+# setup; this selected-checkout command does not parse, repair, or retarget it.
 zellij_cmd setup --check >/dev/null
 "$REPO_ROOT/build.sh"
 

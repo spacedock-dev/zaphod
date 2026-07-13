@@ -134,7 +134,9 @@ The command asks Zellij to validate the selected profile, builds this checkout,
 renders its canonical WASM URL into a disposable inline layout, and creates
 exactly one new tab. It does not parse, rewrite, stage, or restore the standing
 `config.kdl` or `layouts/zaphod.kdl`; failures and interruption leave both
-byte-identical. It never changes an existing tab.
+byte-identical. Persistent key policy, including `Alt /` and `Alt .`, remains
+global profile setup; the direct command neither validates nor retargets those
+routes. It never changes an existing tab.
 
 This direct command is also the current session-row entry point. After
 `new-tab` returns, it waits for native `list-panes` state to show exactly one
