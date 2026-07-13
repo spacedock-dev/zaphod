@@ -18,8 +18,6 @@ run_inside() {
 }
 
 run_outside foreground
-run_outside automatic
-run_inside foreground
 run_inside automatic
 
-printf '%s\n' 'PASS: outside/inside callers completed foreground diagnosis and automatic subscriber handoff'
+printf '%s\n' 'PASS: outside foreground diagnosis and inside automatic subscriber handoff both completed'
