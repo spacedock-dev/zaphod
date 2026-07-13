@@ -242,6 +242,19 @@ fn parse_agent_event(payload: &str) -> Result<AgentEvent, String> {
     serde_json::from_str(payload).map_err(|error| error.to_string())
 }
 
+fn apply_agent_snapshot(
+    sessions: &mut Vec<SessionEvent>,
+    gates: &mut Vec<GateEvent>,
+    payload: Option<&str>,
+) -> Result<bool, String> {
+    let payload = payload.ok_or_else(|| "missing snapshot payload".to_owned())?;
+    let events: Vec<AgentEvent> =
+        serde_json::from_str(payload).map_err(|error| error.to_string())?;
+    Ok(events.into_iter().fold(false, |changed, event| {
+        apply_agent_event(sessions, gates, event) || changed
+    }))
+}
+
 // Upserts one event into the rail's session/gate lists: sessions keyed by
 // id, gates by log_path, insertion order kept, no expiry (grout is one-shot
 // in sprint 0; lifecycle is sprint 1+). Returns whether stored state
@@ -683,15 +696,13 @@ impl ZellijPlugin for Sidebar {
             if !self.accepts_agent_event(&pipe_message.args) {
                 return false;
             }
-            let Some(payload) = pipe_message.payload.as_deref() else {
+            let Ok(changed) = apply_agent_snapshot(
+                &mut self.sessions,
+                &mut self.gates,
+                pipe_message.payload.as_deref(),
+            ) else {
                 return false;
             };
-            let Ok(events) = serde_json::from_str::<Vec<AgentEvent>>(payload) else {
-                return false;
-            };
-            let changed = events.into_iter().fold(false, |changed, event| {
-                apply_agent_event(&mut self.sessions, &mut self.gates, event) || changed
-            });
             if let PipeSource::Cli(pipe_id) = &pipe_message.source {
                 cli_pipe_output(pipe_id, "accepted");
             }
@@ -2505,6 +2516,15 @@ mod tests {
         message
     }
 
+    fn agent_snapshot(payload: Option<&str>, recipient_tab_id: &str) -> PipeMessage {
+        let mut message = agent_event(payload);
+        message.name = "agent-snapshot".to_owned();
+        message
+            .args
+            .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
+        message
+    }
+
     fn arm_agent_recipient(sidebar: &mut Sidebar, own_position: usize, tabs: &[TabInfo]) {
         sidebar.own_tab = Some(own_position);
         sidebar.own_floating = false;
@@ -2602,6 +2622,34 @@ mod tests {
         floating.own_floating = true;
         assert!(!floating.pipe(agent_event_for_tab(session_line(), "0")));
         assert!(floating.sessions.is_empty());
+    }
+
+    #[test]
+    fn agent_snapshot_requires_valid_payload_and_exact_recipient() {
+        let tabs = [
+            tab_info(1, 73, true, None, false),
+            tab_info(2, 81, false, None, false),
+        ];
+        let payload = format!("[{},{}]", session_line(), gate_line());
+        let mut target = Sidebar::default();
+        arm_agent_recipient(&mut target, 1, &tabs);
+        assert!(target.pipe(agent_snapshot(Some(&payload), "73")));
+        assert_eq!(target.sessions.len(), 1);
+        assert_eq!(target.gates.len(), 1);
+
+        for invalid in [None, Some("{not json"), Some(r#"{"kind":"session"}"#)] {
+            let mut rail = Sidebar::default();
+            arm_agent_recipient(&mut rail, 1, &tabs);
+            assert!(!rail.pipe(agent_snapshot(invalid, "73")));
+            assert!(rail.sessions.is_empty());
+            assert!(rail.gates.is_empty());
+        }
+
+        let mut foreign = Sidebar::default();
+        arm_agent_recipient(&mut foreign, 2, &tabs);
+        assert!(!foreign.pipe(agent_snapshot(Some(&payload), "73")));
+        assert!(foreign.sessions.is_empty());
+        assert!(foreign.gates.is_empty());
     }
 
     #[test]

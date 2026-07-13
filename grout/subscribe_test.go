@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ func fakeSubscriberZellij(t *testing.T, dir, log, panes string) string {
 	t.Helper()
 	panesPath := filepath.Join(dir, "panes.json")
 	readyPath := filepath.Join(dir, "recipient-ready")
+	snapshotPath := filepath.Join(dir, "snapshot.json")
 	if err := os.WriteFile(panesPath, []byte(panes), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +35,7 @@ func fakeSubscriberZellij(t *testing.T, dir, log, panes string) string {
 		"    case \"$*\" in *agent-event-ready*) : > "+readyPath+"; echo ready; exit 0 ;; esac\n"+
 		"    [ -f "+readyPath+" ] || exit 70\n"+
 		"    { echo \"$#\"; for value in \"$@\"; do printf '%s\\n' \"$value\"; done; } >> "+log+"\n"+
+		"    case \"$*\" in *agent-snapshot*) cat > "+snapshotPath+"; echo accepted; exit 0 ;; esac\n"+
 		"    echo accepted\n"+
 		"    exit 0\n"+
 		"  fi\n"+
@@ -135,6 +138,17 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	}
 	if got := lists.Load(); got != 2 {
 		t.Fatalf("source list count = %d, want initial plus data_changed refresh", got)
+	}
+	snapshotPayload, err := os.ReadFile(filepath.Join(dir, "snapshot.json"))
+	if err != nil {
+		t.Fatalf("initial snapshot stdin was not captured: %v", err)
+	}
+	var snapshot []SessionRow
+	if err := json.Unmarshal(snapshotPayload, &snapshot); err != nil {
+		t.Fatalf("initial snapshot stdin is not valid row JSON: %v", err)
+	}
+	if len(snapshot) != 1 || snapshot[0].ID != "session-1" || snapshot[0].Cwd != "/work/managed" {
+		t.Fatalf("initial snapshot = %#v, want exact managed session row", snapshot)
 	}
 
 	invs := readInvocations(t, argvLog)
