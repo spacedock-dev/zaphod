@@ -5,9 +5,9 @@ Candidate: `b3b003ab1608d95b475d8034e895fa7a516f044a` in
 
 ## Decision requested
 
-**Approve v3's offline validation and authorize the captain-owned post-merge
-`WORK` drill.** This approval says the stale-focus repair is safe to merge;
-the live drill remains the final interactive observation.
+**Run the captain-owned candidate `WORK` drill now; approve v3 to merge only
+if it passes.** Offline validation says the stale-focus repair is ready for
+that final interactive observation, not yet for merge.
 
 ## Independent proof
 
@@ -34,12 +34,12 @@ That proves the test catches the exact cycle-1 defect rather than merely
 exercising a happy path. The detached checkout and its temporary build output
 were removed.
 
-## Post-merge `WORK` drill
+## Candidate `WORK` drill — before gate approval
 
-From a terminal pane in `WORK`, after this candidate is merged to `main`:
+From a terminal pane in `WORK`, run the candidate worktree's entry command:
 
 ```bash
-cd /Users/clkao/git/zaphod
+cd /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-managed-tab-toggle-authorization
 ./scripts/zellij-new-tab.sh --session WORK --name 'Zaphod v3 drill'
 ```
 
@@ -53,6 +53,7 @@ candidate `zaphod_wasm_url`.
 
 ## Recommendation
 
-**Approve.** The repair removes the rejected stale-cache authorization source
-without broadening the mechanism; no custom PTY, lease, registry, controller,
-or further implementation cycle is warranted.
+**Approve to merge only if the observed candidate drill passes.** The repair
+removes the rejected stale-cache authorization source without broadening the
+mechanism; no custom PTY, lease, registry, controller, or further
+implementation cycle is warranted.
