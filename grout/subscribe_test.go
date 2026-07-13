@@ -43,6 +43,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
   {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":"/work/managed"},
   {"id":9,"tab_id":81,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":"/work/foreign"}
 ]`
+	zellij := fakeSubscriberZellij(t, dir, argvLog, panes)
 
 	changed := make(chan struct{})
 	connected := make(chan struct{})
@@ -80,7 +81,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	go func() {
 		errCh <- runSubscribe(ctx, SubscribeConfig{
 			ServerURL:         source.URL,
-			ZellijBin:         fakeSubscriberZellij(t, dir, argvLog, panes),
+			ZellijBin:         zellij,
 			ZellijConfigDir:   "/isolated/config",
 			ZellijConfigFile:  "/isolated/config/config.kdl",
 			ZellijDataDir:     "/isolated/data",
@@ -127,5 +128,35 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	}
 	if !strings.Contains(argv[len(argv)-1], `"cwd":"/work/managed"`) || !strings.Contains(argv[len(argv)-1], `"kind":"session"`) {
 		t.Fatalf("pipe payload = %s, want source session row", argv[len(argv)-1])
+	}
+}
+
+func TestSubscribeFailsClosedWhenItsVerifiedTargetIsGone(t *testing.T) {
+	dir := t.TempDir()
+	argvLog := filepath.Join(dir, "zellij-argv.log")
+	zellij := fakeSubscriberZellij(t, dir, argvLog, `[]`)
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("source request %q happened after target loss", r.URL.Path)
+		http.Error(w, "target should be checked first", http.StatusInternalServerError)
+	}))
+	defer source.Close()
+
+	err := runSubscribe(context.Background(), SubscribeConfig{
+		ServerURL:         source.URL,
+		ZellijBin:         zellij,
+		ZellijConfigDir:   "/isolated/config",
+		ZellijConfigFile:  "/isolated/config/config.kdl",
+		ZellijDataDir:     "/isolated/data",
+		ZellijSession:     "WORK",
+		TabID:             "73",
+		RailURL:           "file:/candidate/zellij-sidebar.wasm",
+		PipeTimeout:       time.Second,
+		SummaryClampBytes: 512,
+	}, nil)
+	if !errors.Is(err, ErrTargetLost) {
+		t.Fatalf("runSubscribe error = %v, want target-lost", err)
+	}
+	if _, err := os.Stat(argvLog); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target loss must not pipe or leave a pipe argv log: %v", err)
 	}
 }

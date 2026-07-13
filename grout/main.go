@@ -4,9 +4,15 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -69,16 +75,91 @@ func run(cfg Config, stderr io.Writer) error {
 	return nil
 }
 
+func subscribeUsage(stderr io.Writer) {
+	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL")
+}
+
+func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error) {
+	flags := flag.NewFlagSet("zaphod subscribe", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	server := flags.String("server", "", "AgentsView server URL")
+	zellijBin := flags.String("zellij-bin", "", "Zellij binary")
+	configDir := flags.String("zellij-config-dir", "", "Zellij config directory")
+	configFile := flags.String("zellij-config", "", "Zellij config file")
+	dataDir := flags.String("zellij-data-dir", "", "Zellij data directory")
+	session := flags.String("zellij-session", "", "Zellij session")
+	tabID := flags.String("tab-id", "", "stable Zellij tab ID")
+	railURL := flags.String("rail-url", "", "canonical sidebar WASM URL")
+	if err := flags.Parse(args); err != nil {
+		return SubscribeConfig{}, err
+	}
+	if flags.NArg() != 0 {
+		return SubscribeConfig{}, fmt.Errorf("subscribe accepts flags only")
+	}
+	missing := make([]string, 0, 8)
+	for _, flag := range []struct {
+		name  string
+		value string
+	}{
+		{"--server", *server},
+		{"--zellij-bin", *zellijBin},
+		{"--zellij-config-dir", *configDir},
+		{"--zellij-config", *configFile},
+		{"--zellij-data-dir", *dataDir},
+		{"--zellij-session", *session},
+		{"--tab-id", *tabID},
+		{"--rail-url", *railURL},
+	} {
+		if flag.value == "" {
+			missing = append(missing, flag.name)
+		}
+	}
+	if len(missing) > 0 {
+		return SubscribeConfig{}, fmt.Errorf("subscribe requires %s", strings.Join(missing, ", "))
+	}
+	return SubscribeConfig{
+		ServerURL:         *server,
+		ZellijBin:         *zellijBin,
+		ZellijConfigDir:   *configDir,
+		ZellijConfigFile:  *configFile,
+		ZellijDataDir:     *dataDir,
+		ZellijSession:     *session,
+		TabID:             *tabID,
+		RailURL:           *railURL,
+		PipeTimeout:       5 * time.Second,
+		SummaryClampBytes: 512,
+	}, nil
+}
+
+func runMain(args []string, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "subscribe" {
+		subscribeUsage(stderr)
+		return 2
+	}
+	cfg, err := parseSubscribeArgs(args[1:], stderr)
+	if err != nil {
+		if !errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintln(stderr, err)
+		}
+		subscribeUsage(stderr)
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := runSubscribe(ctx, cfg, stderr); err != nil {
+		switch {
+		case errors.Is(err, ErrTargetLost):
+			fmt.Fprintf(stderr, "target-lost: %v\n", err)
+		case errors.Is(err, ErrSourceEOF):
+			fmt.Fprintln(stderr, "source-eof")
+		default:
+			fmt.Fprintln(stderr, err)
+		}
+		return 1
+	}
+	return 0
+}
+
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: grout <session-id> <gate-log>")
-		os.Exit(2)
-	}
-	cfg := defaultConfig()
-	cfg.SessionID = os.Args[1]
-	cfg.GateLog = os.Args[2]
-	if err := run(cfg, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	os.Exit(runMain(os.Args[1:], os.Stderr))
 }

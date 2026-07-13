@@ -113,10 +113,16 @@ func (cfg SubscribeConfig) zellijArgs(command ...string) []string {
 // original stable server tab ID plus the exact canonical rail URL. A pane ID,
 // title, CWD, display position, or URL-only match cannot substitute for it.
 func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (targetSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return targetSnapshot{}, err
+	}
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--command", "--geometry", "--state", "--tab")
 	command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
 	output, err := command.Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return targetSnapshot{}, ctx.Err()
+		}
 		return targetSnapshot{}, fmt.Errorf("%w: native list-panes: %v", ErrTargetLost, err)
 	}
 	var panes []zellijPane
@@ -299,7 +305,14 @@ func runSubscribe(ctx context.Context, cfg SubscribeConfig, stderr io.Writer) er
 	}
 	client := &http.Client{}
 	if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
 		return err
 	}
-	return streamEvents(ctx, client, cfg, stableTabID, stderr)
+	err = streamEvents(ctx, client, cfg, stableTabID, stderr)
+	if ctx.Err() != nil {
+		return nil
+	}
+	return err
 }
