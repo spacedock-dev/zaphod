@@ -174,10 +174,11 @@ one fixed layout already named by the operator's global config; it does not
 select an arbitrary checkout and the direct script never repoints it. It also
 cannot safely start the subscriber because a native Zellij `Run` keybind
 materializes a helper pane.
-Named pipes remain session-wide broadcasts, so the rail accepts a session
-event only after a fresh `PaneUpdate` then `TabUpdate` maps its display
-position to the exact stable `recipient-tab-id`. CWD is used only after that
-check to focus a pane in the accepted rail.
+Zellij named pipes remain session-wide broadcasts. Direct entry therefore
+uses a versioned pipe name derived from its fresh recipient token. The rail
+also requires a fresh `PaneUpdate` followed by `TabUpdate` and the exact
+stable `recipient-tab-id`. CWD is used only after these checks to focus a pane
+in the accepted rail.
 
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail requests a temporary runtime `Alt /` route to its own already-running
@@ -197,6 +198,7 @@ Run the real-key boundary with:
 
 ```bash
 ./tests/zellij-tmux-smoke-test.sh
+ZAPHOD_PERMISSION_FIXTURE=upgrade ./tests/zellij-tmux-smoke-test.sh
 ./tests/zellij-two-rail-recipient-smoke-test.sh
 ```
 
@@ -216,11 +218,14 @@ real-key candidate check.
 On first normal launch, the pane shows a permission prompt
 (`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`,
 `ReadCliPipes`, `Reconfigure`, `RunCommands`) — focus it and approve once.
-Zellij's grant cache is keyed by the raw WASM path; the smoke harness
-redirects `HOME` to a temporary root and uses a deliberately pre-granted
-fixture, so it never writes the operator's cache or fakes consent with
-keystrokes. `ReadCliPipes` is used only for the direct-entry subscriber's
-private recipient, initial-snapshot, and accepted-row acknowledgments.
+Zellij's grant cache is keyed by the raw WASM path. By default, the smoke
+harness redirects `HOME` to a temporary root and uses a pre-granted fixture.
+Its `upgrade` mode seeds an old grant without `ReadCliPipes`, focuses the exact
+candidate pane, sends one literal `y` through the attached tmux client, and
+checks the expanded cache and normal session row. Neither mode writes the
+operator's cache. `ReadCliPipes` is used only for the direct-entry
+subscriber's private recipient, initial-snapshot, and accepted-row
+acknowledgments.
 `Reconfigure` changes only runtime keybinds; Zaphod does not save that route
 to disk. `RunCommands` is required only when a gate row floats `subspace-tui`.
 

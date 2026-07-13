@@ -66,6 +66,17 @@ state:
   to a sidebar-less foreign tab. Literal `Alt /` leaves its pane inventory,
   focus, layout, and candidate count byte-identical.
 
+Run the permission-cache upgrade boundary with:
+
+```bash
+ZAPHOD_PERMISSION_FIXTURE=upgrade ./tests/zellij-tmux-smoke-test.sh
+```
+
+This mode seeds the old grant set without `ReadCliPipes`, waits until the
+native prompt is visible in the focused candidate pane, and sends one literal
+`y`. It then requires the persisted `ReadCliPipes` grant and the same session
+row, layout, toggle, and cleanup checks as the pre-granted run.
+
 ## Tab-recipient smoke
 
 Run the companion two-rail check with:
@@ -75,12 +86,12 @@ Run the companion two-rail check with:
 ```
 
 It creates two rails in one isolated Zellij session with the same terminal
-CWD, obtains their native stable tab IDs, and sends one normal named-pipe
-broadcast addressed to one ID. Only the target rail may render the marker;
-the bystander stays active and remains unchanged. This tests the receiver's
-stable-tab admission rule rather than CWD, pane ID, title, or display
-position. It uses the same tmux-hosted boundary and native Zellij state—no
-custom PTY controller.
+CWD, obtains their native stable tab IDs, and sends one private, versioned
+named-pipe broadcast derived from the target's recipient token. Only the
+target rail may render the marker; the bystander stays active and remains
+unchanged. This tests both the private channel and the receiver's stable-tab
+admission rule rather than CWD, pane ID, title, or display position. It uses
+the same tmux-hosted boundary and native Zellij state—no custom PTY controller.
 
 For headless coverage, the script gives Zellij a disposable `HOME` and writes
 a deliberate pre-grant to its temporary permission cache. The cache key is the
