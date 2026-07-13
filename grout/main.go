@@ -1,12 +1,18 @@
-// ABOUTME: Grout sprint-0 skeleton — one-shot run that fetches one agentsview
-// ABOUTME: session, reads one gate log, and pipes both rows into zellij.
+// ABOUTME: Private native sidecar entry plus internal row-building seams.
+// ABOUTME: Only zaphod subscribe is executable; its target tuple is explicit.
 
 package main
 
 import (
+	"context"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 )
 
@@ -15,10 +21,35 @@ type Config struct {
 	SessionID         string        // required argv[1]
 	GateLog           string        // required argv[2]
 	ZellijBin         string        // "zellij"
-	ZellijSession     string        // "" = inherit env; non-empty sets ZELLIJ_SESSION_NAME on the child
+	ZellijConfigDir   string        // explicit Zellij profile root, when known
+	ZellijConfigFile  string        // explicit Zellij config file, when known
+	ZellijDataDir     string        // explicit Zellij data root, when known
+	ZellijSession     string        // explicit target session, when known
 	PipeName          string        // "agent-event" — protocol constant
 	PipeTimeout       time.Duration // 5 * time.Second — kill timer
 	SummaryClampBytes int           // 512
+}
+
+// startupSignal writes one short confirmation to the direct script's private
+// FIFO after this native process has successfully started. It is deliberately
+// not part of runSubscribe: a source or target failure after exec is terminal
+// sidecar lifecycle, not a failed host exec.
+func startupSignal(fd int) error {
+	if fd == -1 {
+		return nil
+	}
+	if fd < 3 {
+		return fmt.Errorf("startup fd must be 3 or greater")
+	}
+	file := os.NewFile(uintptr(fd), "zaphod-startup-signal")
+	if file == nil {
+		return fmt.Errorf("startup fd %d is unavailable", fd)
+	}
+	defer file.Close()
+	if _, err := io.WriteString(file, "ready\n"); err != nil {
+		return fmt.Errorf("startup signal: %w", err)
+	}
+	return nil
 }
 
 // defaultConfig carries only cwd-independent knobs. SessionID and GateLog have
@@ -66,16 +97,100 @@ func run(cfg Config, stderr io.Writer) error {
 	return nil
 }
 
+func subscribeUsage(stderr io.Writer) {
+	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL")
+}
+
+func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error) {
+	flags := flag.NewFlagSet("zaphod subscribe", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	server := flags.String("server", "", "AgentsView server URL")
+	zellijBin := flags.String("zellij-bin", "", "Zellij binary")
+	configDir := flags.String("zellij-config-dir", "", "Zellij config directory")
+	configFile := flags.String("zellij-config", "", "Zellij config file")
+	dataDir := flags.String("zellij-data-dir", "", "Zellij data directory")
+	session := flags.String("zellij-session", "", "Zellij session")
+	tabID := flags.String("tab-id", "", "stable Zellij tab ID")
+	railURL := flags.String("rail-url", "", "canonical sidebar WASM URL")
+	startupFD := flags.Int("startup-fd", -1, "private direct-script startup confirmation fd")
+	if err := flags.Parse(args); err != nil {
+		return SubscribeConfig{}, err
+	}
+	if flags.NArg() != 0 {
+		return SubscribeConfig{}, fmt.Errorf("subscribe accepts flags only")
+	}
+	missing := make([]string, 0, 8)
+	for _, flag := range []struct {
+		name  string
+		value string
+	}{
+		{"--server", *server},
+		{"--zellij-bin", *zellijBin},
+		{"--zellij-config-dir", *configDir},
+		{"--zellij-config", *configFile},
+		{"--zellij-data-dir", *dataDir},
+		{"--zellij-session", *session},
+		{"--tab-id", *tabID},
+		{"--rail-url", *railURL},
+	} {
+		if flag.value == "" {
+			missing = append(missing, flag.name)
+		}
+	}
+	if len(missing) > 0 {
+		return SubscribeConfig{}, fmt.Errorf("subscribe requires %s", strings.Join(missing, ", "))
+	}
+	if *startupFD < -1 || (*startupFD >= 0 && *startupFD < 3) {
+		return SubscribeConfig{}, fmt.Errorf("subscribe startup fd must be 3 or greater")
+	}
+	return SubscribeConfig{
+		ServerURL:         *server,
+		ZellijBin:         *zellijBin,
+		ZellijConfigDir:   *configDir,
+		ZellijConfigFile:  *configFile,
+		ZellijDataDir:     *dataDir,
+		ZellijSession:     *session,
+		TabID:             *tabID,
+		RailURL:           *railURL,
+		StartupFD:         *startupFD,
+		PipeTimeout:       5 * time.Second,
+		SummaryClampBytes: 512,
+	}, nil
+}
+
+func runMain(args []string, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "subscribe" {
+		subscribeUsage(stderr)
+		return 2
+	}
+	cfg, err := parseSubscribeArgs(args[1:], stderr)
+	if err != nil {
+		if !errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintln(stderr, err)
+		}
+		subscribeUsage(stderr)
+		return 2
+	}
+	if err := startupSignal(cfg.StartupFD); err != nil {
+		fmt.Fprintf(stderr, "sidecar startup signal failed: %v\n", err)
+		return 1
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := runSubscribe(ctx, cfg, stderr); err != nil {
+		switch {
+		case errors.Is(err, ErrTargetLost):
+			fmt.Fprintf(stderr, "target-lost: %v\n", err)
+		case errors.Is(err, ErrSourceEOF):
+			fmt.Fprintln(stderr, "source-eof")
+		default:
+			fmt.Fprintln(stderr, err)
+		}
+		return 1
+	}
+	return 0
+}
+
 func main() {
-	if len(os.Args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: grout <session-id> <gate-log>")
-		os.Exit(2)
-	}
-	cfg := defaultConfig()
-	cfg.SessionID = os.Args[1]
-	cfg.GateLog = os.Args[2]
-	if err := run(cfg, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	os.Exit(runMain(os.Args[1:], os.Stderr))
 }

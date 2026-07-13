@@ -36,13 +36,16 @@ tab and what does it want from me?**
   rearranged in place, never spawned or hidden, and a manually re-split tab
   keeps its arrangement (the swap set is regenerated from the live layout)
 - Per-tab instances that toggle independently
-- **Agent & gate rows**: a companion `grout` process pipes `agent-event`
-  rows into the rail — agent sessions with state (blocked / working /
-  idle / done, mapped from agentsview status + activity), and pending gate
-  decisions. Click a session row to focus its cwd-bound pane (unbound is
-  shown, never guessed); click a gate row to float `subspace-tui` on the
-  gate's artifact with `--log` pointed at its decision log. Requires the
-  `RunCommands` permission (prompted once)
+- **Tab-bound session rows**: `scripts/zellij-new-tab.sh` creates a fresh
+  managed tab, verifies its resident rail, and privately starts the
+  checkout-local subscriber. It projects AgentsView session state (blocked /
+  working / idle / done) into that rail only; a click focuses one exact
+  cwd-bound terminal and leaves zero or multiple matches unbound.
+- **Gate rows**: the rail can display pending decisions and float
+  `subspace-tui` on a gate artifact with `--log` pointed at its decision log.
+  Gate delivery is separate from the first tab-bound session subscriber.
+  Floating the review tool requires the `RunCommands` permission (prompted
+  once).
 
 ## Build
 
@@ -52,10 +55,13 @@ Requires a Rust toolchain with the `wasm32-wasip1` target
 ```bash
 ./build.sh
 # → target/wasm32-wasip1/release/zellij-sidebar.wasm
+# → target/zaphod
 ```
 
 `build.sh` pins rustup's `rustc` explicitly because a homebrew Rust earlier
 on `PATH` lacks the wasm std and fails with `can't find crate for core`.
+The second artifact is an internal native sidecar; it is not an installed
+command or a second launcher.
 
 ## Usage
 
@@ -131,6 +137,29 @@ It never changes an existing tab. The absolute path matters: Zellij resolves
 the named `layout "zaphod"` form from its standing default config root, even
 when the session was launched with an isolated config root.
 
+This direct command is also the current session-row entry point. After
+`new-tab` returns, it waits for native `list-panes` state to show exactly one
+tiled, non-suppressed Zaphod rail with the returned stable tab ID and this
+checkout's canonical WASM URL. Only then does it start one private
+`target/zaphod subscribe` process with the same Zellij profile and session.
+The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
+`--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
+Do not run the sidecar yourself.
+
+If that exact rail never appears, the command reports
+`sidecar-target-unready`, starts no sidecar, and preserves the newly created
+tab for inspection. After it starts, target-tab loss, a delivered SIGINT or
+SIGTERM, source EOF, or a source failure ends the sidecar. It does not
+restart, retarget, or clean up AgentsView, Zellij sessions, tabs, panes, or
+plugins.
+
+`Alt Shift z` remains a tab-only shortcut. It cannot safely start the
+subscriber because a native Zellij `Run` keybind materializes a helper pane.
+Named pipes remain session-wide broadcasts, so the rail accepts a session
+event only after a fresh `PaneUpdate` then `TabUpdate` maps its display
+position to the exact stable `recipient-tab-id`. CWD is used only after that
+check to focus a pane in the accepted rail.
+
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail requests a temporary runtime `Alt /` route to its own already-running
 plugin; the persistent binding remains `NoOp`. `reconfigure()` has no
@@ -149,9 +178,12 @@ Run the real-key boundary with:
 
 ```bash
 ./tests/zellij-tmux-smoke-test.sh
+./tests/zellij-two-rail-recipient-smoke-test.sh
 ```
 
-It is the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
+They use the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
+The second test proves that a stable-tab recipient reaches only its target
+rail even when a bystander rail has the same terminal CWD.
 
 ### Historical worktree profile
 
@@ -174,9 +206,11 @@ changes only runtime keybinds; Zaphod does not save that route to disk.
 ## Status
 
 Working prototype (zellij 0.44.3): per-tab toggle, click/keyboard switching,
-plugin-local agent awareness, state/status lines, and docked/sliver toggle.
-Create a rail with `scripts/zellij-new-tab.sh` or the initialized `Alt Shift z`
-binding. `Alt /` never creates or retrofits a tab.
+plugin-local agent awareness, tab-bound session rows from the direct script,
+state/status lines, and docked/sliver toggle. Create a rail with
+`scripts/zellij-new-tab.sh` or the initialized `Alt Shift z` binding; use the
+direct script when session rows are wanted. `Alt /` never creates or
+retrofits a tab.
 
 [SPEC.md](SPEC.md) records the shipped prototype and its numbered Zellij
 plugin landmines, including the historical rebuild guidance. For the evergreen

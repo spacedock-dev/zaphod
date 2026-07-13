@@ -10,7 +10,7 @@ source "$SCRIPT_DIR/zellij-layout-lib.sh"
 
 usage() {
     cat >&2 <<EOF
-usage: $0 [--session NAME] [--name NAME]
+usage: $0 [--session NAME] [--name NAME] [--agentsview-url URL]
 
 Create one fresh Zaphod tab in NAME (or \$ZELLIJ_SESSION_NAME).
 EOF
@@ -24,6 +24,7 @@ fail() {
 
 SESSION_NAME="${ZELLIJ_SESSION_NAME:-}"
 TAB_NAME="Zaphod"
+AGENTSVIEW_URL="${ZAPHOD_AGENTSVIEW_URL:-http://127.0.0.1:8080}"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --session)
@@ -34,6 +35,11 @@ while [ "$#" -gt 0 ]; do
         --name)
             [ "$#" -ge 2 ] || usage
             TAB_NAME="$2"
+            shift 2
+            ;;
+        --agentsview-url)
+            [ "$#" -ge 2 ] || usage
+            AGENTSVIEW_URL="$2"
             shift 2
             ;;
         --help|-h)
@@ -65,18 +71,19 @@ DATA_DIR="${ZELLIJ_DATA_DIR:-$(default_zellij_data_dir)}"
 CONFIG_DIR="$(dirname "$CONFIG_FILE")"
 LAYOUT_DIR="$ZELLIJ_ROOT/layouts"
 TARGET_LAYOUT="$LAYOUT_DIR/zaphod.kdl"
+ZELLIJ_BIN="${ZELLIJ_BIN:-zellij}"
 
 ZELLIJ_ARGS=(--config-dir "$ZELLIJ_ROOT" --config "$CONFIG_FILE")
 ZELLIJ_ARGS+=(--data-dir "$DATA_DIR")
 
 zellij_cmd() {
-    zellij "${ZELLIJ_ARGS[@]}" "$@"
+    "$ZELLIJ_BIN" "${ZELLIJ_ARGS[@]}" "$@"
 }
 
 zellij_check_config() {
     local config_file="$1"
     local args=(--config-dir "$ZELLIJ_ROOT" --config "$config_file" --data-dir "$DATA_DIR")
-    zellij "${args[@]}" setup --check >/dev/null
+    "$ZELLIJ_BIN" "${args[@]}" setup --check >/dev/null
 }
 
 TEMP_ROOT=""
@@ -86,6 +93,7 @@ CONFIG_BACKUP=""
 LAYOUT_BACKUP=""
 HAD_LAYOUT=0
 ROLLBACK_NEEDED=0
+SIDECAR_START_FIFO=""
 
 cleanup() {
     local original_status=$?
@@ -108,6 +116,7 @@ cleanup() {
     [ -z "$LAYOUT_TEMP" ] || rm -f "$LAYOUT_TEMP" || cleanup_status=1
     [ -z "$CONFIG_BACKUP" ] || rm -f "$CONFIG_BACKUP" || cleanup_status=1
     [ -z "$LAYOUT_BACKUP" ] || rm -f "$LAYOUT_BACKUP" || cleanup_status=1
+    [ -z "$SIDECAR_START_FIFO" ] || rm -f "$SIDECAR_START_FIFO" || cleanup_status=1
     [ -z "$TEMP_ROOT" ] || rm -rf "$TEMP_ROOT" || cleanup_status=1
     if [ "$cleanup_status" -ne 0 ]; then
         echo "failed to clean up or roll back Zaphod activation" >&2
@@ -121,9 +130,11 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-if ! command -v zellij >/dev/null 2>&1; then
+if ! command -v "$ZELLIJ_BIN" >/dev/null 2>&1; then
     fail "zellij 0.44.3 is required"
 fi
+command -v jq >/dev/null 2>&1 ||
+    fail "jq is required to verify the fresh managed tab"
 VERSION="$(zellij_cmd --version)" || exit $?
 if [ "$VERSION" != "zellij 0.44.3" ]; then
     fail "zellij 0.44.3 is required; found $VERSION"
@@ -137,10 +148,78 @@ zellij_cmd setup --check >/dev/null
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 [ -f "$WASM_PATH" ] || fail "wasm not found after build: $WASM_PATH"
+SIDECAR_PATH="$REPO_ROOT/target/zaphod"
+[ -x "$SIDECAR_PATH" ] || fail "zaphod sidecar not found after build: $SIDECAR_PATH"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive a canonical URL for $WASM_PATH"
 LAYOUT_PATH_KDL="$(zaphod_kdl_escape "$TARGET_LAYOUT")" ||
     fail "could not derive a KDL-safe path for $TARGET_LAYOUT"
+
+sidecar_target_ready() {
+    local panes candidate_count
+    panes="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+        action list-panes --json --all --command --geometry --state --tab 2>/dev/null)" ||
+        return 1
+    candidate_count="$(printf '%s' "$panes" | jq -er \
+        --arg tab_id "$TAB_ID" \
+        --arg wasm_url "$WASM_URL" \
+        '[.[] | select(
+            ((.tab_id | tostring) == $tab_id)
+            and .is_plugin == true
+            and .plugin_url == $wasm_url
+            and .is_floating == false
+            and .is_suppressed == false
+        )] | length' 2>/dev/null)" || return 1
+    [ "$candidate_count" = "1" ]
+}
+
+wait_for_sidecar_target() {
+    local attempt
+    for attempt in $(seq 1 80); do
+        sidecar_target_ready && return 0
+        sleep 0.05
+    done
+    return 1
+}
+
+start_private_sidecar() {
+    local start_status startup_message startup_status
+    mkdir -p "$DATA_DIR" ||
+        fail "sidecar-start-failed: could not create private sidecar directory"
+    SIDECAR_LOG="$(mktemp "$DATA_DIR/zaphod-sidecar.XXXXXX")" ||
+        fail "sidecar-start-failed: could not create private sidecar log"
+    SIDECAR_START_FIFO="$(mktemp "$DATA_DIR/zaphod-sidecar-start.XXXXXX")" ||
+        fail "sidecar-start-failed: could not create private sidecar startup path"
+    rm -f "$SIDECAR_START_FIFO"
+    mkfifo "$SIDECAR_START_FIFO" ||
+        fail "sidecar-start-failed: could not create private sidecar startup path"
+    set +e
+    nohup "$SIDECAR_PATH" subscribe \
+        --server "$AGENTSVIEW_URL" \
+        --zellij-bin "$ZELLIJ_BIN" \
+        --zellij-config-dir "$ZELLIJ_ROOT" \
+        --zellij-config "$CONFIG_FILE" \
+        --zellij-data-dir "$DATA_DIR" \
+        --zellij-session "$SESSION_NAME" \
+        --tab-id "$TAB_ID" \
+        --rail-url "$WASM_URL" \
+        --startup-fd 3 \
+        3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
+    start_status=$?
+    set -e
+    if [ "$start_status" -ne 0 ]; then
+        fail "sidecar-start-failed: could not launch private zaphod sidecar"
+    fi
+    set +e
+    IFS= read -r -t 2 startup_message < "$SIDECAR_START_FIFO"
+    startup_status=$?
+    set -e
+    rm -f "$SIDECAR_START_FIFO"
+    SIDECAR_START_FIFO=""
+    if [ "$startup_status" -ne 0 ] || [ "$startup_message" != "ready" ]; then
+        fail "sidecar-start-failed: private zaphod sidecar did not exec"
+    fi
+}
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
     fail "could not create a temporary Zaphod layout directory"
@@ -201,5 +280,11 @@ ROLLBACK_NEEDED=0
 rm -f "$CONFIG_BACKUP" "$LAYOUT_BACKUP"
 CONFIG_BACKUP=""
 LAYOUT_BACKUP=""
+if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || ! wait_for_sidecar_target; then
+    echo "sidecar-target-unready" >&2
+    exit 1
+fi
+start_private_sidecar
 printf 'TAB_ID=%s\n' "$TAB_ID"
 printf 'WASM_URL=%s\n' "$WASM_URL"
+printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
