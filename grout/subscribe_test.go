@@ -414,7 +414,7 @@ func TestSubscribeDoesNotSignalBetweenTokenPendingAndActivityPublication(t *test
 	}
 }
 
-func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
+func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) {
 	dir := t.TempDir()
 	argvLog := filepath.Join(dir, "zellij-argv.log")
 	const railURL = "file:/candidate/zellij-sidebar.wasm"
@@ -423,7 +423,28 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
   {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":null},
   {"id":9,"tab_id":81,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":"/work/foreign"}
 	]`
-	zellij := fakeSubscriberZellij(t, dir, argvLog, panes)
+	panesPath := filepath.Join(dir, "panes.json")
+	readyPath := filepath.Join(dir, "recipient-ready")
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	injectMalformed := filepath.Join(dir, "inject-malformed")
+	injected := filepath.Join(dir, "malformed-injected")
+	if err := os.WriteFile(panesPath, []byte(panes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"for arg in \"$@\"; do\n"+
+		"  if [ \"$arg\" = list-panes ]; then\n"+
+		"    if [ -e "+injectMalformed+" ] && mkdir "+injected+" 2>/dev/null; then printf 'layout { pane; }\\n'; exit 0; fi\n"+
+		"    cat "+panesPath+"; exit 0\n"+
+		"  fi\n"+
+		"  if [ \"$arg\" = pipe ]; then\n"+
+		"    case \"$*\" in *zaphod-agent-v1-*-ready*) : > "+readyPath+"; echo ready; exit 0 ;; esac\n"+
+		"    [ -f "+readyPath+" ] || exit 70\n"+
+		"    { echo \"$#\"; for value in \"$@\"; do printf '%s\\n' \"$value\"; done; } >> "+argvLog+"\n"+
+		"    case \"$*\" in *zaphod-agent-v1-*-snapshot*) cat > "+snapshotPath+"; echo accepted; exit 0 ;; esac\n"+
+		"    echo accepted; exit 0\n"+
+		"  fi\n"+
+		"done\nexit 64\n")
 	startupReader, startupWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -449,8 +470,11 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/sessions":
 			w.Header().Set("Content-Type", "application/json")
-			lists.Add(1)
-			fmt.Fprint(w, `{"sessions":[{"id":"session-1","cwd":"/work/managed","agent":"codex","termination_status":"awaiting_user","first_message":"needs review","created_at":"2026-07-13T00:00:00Z"}]}`)
+			if lists.Add(1) == 1 {
+				fmt.Fprint(w, `{"sessions":[{"id":"session-1","cwd":"/work/managed","agent":"codex","termination_status":"awaiting_user","first_message":"initial marker","created_at":"2026-07-13T00:00:00Z"}]}`)
+			} else {
+				fmt.Fprint(w, `{"sessions":[{"id":"session-2","cwd":"/work/managed","agent":"codex","termination_status":"awaiting_user","first_message":"fq-second-marker","created_at":"2026-07-14T00:00:00Z"}]}`)
+			}
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			flusher, ok := w.(http.Flusher)
@@ -462,6 +486,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 			<-changed
 			fmt.Fprint(w, "event: data_changed\ndata: {\"scope\":\"sessions\"}\n\n")
 			flusher.Flush()
+			<-r.Context().Done()
 		default:
 			t.Errorf("unexpected source path %q", r.URL.Path)
 			http.NotFound(w, r)
@@ -504,9 +529,30 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 		close(changed)
 		t.Fatal("subscriber never signaled stream readiness")
 	}
+	if err := os.WriteFile(injectMalformed, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	close(changed)
-	if err := <-errCh; !errors.Is(err, ErrSourceEOF) {
-		t.Fatalf("runSubscribe error = %v, want source EOF", err)
+	var eventLog []byte
+	for attempt := 0; attempt < 100; attempt++ {
+		select {
+		case err := <-errCh:
+			t.Fatalf("subscriber exited before second marked session: %v", err)
+		default:
+		}
+		eventLog, _ = os.ReadFile(argvLog)
+		if strings.Contains(string(eventLog), "fq-second-marker") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(string(eventLog), "fq-second-marker") {
+		t.Fatalf("second marked session was not delivered: %q", eventLog)
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("subscriber exited after second marked session: %v", err)
+	default:
 	}
 	if got := lists.Load(); got != 2 {
 		t.Fatalf("source list count = %d, want initial plus data_changed refresh", got)
@@ -546,8 +592,15 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	if strings.Contains(strings.Join(argv, "\x00"), "--plugin") {
 		t.Fatalf("pipe argv unexpectedly names a plugin: %q", argv)
 	}
-	if !strings.Contains(argv[len(argv)-1], `"cwd":"/work/managed"`) || !strings.Contains(argv[len(argv)-1], `"kind":"session"`) {
+	if !strings.Contains(argv[len(argv)-1], `"id":"session-2"`) ||
+		!strings.Contains(argv[len(argv)-1], `"summary":"fq-second-marker"`) ||
+		!strings.Contains(argv[len(argv)-1], `"cwd":"/work/managed"`) ||
+		!strings.Contains(argv[len(argv)-1], `"kind":"session"`) {
 		t.Fatalf("pipe payload = %s, want source session row", argv[len(argv)-1])
+	}
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("subscriber cancellation = %v", err)
 	}
 }
 
@@ -662,6 +715,37 @@ func TestProbeTargetMalformedErrorPreservesBoundedNativeReplyProvenance(t *testi
 	}
 	if strings.Contains(message, strings.Repeat("x", 257)) {
 		t.Fatalf("malformed error leaked unbounded stdout: %q", message)
+	}
+}
+
+func TestProbeTargetPersistentLayoutReplyFailsAfterBoundedRetries(t *testing.T) {
+	dir := t.TempDir()
+	attempts := filepath.Join(dir, "attempts")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"printf x >> "+attempts+"\n"+
+		"printf 'layout { pane; }\\n'\n")
+	_, err := probeTarget(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "WORK", RailURL: "file:/candidate/zellij-sidebar.wasm",
+		CheckoutCWD: "/work/managed",
+	}, 73)
+	if !errors.Is(err, ErrTargetLost) {
+		t.Fatalf("persistent layout reply error = %v, want target-lost", err)
+	}
+	for _, want := range []string{
+		"malformed native pane state", "command=list-panes", "attempt=3/3",
+		`stdout_prefix="layout { pane; }\n"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("persistent layout reply error = %q, want %q", err, want)
+		}
+	}
+	got, readErr := os.ReadFile(attempts)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != "xxx" {
+		t.Fatalf("list-panes attempts = %q, want three bounded attempts", got)
 	}
 }
 
