@@ -139,6 +139,41 @@ strict TDD, one behavior per commit.
 - **Good:** the red test fails for the predicted reason before the fix; the smallest reasonable diff; surrounding style matched; new dump fixtures use zellij's real single-line shape.
 - **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; launching `code_completion` while the exact-tip `quick` review is pending or has an unresolved Medium-or-higher finding; treating `quick` as the implementation-exit verdict; using `roborev fix`, `roborev refine`, or the Roborev agent hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the task has been handed to validation — confirm no pending round-trip before advancing.
 
+Before requesting review, implementation MUST perform one semantic adversarial
+pass over the changed behavior:
+
+- Trace each changed value or event through every representation and lifecycle
+  phase. Check exact identity, cardinality, order, bytes, attribution,
+  authority, and terminal state — not only field presence or counts.
+- Build a compact matrix of adjacent variants: empty and terminal states,
+  repeated or out-of-order events, every input path, and relevant Unicode,
+  EOF, size, visibility, and layout boundaries. Verify one invariant across
+  the matrix.
+- When validating an existing format or protocol, use its canonical validator
+  when possible. Otherwise validate the complete record atomically; do not add
+  validation one field or failure case at a time.
+- Inspect changed hot paths and readers for multiplicative work, blocking I/O,
+  unbounded allocation, and implicit size limits. Add one scaling or
+  over-limit test when that risk exists.
+- Ask, "How could this test pass while the observable behavior is wrong?"
+  Assert the exact result and the failure or cleanup behavior that
+  distinguishes it.
+
+When the change crosses an asynchronous boundary — a process launch, stream,
+queue, callback, or cross-pane delivery — the pass also names the owner, exact
+recipient identity, positive acknowledgment, independent deadline,
+cancellation path, cleanup obligation, and treatment of events arriving during
+handoff. Readiness cannot precede acceptance of every required initial value by
+the intended recipient or resolution of activity observed before the readiness
+boundary. Each named boundary gets an adversarial test.
+
+When feedback changes the operator-visible end value or crosses a recorded
+out-of-scope boundary, the FO updates the durable task contract and regenerates
+the implementation dispatch before reuse. The update states the new end value,
+the superseded constraint, permitted scope, acceptance proof, and unchanged
+boundaries; conversational feedback does not implicitly rewrite the approved
+design.
+
 After the final candidate commit, implementation MUST run `roborev wait HEAD`
 for that commit's existing post-commit `quick` review. A Medium-or-higher
 finding blocks the expensive panel. Disposition it as `fix`, `rebut`, or
