@@ -288,3 +288,51 @@ complete, and the gate is ready for the captain's direct-script-only demo.
   chat against a real AgentsView-backed agent session, without pressing Alt
   keys or changing standing config/layout, then return it to the same validator
   for independent review and a new gate.
+
+## Stage Report: implementation addendum (review-convergence pause)
+
+- DONE: Freeze the revised implementation at
+  `234ed30ef8aa916b8d2311486907a57513123b71` without absorbing the unrelated
+  main-branch review-policy documentation change. The product worktree is
+  clean and no further code_completion panel was launched after the captain's
+  convergence pause.
+- DONE: Close every exact-tip quick-review finding and preserve the evidence.
+  Quick `419` identified an overall recipient-deadline overrun and quick `428`
+  identified descendant-held stdout after cancellation; both received focused
+  regressions and fixes. Exact-tip quick `430` reviewed frozen head `234ed30`
+  and passed with no findings.
+- DONE: Re-run the full local and live evidence at the frozen head.
+  `go test ./...`, `go vet ./...`, focused readiness/recipient cases repeated
+  ten times, Rust `cargo test` (136/136), `cargo check --tests`, the entry suite
+  (9/9), shell/doc syntax checks, and the `main...HEAD` diff check all passed.
+  The real tmux-hosted fresh-entry smoke and real two-rail stable-recipient
+  smoke also passed, with disposable cleanup.
+- DONE: Preserve the release-blocking invariants in the revised path.
+  Direct inline tab creation does not mutate standing KDL; stable tab plus
+  per-entry token prevents cross-rail delivery; readiness requires recipient
+  and snapshot acknowledgement, catch-up, and a quiet boundary spanning body
+  read, split, scanned, and consumed state. Source EOF/error blocks readiness,
+  startup bounds include descendant-held stdout, failure/TERM reaps the managed
+  sidecar, and tuple handoff must complete.
+- DONE: Record the convergence disposition honestly.
+  There are no known unresolved findings from exact-tip quick, local, or live
+  evidence. Prior panel `406` findings are closed in code/tests, but panel
+  consensus was deliberately not refreshed under the captain's pause.
+- FOLLOW-UP: When authorized, rerun code_completion on exact frozen head
+  `234ed30`; acceptance is all required members PASS with the reviewed ref
+  resolving to that head.
+- FOLLOW-UP: Optionally harden descendant lifecycle cleanup with a fixture that
+  backgrounds a long-lived process and records its PID; acceptance is bounded
+  return plus proof that the recorded descendant is no longer alive.
+- FOLLOW-UP: Optionally run an interactive permission drill in pristine Zellij
+  config/data directories; acceptance is approving ReadCliPipes within 18
+  seconds and observing baseline and post-baseline AgentsView markers without
+  a manual sidecar or standing writes.
+
+### Summary
+
+The revised implementation is frozen at `234ed30`, exact-tip quick `430` and
+all local/live checks pass, and no unresolved implementation finding is known.
+Broader terminal/OS permutations, the optional detached-descendant reap, and
+the pristine interactive permission drill remain bounded follow-ups pending
+captain disposition; no new completion panel was started during the pause.
