@@ -472,3 +472,61 @@ on the verified rail, survives redraw races, and leaves standing KDL unchanged.
 The three panel-497 findings are fixed with independent red/green commits.
 Readiness and target identity remain fail closed, while tokenless installed
 rails avoid the direct-entry-only CLI-pipe permission.
+
+## Stage Report: implementation (cycle 4)
+
+- DONE: Preserve bounded provenance for malformed native pane replies.
+  The failed live sidecar log contained only `invalid character 'l'`; its raw
+  reply was not retained. Zellij logged a concurrent dump-layout timeout, so a
+  delayed `layout {…}` reply is evidence-backed but remains an inference.
+- DONE: Add command, attempt, byte length, and escaped stdout/stderr prefixes.
+  Red `55a8cc4`: `malformed error = "target-lost: malformed native pane state:
+  invalid character 'l' looking for beginning of value", want provenance
+  "command=list-panes"`; green `02d04ae` bounds each prefix to 256 bytes.
+- DONE: Reproduce the post-readiness refresh exit across the full Go lifecycle.
+  Red `928093a`: `subscriber exited before second marked session: target-lost:
+  malformed native pane state: invalid character 'l' looking for beginning of
+  value; command=list-panes attempt=1/3 stdout_len=17
+  stdout_prefix="layout { pane; }\n" stderr_len=0 stderr_prefix=""`.
+- DONE: Retry only the observed complete wrong-action record.
+  Green `5926931` recognizes bounded UTF-8 output beginning `layout {` and
+  ending `}`, retries at most three times, and never accepts it as pane JSON.
+- DONE: Keep persistent and unrelated malformed replies fail closed.
+  The persistent-layout regression requires `attempt=3/3`; the existing
+  oversized layout-prefix-plus-garbage case still fails on attempt one, while
+  command failure, cancellation, persistent empty inventory, and tuple loss
+  retain their terminal paths.
+- DONE: Make successful recovery observable rather than swallowing evidence.
+  Red `f33e67a`: `surviving transient diagnostic = "", want
+  "transient-native-pane-reply"`; green `976faba` writes the same bounded
+  provenance to the sidecar diagnostic stream before retrying.
+- DONE: Prove `data_changed -> refresh -> plugin delivery` with a second row.
+  The integrated test injects one layout reply, then delivers session 2 with
+  `fq-second-marker`, asserts the exact private stable-tab/token pipe tuple,
+  and proves the subscriber remains alive until owned cancellation.
+- DONE: Validate a foreground diagnostic before automatic handoff.
+  The first disposable run exposed a missing isolated socket environment with
+  bounded ANSI/session-list provenance; after correcting the harness, direct
+  `target/zaphod subscribe` rendered `SMOKE_INITIAL_ROW`, then
+  `SMOKE_SECOND_ROW`, and stayed alive.
+- DONE: Validate the production direct-entry handoff on the same lifecycle.
+  `tests/zellij-subscription-lifecycle-smoke-test.sh` runs foreground then
+  automatic modes; both passed with distinct rows, live PIDs, routing checks,
+  standing-KDL preservation, and complete disposable cleanup.
+- DONE: Complete exact-head native and entry verification at `25d950c`.
+  Go test/vet passed; Rust passed 138/138 plus `cargo check --tests`; entry
+  passed 9/9; artifact, permission-upgrade, and two-rail smokes all passed.
+- DONE: Preserve operator-owned KDL.
+  Config hash is `8ce2a42d...a196`; layout hash is `f1004741...d6e`.
+- DONE: Clear the authorized exact-tip quick gate and stop at the boundary.
+  Quick parent `715` reviewed exact head `25d950ca08ccff935b214933291fa9ecf569761e`,
+  panel `quick`, member `714` ran once and passed, parent verdict PASS, no
+  findings. Per captain dispatch, no new `code_completion` panel was launched.
+
+### Summary
+
+The sidecar now survives only the evidenced complete layout-reply misroute,
+records bounded diagnostics even when recovery succeeds, refreshes and renders
+the second indexed session, and remains fail closed for persistent malformed
+state and real target loss. Foreground diagnosis and automatic handoff both
+pass in isolated real Zellij/tmux sessions without changing standing KDL.
