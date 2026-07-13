@@ -55,6 +55,8 @@ type SubscribeConfig struct {
 	beforeReadinessCheck func()
 	afterRead            func(int, error)
 	beforeNextScan       func()
+	beforeLineSend       func()
+	beforeSplit          func()
 }
 
 type zellijPane struct {
@@ -77,6 +79,7 @@ type readinessReader struct {
 	activity  *atomic.Uint64
 	ended     *atomic.Bool
 	afterRead func(int, error)
+	pending   *atomic.Bool
 }
 
 func (r readinessReader) Read(p []byte) (int, error) {
@@ -84,6 +87,7 @@ func (r readinessReader) Read(p []byte) (int, error) {
 	r.boundary.Lock()
 	if n > 0 {
 		r.activity.Add(1)
+		r.pending.Store(true)
 	}
 	if err != nil {
 		r.ended.Store(true)
@@ -326,7 +330,7 @@ func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
 	deadline := time.NewTimer(18 * time.Second)
 	defer deadline.Stop()
 	for {
-		probeCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		probeCtx, cancel := context.WithTimeout(ctx, cfg.PipeTimeout)
 		args := cfg.zellijArgs("pipe", "--name", "agent-event-ready", "--args", "recipient-tab-id="+cfg.TabID+",recipient-token="+cfg.RecipientToken)
 		command := exec.CommandContext(probeCtx, cfg.ZellijBin, args...)
 		command.Stdin = strings.NewReader("probe")
@@ -383,10 +387,11 @@ func streamEvents(
 	var streamBoundary sync.Mutex
 	var streamEnded atomic.Bool
 	var transportActivity atomic.Uint64
+	var transportPending atomic.Bool
 	scanner := bufio.NewScanner(readinessReader{
 		reader: response.Body, boundary: &streamBoundary,
 		activity: &transportActivity, ended: &streamEnded,
-		afterRead: cfg.afterRead,
+		afterRead: cfg.afterRead, pending: &transportPending,
 	})
 	// An event is only a trigger today, but allow enough room for a server
 	// diagnostic without silently tokenizing it.
@@ -400,9 +405,13 @@ func streamEvents(
 	var streamActivity atomic.Uint64
 	var streamFragment atomic.Bool
 	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if cfg.beforeSplit != nil {
+			cfg.beforeSplit()
+		}
 		advance, token, err = bufio.ScanLines(data, atEOF)
 		streamBoundary.Lock()
 		streamFragment.Store(len(data) > advance && !atEOF)
+		transportPending.Store(false)
 		streamBoundary.Unlock()
 		if token != nil {
 			streamBoundary.Lock()
@@ -421,6 +430,9 @@ func streamEvents(
 	})
 	go func() {
 		for scanner.Scan() {
+			if cfg.beforeLineSend != nil {
+				cfg.beforeLineSend()
+			}
 			select {
 			case lines <- scanResult{line: scanner.Text()}:
 			case <-streamCtx.Done():
@@ -529,7 +541,8 @@ func streamEvents(
 			streamBoundary.Lock()
 			scanned := streamActivity.Load()
 			if scanned != settleGeneration || transportActivity.Load() != settleTransportGeneration ||
-				streamFragment.Load() || !startupStreamQuiet(scanned, consumedActivity, eventName) {
+				transportPending.Load() || streamFragment.Load() ||
+				!startupStreamQuiet(scanned, consumedActivity, eventName) {
 				streamBoundary.Unlock()
 				startSettle()
 				continue

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -64,9 +65,10 @@ func TestReadinessReaderPublishesFailureBeforeReturning(t *testing.T) {
 	var boundary sync.Mutex
 	var activity atomic.Uint64
 	var ended atomic.Bool
+	var pending atomic.Bool
 	observed := false
 	reader := readinessReader{
-		reader: failingReader{}, boundary: &boundary, activity: &activity, ended: &ended,
+		reader: failingReader{}, boundary: &boundary, activity: &activity, ended: &ended, pending: &pending,
 		afterRead: func(_ int, err error) { observed = err != nil && ended.Load() },
 	}
 	if _, err := reader.Read(make([]byte, 1)); err == nil {
@@ -74,6 +76,27 @@ func TestReadinessReaderPublishesFailureBeforeReturning(t *testing.T) {
 	}
 	if !observed {
 		t.Fatal("transport failure was returned before readiness state published it")
+	}
+}
+
+func TestScanLinesReportsTrailingFragmentAfterCompleteToken(t *testing.T) {
+	data := []byte(": keepalive\nevent: data_")
+	advance, token, err := bufio.ScanLines(data, false)
+	if err != nil || string(token) != ": keepalive" || len(data) <= advance {
+		t.Fatalf("advance=%d token=%q err=%v; want complete token plus retained fragment", advance, token, err)
+	}
+}
+
+func TestRecipientProbeAllowsMoreThanQuarterSecond(t *testing.T) {
+	dir := t.TempDir()
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nsleep 0.4\necho ready\n")
+	err := waitForRecipient(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "s", TabID: "73", RecipientToken: "token",
+		PipeTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatalf("delayed healthy recipient failed: %v", err)
 	}
 }
 
@@ -104,14 +127,14 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 			case <-r.Context().Done():
 				return
 			}
-			fmt.Fprint(w, ": keepalive\nevent: data_")
+			fmt.Fprint(w, ": keepalive\n")
 			w.(http.Flusher).Flush()
 			select {
 			case <-finishEvent:
 			case <-r.Context().Done():
 				return
 			}
-			fmt.Fprint(w, "changed\ndata: {}\n\n")
+			fmt.Fprint(w, "event: data_changed\ndata: {}\n\n")
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
 		case "/api/v1/sessions":
@@ -126,6 +149,9 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	var checkOnce sync.Once
 	fragmentRead := make(chan struct{})
 	var readNotified atomic.Bool
+	splitStarted := make(chan struct{})
+	releaseSplit := make(chan struct{})
+	var splitOnce sync.Once
 	keepaliveConsumed := make(chan struct{})
 	releaseNextScan := make(chan struct{})
 	var tokenOnce sync.Once
@@ -159,7 +185,16 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 					}
 				})
 			},
-			beforeNextScan: func() {
+			beforeSplit: func() {
+				splitOnce.Do(func() {
+					close(splitStarted)
+					select {
+					case <-releaseSplit:
+					case <-ctx.Done():
+					}
+				})
+			},
+			beforeLineSend: func() {
 				tokenOnce.Do(func() {
 					close(keepaliveConsumed)
 					select {
@@ -188,6 +223,17 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 		t.Fatal("fragmented event bytes were not read while readiness was paused")
 	}
 	close(releaseCheck)
+	select {
+	case <-splitStarted:
+	case <-time.After(time.Second):
+		t.Fatal("scanner did not pause before accounting for the read")
+	}
+	select {
+	case payload := <-ready:
+		t.Fatalf("unprocessed transport read allowed readiness: %q", payload)
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(releaseSplit)
 	select {
 	case <-keepaliveConsumed:
 	case <-time.After(time.Second):
