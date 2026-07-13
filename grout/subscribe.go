@@ -162,13 +162,27 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 		return targetSnapshot{}, err
 	}
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--command", "--geometry", "--state", "--tab")
-	command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
-	output, err := command.Output()
-	if err != nil {
-		if ctx.Err() != nil {
-			return targetSnapshot{}, ctx.Err()
+	var output []byte
+	for attempt := 0; attempt < 3; attempt++ {
+		command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
+		var err error
+		output, err = command.Output()
+		if err != nil {
+			if ctx.Err() != nil {
+				return targetSnapshot{}, ctx.Err()
+			}
+			return targetSnapshot{}, fmt.Errorf("%w: native list-panes: %v", ErrTargetLost, err)
 		}
-		return targetSnapshot{}, fmt.Errorf("%w: native list-panes: %v", ErrTargetLost, err)
+		if len(strings.TrimSpace(string(output))) > 0 {
+			break
+		}
+		if attempt < 2 {
+			select {
+			case <-ctx.Done():
+				return targetSnapshot{}, ctx.Err()
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
 	}
 	var panes []zellijPane
 	if err := json.Unmarshal(output, &panes); err != nil {
