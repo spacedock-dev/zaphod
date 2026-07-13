@@ -36,6 +36,7 @@ SOCKET_DIR=""
 HOME_DIR=""
 PERMISSION_CACHE=""
 PERMISSION_FIXTURE="${ZAPHOD_PERMISSION_FIXTURE:-pregranted}"
+SUBSCRIBER_MODE="${ZAPHOD_SUBSCRIBER_MODE:-automatic}"
 ENTRY_START_TIMEOUT=30
 ISOLATED_CONFIG_BEFORE=""
 ISOLATED_LAYOUT=""
@@ -47,6 +48,8 @@ TMUX_PANE="$TMUX_SESSION:0.0"
 AGENTSVIEW_PID=""
 AGENTSVIEW_URL=""
 SIDECAR_PID=""
+SIDECAR_LOG=""
+SIDECAR_START_FIFO=""
 ENTRY_PID=""
 
 zellij_control() {
@@ -141,6 +144,12 @@ case "$PERMISSION_FIXTURE" in
     pregranted|upgrade) ;;
     *) fail "ZAPHOD_PERMISSION_FIXTURE must be pregranted or upgrade" ;;
 esac
+case "$SUBSCRIBER_MODE" in
+    automatic|foreground) ;;
+    *) fail "ZAPHOD_SUBSCRIBER_MODE must be automatic or foreground" ;;
+esac
+[ "$SUBSCRIBER_MODE" != foreground ] || [ "$PERMISSION_FIXTURE" = pregranted ] ||
+    fail "foreground subscriber smoke requires the disposable pregranted fixture"
 [ "$PERMISSION_FIXTURE" = pregranted ] || ENTRY_START_TIMEOUT=10
 
 # Zellij's Unix socket is capped at 103 bytes on macOS. Keep this disposable
@@ -161,7 +170,8 @@ ISOLATED_CONFIG_BEFORE="$(file_state "$CONFIG_FILE")"
 ISOLATED_LAYOUT_BEFORE="$(file_state "$ISOLATED_LAYOUT")"
 
 go build -o "$ROOT/agentsview-fixture" "$SCRIPT_DIR/helpers/agentsview-fixture.go"
-"$ROOT/agentsview-fixture" --ready-file "$ROOT/agentsview-url" --cwd "$REPO_ROOT" >"$ROOT/agentsview.out" 2>"$ROOT/agentsview.err" &
+"$ROOT/agentsview-fixture" --ready-file "$ROOT/agentsview-url" --cwd "$REPO_ROOT" \
+    --trigger-file "$ROOT/agentsview-second-session" >"$ROOT/agentsview.out" 2>"$ROOT/agentsview.err" &
 AGENTSVIEW_PID=$!
 for _attempt in $(seq 1 100); do
     [ ! -s "$ROOT/agentsview-url" ] || break
@@ -382,7 +392,79 @@ entry_command() {
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
         --agentsview-url "$AGENTSVIEW_URL"
 }
-if [ "$PERMISSION_FIXTURE" = upgrade ]; then
+
+foreground_entry() {
+    local rendered_layout="$ROOT/foreground-zaphod.kdl"
+    local recipient_token="zaphod-smoke-$$-$(date +%s)"
+    local target_pane_id=""
+    local startup_message=""
+    local startup_status=0
+    local attempt
+
+    zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" \
+        "$rendered_layout" "$recipient_token"
+    zaphod_validate_layout_identity "$rendered_layout" "$WASM_URL"
+    TAB_ID="$(zellij_session action new-tab --name 'Zaphod foreground subscriber' \
+        --cwd "$REPO_ROOT" --layout-string "$(cat "$rendered_layout")")"
+    [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || fail "foreground entry did not return a stable tab ID"
+    for attempt in $(seq 1 80); do
+        zellij_session action list-panes --json --all --command --geometry --state --tab \
+            > "$ROOT/foreground-target.json" 2>"$ROOT/foreground-target.err" || true
+        target_pane_id="$(jq -er --arg tab_id "$TAB_ID" --arg wasm_url "$WASM_URL" \
+            '[.[] | select((.tab_id | tostring) == $tab_id and .is_plugin and .plugin_url == $wasm_url and (.is_floating | not) and (.is_suppressed | not))] | if length == 1 then .[0].id | tostring else empty end' \
+            "$ROOT/foreground-target.json" 2>/dev/null || true)"
+        [ -n "$target_pane_id" ] && break
+        sleep 0.05
+    done
+    [ -n "$target_pane_id" ] || {
+        cat "$ROOT/foreground-target.err" >&2 || true
+        fail "foreground entry never exposed its exact target rail"
+    }
+    case "$target_pane_id" in
+        plugin_*) ;;
+        0|[1-9]|[1-9][0-9]*) target_pane_id="plugin_$target_pane_id" ;;
+        *) fail "foreground target returned an invalid pane ID: $target_pane_id" ;;
+    esac
+    zellij_session action focus-pane-id "$target_pane_id"
+
+    SIDECAR_LOG="$ROOT/foreground-subscriber.log"
+    SIDECAR_START_FIFO="$ROOT/foreground-subscriber-start"
+    mkfifo "$SIDECAR_START_FIFO"
+    env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" "$REPO_ROOT/target/zaphod" subscribe \
+        --server "$AGENTSVIEW_URL" \
+        --zellij-bin "$(command -v zellij)" \
+        --zellij-config-dir "$CONFIG_DIR" \
+        --zellij-config "$CONFIG_FILE" \
+        --zellij-data-dir "$DATA_DIR" \
+        --zellij-session "$SESSION_NAME" \
+        --tab-id "$TAB_ID" \
+        --rail-url "$WASM_URL" \
+        --checkout-cwd "$REPO_ROOT" \
+        --recipient-token "$recipient_token" \
+        --startup-fd 3 \
+        3>"$SIDECAR_START_FIFO" > >(tee -a "$SIDECAR_LOG") 2>&1 &
+    SIDECAR_PID=$!
+    set +e
+    IFS= read -r -t "$ENTRY_START_TIMEOUT" startup_message < "$SIDECAR_START_FIFO"
+    startup_status=$?
+    set -e
+    rm -f "$SIDECAR_START_FIFO"
+    SIDECAR_START_FIFO=""
+    if [ "$startup_status" -ne 0 ] || [ "$startup_message" != ready ]; then
+        sed -n '1,40p' "$SIDECAR_LOG" >&2 || true
+        fail "foreground target/zaphod subscribe did not become ready"
+    fi
+    {
+        printf 'TAB_ID=%s\n' "$TAB_ID"
+        printf 'WASM_URL=%s\n' "$WASM_URL"
+        printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
+        printf 'SIDECAR_PID=%s\n' "$SIDECAR_PID"
+    } > "$ROOT/entry.out"
+}
+
+if [ "$SUBSCRIBER_MODE" = foreground ]; then
+    foreground_entry
+elif [ "$PERMISSION_FIXTURE" = upgrade ]; then
     entry_command > "$ROOT/entry.out" 2> "$ROOT/entry.err" &
     ENTRY_PID=$!
     for _attempt in $(seq 1 160); do
@@ -424,8 +506,10 @@ else
 fi
 TAB_ID="$(sed -n 's/^TAB_ID=//p' "$ROOT/entry.out")"
 SIDECAR_PID="$(sed -n 's/^SIDECAR_PID=//p' "$ROOT/entry.out")"
+SIDECAR_LOG="$(sed -n 's/^SIDECAR_LOG=//p' "$ROOT/entry.out")"
 [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || fail "entry script did not report a stable tab ID"
 [[ "$SIDECAR_PID" =~ ^[1-9][0-9]*$ ]] || fail "entry script did not report a sidecar PID"
+[ -n "$SIDECAR_LOG" ] && [ -f "$SIDECAR_LOG" ] || fail "subscriber did not report a diagnostic log"
 kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited before smoke assertions"
 grep -Fx "WASM_URL=$WASM_URL" "$ROOT/entry.out" >/dev/null ||
     fail "entry script did not report the candidate WASM URL"
@@ -437,13 +521,30 @@ wait_for_settled_candidate_resident \
 for _attempt in $(seq 1 100); do
     tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/agents-row.screen"
     if grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null &&
-        grep -F 'SMOKE_SSE_ROW' "$ROOT/agents-row.screen" >/dev/null; then
+        grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-row.screen" >/dev/null; then
         break
     fi
     sleep 0.05
 done
 grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row section never rendered"
-grep -F 'SMOKE_SSE_ROW' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row was lost before recipient arming"
+grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row was lost before recipient arming"
+touch "$ROOT/agentsview-second-session"
+for _attempt in $(seq 1 160); do
+    tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/agents-second-row.screen"
+    if grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-second-row.screen" >/dev/null &&
+        grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
+        break
+    fi
+    kill -0 "$SIDECAR_PID" 2>/dev/null || break
+    sleep 0.05
+done
+if ! grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-second-row.screen" >/dev/null ||
+    ! grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
+    sed -n '1,40p' "$SIDECAR_LOG" >&2 || true
+    sed -n '1,80p' "$ROOT/agents-second-row.screen" >&2 || true
+    fail "post-readiness data_changed did not render both distinct session rows"
+fi
+kill -0 "$SIDECAR_PID" 2>/dev/null || fail "subscriber exited after post-readiness data_changed delivery"
 TAB_COUNT_AFTER="$(jq -er 'length' "$ROOT/candidate-tabs-before.json")"
 [ "$TAB_COUNT_AFTER" -eq "$((TAB_COUNT_BEFORE + 1))" ] ||
     fail "direct entry changed tab count from $TAB_COUNT_BEFORE to $TAB_COUNT_AFTER (expected one fresh tab)"
@@ -529,4 +630,5 @@ jq -e --arg wasm_url "$WASM_URL" \
     fail "standing Zellij layout changed during tmux smoke: $STANDING_LAYOUT"
 kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited during smoke assertions"
 
-printf '%s\n' 'PASS: tmux-hosted Zellij smoke proved fresh entry, managed Alt /, post-route foreign inertness, and disposable cleanup'
+printf 'PASS: %s target/zaphod subscribe rendered SMOKE_INITIAL_ROW then SMOKE_SECOND_ROW, stayed alive, preserved routing, and cleaned up\n' \
+    "$SUBSCRIBER_MODE"
