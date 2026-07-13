@@ -78,10 +78,18 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.(http.Flusher).Flush()
-			<-emitPartial
+			select {
+			case <-emitPartial:
+			case <-r.Context().Done():
+				return
+			}
 			fmt.Fprint(w, "event: data_changed\n")
 			w.(http.Flusher).Flush()
-			<-finishEvent
+			select {
+			case <-finishEvent:
+			case <-r.Context().Done():
+				return
+			}
 			fmt.Fprint(w, "data: {}\n\n")
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
@@ -101,7 +109,10 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer reader.Close()
+	defer writer.Close()
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runSubscribe(ctx, SubscribeConfig{
@@ -118,7 +129,10 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 			beforeReadinessCheck: func() {
 				checkOnce.Do(func() {
 					close(checkStarted)
-					<-releaseCheck
+					select {
+					case <-releaseCheck:
+					case <-ctx.Done():
+					}
 				})
 			},
 		}, nil)
