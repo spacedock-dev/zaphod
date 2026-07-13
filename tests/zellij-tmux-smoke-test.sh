@@ -10,6 +10,12 @@ source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
 
 # A smoke launched from a loaded Zellij pane must not carry that client's
 # identity into its disposable server or native CLI calls.
+INHERITED_ZELLIJ_PRESENT="${ZELLIJ+x}"
+INHERITED_ZELLIJ="${ZELLIJ-}"
+INHERITED_ZELLIJ_SESSION_NAME_PRESENT="${ZELLIJ_SESSION_NAME+x}"
+INHERITED_ZELLIJ_SESSION_NAME="${ZELLIJ_SESSION_NAME-}"
+INHERITED_ZELLIJ_PANE_ID_PRESENT="${ZELLIJ_PANE_ID+x}"
+INHERITED_ZELLIJ_PANE_ID="${ZELLIJ_PANE_ID-}"
 unset ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID
 
 fail() {
@@ -160,6 +166,12 @@ case "$SUBSCRIBER_MODE" in
 esac
 [ "$SUBSCRIBER_MODE" != foreground ] || [ "$PERMISSION_FIXTURE" = pregranted ] ||
     fail "foreground subscriber smoke requires the disposable pregranted fixture"
+if [ "$CALLER_ENV" = inside ]; then
+    [ "$INHERITED_ZELLIJ_PRESENT" = x ] &&
+        [ "$INHERITED_ZELLIJ_SESSION_NAME_PRESENT" = x ] &&
+        [ "$INHERITED_ZELLIJ_PANE_ID_PRESENT" = x ] ||
+        fail "inside caller fixture did not supply a complete loaded-client identity"
+fi
 [ "$PERMISSION_FIXTURE" = pregranted ] || ENTRY_START_TIMEOUT=10
 
 # Zellij's Unix socket is capped at 103 bytes on macOS. Keep this disposable
@@ -398,7 +410,14 @@ jq -e --arg wasm_url "$WASM_URL" \
     'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
     fail "isolated profile unexpectedly started on the selected checkout rail"
 entry_command() {
-    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+    local client_env=(env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID)
+    if [ "$CALLER_ENV" = inside ]; then
+        client_env=(env \
+            "ZELLIJ=$INHERITED_ZELLIJ" \
+            "ZELLIJ_SESSION_NAME=$INHERITED_ZELLIJ_SESSION_NAME" \
+            "ZELLIJ_PANE_ID=$INHERITED_ZELLIJ_PANE_ID")
+    fi
+    "${client_env[@]}" \
         ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
         ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \

@@ -52,6 +52,10 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# The requested/default session has been resolved. Loaded-pane client identity
+# must not steer version, setup, inventory, creation, or sidecar child calls.
+unset ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID
+
 [ -n "$SESSION_NAME" ] ||
     fail "a Zellij session is required; pass --session NAME or set ZELLIJ_SESSION_NAME"
 [[ "$SIDECAR_START_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
