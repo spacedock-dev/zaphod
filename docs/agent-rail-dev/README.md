@@ -135,9 +135,33 @@ The design is approved and the deliverable is built in a dedicated worktree —
 strict TDD, one behavior per commit.
 
 - **Inputs:** the approved ideation body; the repo at the worktree branch.
-- **Outputs:** commits satisfying the AC (each: red test first, red output recorded in the stage report with the failure reason, minimal fix, suite green); a stage report with before/after test counts and the exact red output; for plugin work `cargo test` + `cargo check --tests` are the native verification (`./build.sh` only when a demo needs the wasm; native `cargo build` link-fails by design); for grout work `go test ./...` + `go vet`.
+- **Outputs:** commits satisfying the AC (each: red test first, red output recorded in the stage report with the failure reason, minimal fix, suite green); a stage report with before/after test counts and the exact red output; for plugin work `cargo test` + `cargo check --tests` are the native verification (`./build.sh` only when a demo needs the wasm; native `cargo build` link-fails by design); for grout work `go test ./...` + `go vet`; passing exact-head Roborev `code_completion` evidence, including the synthesis parent job ID, exact reviewed range and head, panel name, required-member execution outcomes, parent verdict, and finding dispositions.
 - **Good:** the red test fails for the predicted reason before the fix; the smallest reasonable diff; surrounding style matched; new dump fixtures use zellij's real single-line shape.
-- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the task has been handed to validation — confirm no pending round-trip before advancing.
+- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; launching `code_completion` while the exact-tip `quick` review is pending or has an unresolved Medium-or-higher finding; treating `quick` as the implementation-exit verdict; using `roborev fix`, `roborev refine`, or the Roborev agent hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the task has been handed to validation — confirm no pending round-trip before advancing.
+
+After the final candidate commit, implementation MUST run `roborev wait HEAD`
+for that commit's existing post-commit `quick` review. A Medium-or-higher
+finding blocks the expensive panel: disposition it in implementation, fix and
+commit when warranted, then wait on the new exact HEAD. Low findings remain
+advisory and do not force another round. Only after the exact-tip `quick`
+review clears that cost gate may implementation run the required panel:
+
+```bash
+roborev review --repo <canonical-project-root> \
+  --branch=<implementation-branch> --base main \
+  --panel code_completion --min-severity medium --wait
+```
+
+Preserve the synthesis parent job ID even when `--wait` exits nonzero, then
+inspect it with `roborev show --job <parent-id> --json`. Implementation exits
+only when the stored range is `merge-base(main, head)..head`, the reviewed head
+is the current branch tip, every configured required member appears exactly
+once without an execution failure, and the `code_completion` synthesis parent
+verdict is PASS. The synthesis parent is authoritative; `quick` is only the
+scheduling and cost gate. Every synthesized finding receives a `fix`, `rebut`
+with repository evidence and replacement-panel adjudication, or `needs
+decision` disposition. Any code-changing commit invalidates the old panel and
+requires a passing exact-head replacement before validation.
 
 ### `validation`
 
@@ -154,10 +178,18 @@ reviewed via `subspace-tui` (or the browser gate server). Either
 gate-approval to done or rejection back to implementation with concrete
 findings.
 
-- **Inputs:** the worktree at the implementation's final commit, identity-checked by raw commit SHA (a sibling may still be mutating the worktree); the ideation AC split; the stage report's claims.
-- **Outputs:** per-offline-AC verdicts with independently reproduced evidence (re-run commands, not re-read reports); a refutation audit on a throwaway checkout — never the implementation worktree — naming the concrete attack scenarios attempted (false positives/negatives, panic/indexing paths, caller impact, semantic drift vs. pre-diff behavior) and why each failed, or a REFUTED with file:line; the demo script; the subspace review record with the demo outcome.
+- **Inputs:** the worktree at the implementation's final commit, identity-checked by raw commit SHA (a sibling may still be mutating the worktree); the ideation AC split; the stage report's claims; the recorded Roborev `code_completion` synthesis parent.
+- **Outputs:** independent verification that the recorded synthesis parent covers the frozen `merge-base(main, head)..head` range and current head, names the `code_completion` panel, contains every required member exactly once without execution failure, and has a PASS parent verdict; per-offline-AC verdicts with independently reproduced evidence (re-run commands, not re-read reports); a refutation audit on a throwaway checkout — never the implementation worktree — naming the concrete attack scenarios attempted (false positives/negatives, panic/indexing paths, caller impact, semantic drift vs. pre-diff behavior) and why each failed, or a REFUTED with file:line; the demo script; the subspace review record with the demo outcome.
 - **Good:** a cheap fixture or single-command spot-check proves the drill infrastructure works end-to-end before CL's time is spent on the expensive live run; verdicts derived from re-execution; an attack survived is documented with the exact probe; "the finding's premise is false" is a valid and valuable outcome — stop and report rather than validating a fix against a false premise.
-- **Bad:** trusting the implementer's numbers; a SURVIVES with no named attacks; a fresh agent "reproducing" an interactive AC it cannot actually drive; validating the letter of an AC whose served end value regressed; rubber-stamping a stale comment or doc claim the diff made false.
+- **Bad:** trusting the implementer's numbers; rerunning an unchanged passing `code_completion` panel instead of verifying its stored evidence; accepting a stale panel after any fixing commit; treating missing quick-review coverage as a clean review; a SURVIVES with no named attacks; a fresh agent "reproducing" an interactive AC it cannot actually drive; validating the letter of an AC whose served end value regressed; rubber-stamping a stale comment or doc claim the diff made false.
+
+Validation fetches the recorded parent with
+`roborev show --job <parent-id> --json` and verifies the frozen evidence; it
+does not rerun an unchanged passing panel. Validation remains behavior-focused
+and independently reproduces every offline AC. If validation finds a code
+defect, it routes the task back to implementation. Any fixing commit
+invalidates the prior panel and requires a passing replacement before
+validation resumes.
 
 ### `done`
 

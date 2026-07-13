@@ -1,0 +1,48 @@
+# Roborev produces independent review evidence; Spacedock remains authoritative
+# for implementation, validation, stage routing, and human gates.
+agent = "codex"
+excluded_branches = ["spacedock-state/agent-rail-dev"]
+post_commit_review = "commit"
+review_guidelines = """
+Review Zaphod against its current user journeys and ownership boundaries.
+Prioritize correctness, regressions, stable Zellij tab identity, pane/tab
+isolation, failure handling, and tests that exercise meaningful false-positive
+and false-negative cases. Preserve working behavior until the replacement is
+proved in the same journey. Treat isolated Zellij-inside-tmux runs using
+literal keys and native Zellij state as the supported runtime proof surface.
+Do not propose Roborev-driven fixes or changes to Spacedock stage state.
+"""
+
+[review]
+hook_review_panel = "quick"
+
+[review.subagents.quick]
+agent = "codex"
+reasoning = "fast"
+review_type = "default"
+instructions = "Identify Medium-or-higher correctness, regression, and missing-test findings quickly. Keep Low polish observations visible but clearly advisory."
+
+[review.subagents.correctness]
+agent = "codex"
+reasoning = "thorough"
+review_type = "default"
+instructions = "Focus on correctness, failure handling, stable identifiers, state transitions, and missing regression coverage."
+
+[review.subagents.journey]
+agent = "codex"
+reasoning = "thorough"
+review_type = "default"
+instructions = "Trace the end-user journey through selected-checkout entry, exact-tab isolation, visible results, and preservation of existing behavior. Flag contract or integration regressions."
+
+[review.subagents.proof]
+agent = "codex"
+reasoning = "thorough"
+review_type = "default"
+instructions = "Attack the claimed proof: false positives and negatives, panic or indexing paths, caller impact, semantic drift, and tests that can pass without proving the behavior."
+
+[review.panels.quick]
+members = ["quick"]
+
+[review.panels.code_completion]
+members = ["correctness", "journey", "proof"]
+synthesis_agent = "codex"

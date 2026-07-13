@@ -2,3 +2,5 @@ target/
 .worktrees/
 docs/agent-rail-dev/.spacedock-state/
 .safehouse
+# roborev snapshots
+/.roborev/
