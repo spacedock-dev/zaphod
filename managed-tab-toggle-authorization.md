@@ -178,3 +178,16 @@ The repair makes layout provenance explicit and checks it before either
 installing or consuming the runtime route. A same-WASM lookalike becomes a
 strong negative fixture without adding lifecycle state. The first isolated
 configuration spike can still invalidate this design before code changes.
+
+## Stage Report: implementation
+
+- DONE: Prove a fresh managed tab retains the explicit marker plus exact candidate WASM URL, while a same-WASM tiled lookalike remains unqualified.
+  `29f5154` adds both declarations to base/docked/undocked rails; the entry suite proves rendered validation, and the real tmux smoke validates the native managed dump while exactly one same-WASM rail lacks both fields.
+- DONE: Require that managed proof at both Alt-/ route offer and observed-pipe receipt; preserve a normal managed-tab toggle.
+  `ab3a31c` adds `ManagedRailProof` from `zaphod_managed_tab="v1"` plus exact observed URL to both decisions; `cargo test` confirms the positive managed route and every missing/mismatched proof is inert.
+- DONE: Verify the unmanaged lookalike is inert in focused tests and the isolated tmux-hosted Zellij smoke without 7h-style harness machinery.
+  `6f95495` adds the same-WASM adversary and `27f782e` holds it through 80 bounded native observations; the smoke compares tab-scoped inventory, focus, plugin IDs, native layout, and a settled screen with disposable tmux/Zellij cleanup.
+
+### Summary
+
+TDD red evidence: the entry suite first failed with `inline layout did not declare the v1 managed-tab marker on every rail`; the route test first failed because a tiled lookalike authorized `should_route_toggle_to_self`. The green result is `cargo test` 137 passed (134 before v3 tests), `cargo check --tests`, 9 entry-suite checks, and the tmux-hosted smoke all passing. The review hardening retains no custom PTY, lease, controller, adoption path, or Sprint 2 dependency; pre-existing repository-wide `cargo fmt --check` differences were left untouched.
