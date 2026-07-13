@@ -41,21 +41,24 @@ zellij --session "$session" \
   action dump-layout
 ```
 
-The generated persistent config binds `Alt /` to `NoOp`, then binds `Alt Shift z`
-to native `NewTab` with the selected `layouts/zaphod.kdl` **absolute path**.
-Do not use `layout "zaphod"`: Zellij resolves that named form from its standing
-default config directory, not necessarily the selected isolated root. A tiled
-rail requests a runtime-only `MessagePluginId <resident-id>` route after its
-ordinary `Reconfigure` permission. That request has no acknowledgement: a
-received literal keybind pipe at the active tiled resident—not a local
-"installed" boolean—settles that the route is usable. The route is never
-written to persistent config.
+The isolated persistent config contains valid quoted-brace KDL, an existing
+`Alt /` policy, and an unrelated `Alt Shift z` native `NewTab` shortcut for one
+fixed layout. The selected-checkout script validates but never rewrites that
+config or its sentinel `layouts/zaphod.kdl`; it passes its repository-owned
+layout directly through `new-tab --layout-string`. A tiled rail requests a
+runtime-only `MessagePluginId <resident-id>` route after its ordinary
+`Reconfigure` permission. That request has no acknowledgement: a received
+literal keybind pipe at the active tiled resident—not a local "installed"
+boolean—settles that the route is usable. The route is never written to
+persistent config.
 
 The smoke script proves the following with literal tmux keys and native Zellij
 state:
 
-- `Alt Shift z` creates exactly one initialized Zaphod tab with the candidate
-  WASM, confirmed in the live tab inventory and dumped layout.
+- The direct script creates exactly one initialized Zaphod tab with the
+  candidate WASM at its returned stable tab ID, confirmed in the live pane/tab
+  inventory and dumped layout. The fixed global `Alt Shift z` route is left
+  byte-identical and is not used as selected-checkout evidence.
 - One literal `Alt /` in that tab moves the candidate rail from its known
   28-column docked shape to the 1-column sliver, while native pane identity,
   command, focus, and candidate URL remain unchanged.

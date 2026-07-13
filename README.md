@@ -123,19 +123,18 @@ artifact.
 
 ### Create a fresh managed tab
 
-To activate this checkout and create a fresh tab in an existing session, run:
+To build the selected checkout and create a fresh tab in an existing session,
+run:
 
 ```bash
 ./scripts/zellij-new-tab.sh --session WORK
 ```
 
-The command builds this checkout, renders its WASM URL into an inline layout,
-and creates exactly one new tab. It atomically updates only existing Zaphod
-keybind scopes in the selected config root: `Alt Shift z` natively creates
-that root's stored layout by absolute path, and persistent `Alt /` is `NoOp`.
-It never changes an existing tab. The absolute path matters: Zellij resolves
-the named `layout "zaphod"` form from its standing default config root, even
-when the session was launched with an isolated config root.
+The command asks Zellij to validate the selected profile, builds this checkout,
+renders its canonical WASM URL into a disposable inline layout, and creates
+exactly one new tab. It does not parse, rewrite, stage, or restore the standing
+`config.kdl` or `layouts/zaphod.kdl`; failures and interruption leave both
+byte-identical. It never changes an existing tab.
 
 This direct command is also the current session-row entry point. After
 `new-tab` returns, it waits for native `list-panes` state to show exactly one
@@ -153,8 +152,11 @@ SIGTERM, source EOF, or a source failure ends the sidecar. It does not
 restart, retarget, or clean up AgentsView, Zellij sessions, tabs, panes, or
 plugins.
 
-`Alt Shift z` remains a tab-only shortcut. It cannot safely start the
-subscriber because a native Zellij `Run` keybind materializes a helper pane.
+`Alt Shift z` remains a separately configured tab-only shortcut. It opens the
+one fixed layout already named by the operator's global config; it does not
+select an arbitrary checkout and the direct script never repoints it. It also
+cannot safely start the subscriber because a native Zellij `Run` keybind
+materializes a helper pane.
 Named pipes remain session-wide broadcasts, so the rail accepts a session
 event only after a fresh `PaneUpdate` then `TabUpdate` maps its display
 position to the exact stable `recipient-tab-id`. CWD is used only after that
@@ -171,8 +173,8 @@ tiled sidebar-shaped unmanaged resident cannot qualify for that route; visual
 shape or a URL substring is not managed ownership.
 
 Use `ZELLIJ_CONFIG_DIR`, `ZELLIJ_CONFIG_FILE`, and `ZELLIJ_DATA_DIR` to run it
-against an isolated profile. The current invocation creates its tab at once;
-restart the Zellij server before relying on a newly written native keybind.
+against an isolated profile. The command creates its inline tab at once and
+does not install or update a native keybind.
 
 Run the real-key boundary with:
 
@@ -207,10 +209,11 @@ changes only runtime keybinds; Zaphod does not save that route to disk.
 
 Working prototype (zellij 0.44.3): per-tab toggle, click/keyboard switching,
 plugin-local agent awareness, tab-bound session rows from the direct script,
-state/status lines, and docked/sliver toggle. Create a rail with
-`scripts/zellij-new-tab.sh` or the initialized `Alt Shift z` binding; use the
-direct script when session rows are wanted. `Alt /` never creates or
-retrofits a tab.
+state/status lines, and docked/sliver toggle. Use
+`scripts/zellij-new-tab.sh` to create a rail from a selected checkout. A
+separately installed `Alt Shift z` binding opens only its fixed configured
+layout and does not select a checkout or start session rows. `Alt /` never
+creates or retrofits a tab.
 
 [SPEC.md](SPEC.md) records the shipped prototype and its numbered Zellij
 plugin landmines, including the historical rebuild guidance. For the evergreen
