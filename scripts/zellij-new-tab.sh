@@ -93,6 +93,7 @@ CONFIG_BACKUP=""
 LAYOUT_BACKUP=""
 HAD_LAYOUT=0
 ROLLBACK_NEEDED=0
+SIDECAR_START_FIFO=""
 
 cleanup() {
     local original_status=$?
@@ -115,6 +116,7 @@ cleanup() {
     [ -z "$LAYOUT_TEMP" ] || rm -f "$LAYOUT_TEMP" || cleanup_status=1
     [ -z "$CONFIG_BACKUP" ] || rm -f "$CONFIG_BACKUP" || cleanup_status=1
     [ -z "$LAYOUT_BACKUP" ] || rm -f "$LAYOUT_BACKUP" || cleanup_status=1
+    [ -z "$SIDECAR_START_FIFO" ] || rm -f "$SIDECAR_START_FIFO" || cleanup_status=1
     [ -z "$TEMP_ROOT" ] || rm -rf "$TEMP_ROOT" || cleanup_status=1
     if [ "$cleanup_status" -ne 0 ]; then
         echo "failed to clean up or roll back Zaphod activation" >&2
@@ -181,10 +183,16 @@ wait_for_sidecar_target() {
 }
 
 start_private_sidecar() {
+    local start_status startup_message startup_status
     mkdir -p "$DATA_DIR" ||
-        fail "sidecar-start-failed: could not create private sidecar log directory"
+        fail "sidecar-start-failed: could not create private sidecar directory"
     SIDECAR_LOG="$(mktemp "$DATA_DIR/zaphod-sidecar.XXXXXX")" ||
         fail "sidecar-start-failed: could not create private sidecar log"
+    SIDECAR_START_FIFO="$(mktemp "$DATA_DIR/zaphod-sidecar-start.XXXXXX")" ||
+        fail "sidecar-start-failed: could not create private sidecar startup path"
+    rm -f "$SIDECAR_START_FIFO"
+    mkfifo "$SIDECAR_START_FIFO" ||
+        fail "sidecar-start-failed: could not create private sidecar startup path"
     set +e
     nohup "$SIDECAR_PATH" subscribe \
         --server "$AGENTSVIEW_URL" \
@@ -195,11 +203,22 @@ start_private_sidecar() {
         --zellij-session "$SESSION_NAME" \
         --tab-id "$TAB_ID" \
         --rail-url "$WASM_URL" \
-        </dev/null >>"$SIDECAR_LOG" 2>&1 &
-    local start_status=$?
+        --startup-fd 3 \
+        3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
+    start_status=$?
     set -e
-    [ "$start_status" -eq 0 ] ||
+    if [ "$start_status" -ne 0 ]; then
         fail "sidecar-start-failed: could not launch private zaphod sidecar"
+    fi
+    set +e
+    IFS= read -r -t 2 startup_message < "$SIDECAR_START_FIFO"
+    startup_status=$?
+    set -e
+    rm -f "$SIDECAR_START_FIFO"
+    SIDECAR_START_FIFO=""
+    if [ "$startup_status" -ne 0 ] || [ "$startup_message" != "ready" ]; then
+        fail "sidecar-start-failed: private zaphod sidecar did not exec"
+    fi
 }
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||

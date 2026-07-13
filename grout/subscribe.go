@@ -40,6 +40,7 @@ type SubscribeConfig struct {
 	ZellijSession     string
 	TabID             string
 	RailURL           string
+	StartupFD         int
 	PipeTimeout       time.Duration
 	SummaryClampBytes int
 }

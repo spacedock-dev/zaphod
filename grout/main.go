@@ -30,6 +30,28 @@ type Config struct {
 	SummaryClampBytes int           // 512
 }
 
+// startupSignal writes one short confirmation to the direct script's private
+// FIFO after this native process has successfully started. It is deliberately
+// not part of runSubscribe: a source or target failure after exec is terminal
+// sidecar lifecycle, not a failed host exec.
+func startupSignal(fd int) error {
+	if fd == -1 {
+		return nil
+	}
+	if fd < 3 {
+		return fmt.Errorf("startup fd must be 3 or greater")
+	}
+	file := os.NewFile(uintptr(fd), "zaphod-startup-signal")
+	if file == nil {
+		return fmt.Errorf("startup fd %d is unavailable", fd)
+	}
+	defer file.Close()
+	if _, err := io.WriteString(file, "ready\n"); err != nil {
+		return fmt.Errorf("startup signal: %w", err)
+	}
+	return nil
+}
+
 // defaultConfig carries only cwd-independent knobs. SessionID and GateLog have
 // no default: a demo session id exists only in one machine's DB and a relative
 // gate-log path resolves against the cwd, so both must come from argv.
@@ -90,6 +112,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 	session := flags.String("zellij-session", "", "Zellij session")
 	tabID := flags.String("tab-id", "", "stable Zellij tab ID")
 	railURL := flags.String("rail-url", "", "canonical sidebar WASM URL")
+	startupFD := flags.Int("startup-fd", -1, "private direct-script startup confirmation fd")
 	if err := flags.Parse(args); err != nil {
 		return SubscribeConfig{}, err
 	}
@@ -117,6 +140,9 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 	if len(missing) > 0 {
 		return SubscribeConfig{}, fmt.Errorf("subscribe requires %s", strings.Join(missing, ", "))
 	}
+	if *startupFD < -1 || (*startupFD >= 0 && *startupFD < 3) {
+		return SubscribeConfig{}, fmt.Errorf("subscribe startup fd must be 3 or greater")
+	}
 	return SubscribeConfig{
 		ServerURL:         *server,
 		ZellijBin:         *zellijBin,
@@ -126,6 +152,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 		ZellijSession:     *session,
 		TabID:             *tabID,
 		RailURL:           *railURL,
+		StartupFD:         *startupFD,
 		PipeTimeout:       5 * time.Second,
 		SummaryClampBytes: 512,
 	}, nil
@@ -143,6 +170,10 @@ func runMain(args []string, stderr io.Writer) int {
 		}
 		subscribeUsage(stderr)
 		return 2
+	}
+	if err := startupSignal(cfg.StartupFD); err != nil {
+		fmt.Fprintf(stderr, "sidecar startup signal failed: %v\n", err)
+		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

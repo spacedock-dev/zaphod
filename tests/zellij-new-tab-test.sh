@@ -37,7 +37,11 @@ write_fake_build() {
         'printf "%s\\n" "$0" > "$BUILD_LOG"' \
         'mkdir -p "$(dirname "$0")/target/wasm32-wasip1/release"' \
         'printf "fixture wasm\\n" > "$(dirname "$0")/target/wasm32-wasip1/release/zellij-sidebar.wasm"' \
-        'printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" > "$(dirname "$0")/target/zaphod"' \
+        'if [ "${FAKE_SIDECAR_EXEC_FAILURE:-}" = 1 ]; then' \
+        '    printf "%s\\n" "#!/definitely/missing-zaphod-interpreter" > "$(dirname "$0")/target/zaphod"' \
+        'else' \
+        '    printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "startup_fd=\"\"" "previous=\"\"" "for arg in \"\$@\"; do" "    if [ \"\$previous\" = --startup-fd ]; then startup_fd=\"\$arg\"; fi" "    previous=\"\$arg\"" "done" "[ -n \"\$startup_fd\" ]" "printf '\''ready\\n'\'' >&\"\$startup_fd\"" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" > "$(dirname "$0")/target/zaphod"' \
+        'fi' \
         'chmod +x "$(dirname "$0")/target/zaphod"' \
         > "$fixture/build.sh"
     chmod +x "$fixture/build.sh"
@@ -367,7 +371,9 @@ assert_private_sidecar_started() {
         '--tab-id' \
         '73' \
         '--rail-url' \
-        "$expected_url" > "$expected"
+        "$expected_url" \
+        '--startup-fd' \
+        '3' > "$expected"
     diff -u "$expected" "$FAKE_SIDECAR_ARGV" >&2 ||
         fail "private sidecar did not receive the exact verified profile/tab/rail tuple"
 }
@@ -604,6 +610,28 @@ test_unready_resident_starts_no_sidecar() {
     echo "PASS: unready resident leaves the tab intact and starts no sidecar"
 }
 
+test_sidecar_exec_failure_is_visible() {
+    local root status
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+
+    set +e
+    FAKE_SIDECAR_EXEC_FAILURE=1 \
+        run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "sidecar exec failure unexpectedly succeeded"
+    grep -F 'sidecar-start-failed' "$FIXTURE_ERROR" >/dev/null ||
+        fail "sidecar exec failure was not visible to the invoking terminal"
+    [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = '1' ] ||
+        fail "sidecar exec failure did not preserve the created tab"
+    [ ! -e "$FAKE_SIDECAR_ARGV" ] ||
+        fail "sidecar exec failure reached a sidecar command"
+
+    echo "PASS: failed sidecar exec is visible and preserves the tab"
+}
+
 test_new_tab_signal_rolls_back_activation() {
     local root ready release runner_pid status attempt
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
@@ -681,5 +709,6 @@ test_conflicting_non_zaphod_toggle_fails_before_writes
 test_missing_zaphod_route_fails_before_writes
 test_new_tab_failure_rolls_back_activation
 test_unready_resident_starts_no_sidecar
+test_sidecar_exec_failure_is_visible
 test_new_tab_signal_rolls_back_activation
 test_default_data_root_is_explicit
