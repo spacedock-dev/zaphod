@@ -289,6 +289,19 @@ complete, and the gate is ready for the captain's direct-script-only demo.
   keys or changing standing config/layout, then return it to the same validator
   for independent review and a new gate.
 
+- **Cycle 2 — 2026-07-13: REVISED during the convergence live drill, routed to implementation.**
+  At frozen head `234ed30`, AgentsView health and sessions endpoints returned
+  HTTP 200 and the external control-terminal entry created stable tab `8` with
+  exact candidate rail pane `156`, terminal pane `117` in the selected checkout,
+  and a present per-entry recipient token. No permission prompt appeared and
+  standing `config.kdl` / `layouts/zaphod.kdl` hashes remained byte-identical,
+  but the entry emitted no success tuple and its sidecar terminated with
+  `recipient-ready timeout for stable tab 8`; the shell-only rail correctly
+  rendered no empty `AGENTS` section. Reproduce the real attached-WORK boundary
+  and fix why the rendered token-matched rail does not return the
+  `agent-event-ready` CLI-pipe acknowledgement. Do not work around it with a
+  manual sidecar or by starting an agent before recipient readiness.
+
 ## Stage Report: implementation addendum (review-convergence pause)
 
 - DONE: Freeze the revised implementation at
