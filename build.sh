@@ -4,4 +4,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 RUSTC="$(rustup which rustc)" cargo build --release --target wasm32-wasip1 "$@"
+mkdir -p target
+(
+    cd grout
+    go build -o ../target/zaphod .
+)
 ls -la target/wasm32-wasip1/release/zellij-sidebar.wasm
+ls -la target/zaphod
