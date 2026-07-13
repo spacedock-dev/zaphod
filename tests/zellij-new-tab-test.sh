@@ -421,6 +421,22 @@ test_failed_tuple_handoff_reaps_ready_sidecar() {
     echo "PASS: failed tuple handoff terminates and reaps its ready sidecar"
 }
 
+test_tokenless_layout_render_preserves_installed_identity() {
+    local root output
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-tokenless.XXXXXX")"
+    output="$root/zaphod.kdl"
+    # shellcheck source=scripts/zellij-layout-lib.sh
+    source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
+    zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" \
+        'file:/fixed/zellij-sidebar.wasm' "$output"
+    ! grep -F 'recipient_token' "$output" >/dev/null ||
+        fail "tokenless installed layout changed plugin configuration identity"
+    [ "$(grep -Fc 'rail "1"' "$output")" -ge 3 ] ||
+        fail "tokenless installed layout lost the fixed rail identity"
+    rm -rf "$root"
+    echo "PASS: tokenless render preserves fixed installed plugin identity"
+}
+
 test_selected_checkout_creates_one_inline_tab_without_writes
 test_setup_failure_stops_before_new_tab
 test_new_tab_failure_leaves_standing_kdl_unchanged
@@ -429,3 +445,4 @@ test_unready_resident_starts_no_sidecar
 test_sidecar_exec_failure_is_visible
 test_sidecar_stream_timeout_reaps_process
 test_failed_tuple_handoff_reaps_ready_sidecar
+test_tokenless_layout_render_preserves_installed_identity

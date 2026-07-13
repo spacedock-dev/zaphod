@@ -56,6 +56,27 @@ func TestStartupStreamQuietRequiresEveryScannedLineConsumed(t *testing.T) {
 	}
 }
 
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) { return 0, errors.New("transport failed") }
+
+func TestReadinessReaderPublishesFailureBeforeReturning(t *testing.T) {
+	var boundary sync.Mutex
+	var activity atomic.Uint64
+	var ended atomic.Bool
+	observed := false
+	reader := readinessReader{
+		reader: failingReader{}, boundary: &boundary, activity: &activity, ended: &ended,
+		afterRead: func(_ int, err error) { observed = err != nil && ended.Load() },
+	}
+	if _, err := reader.Read(make([]byte, 1)); err == nil {
+		t.Fatal("failing transport unexpectedly succeeded")
+	}
+	if !observed {
+		t.Fatal("transport failure was returned before readiness state published it")
+	}
+}
+
 func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	dir := t.TempDir()
 	panesPath := filepath.Join(dir, "panes.json")
@@ -83,14 +104,14 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 			case <-r.Context().Done():
 				return
 			}
-			fmt.Fprint(w, "event: data_changed\n")
+			fmt.Fprint(w, "event: data_")
 			w.(http.Flusher).Flush()
 			select {
 			case <-finishEvent:
 			case <-r.Context().Done():
 				return
 			}
-			fmt.Fprint(w, "data: {}\n\n")
+			fmt.Fprint(w, "changed\ndata: {}\n\n")
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
 		case "/api/v1/sessions":
@@ -103,8 +124,8 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	checkStarted := make(chan struct{})
 	releaseCheck := make(chan struct{})
 	var checkOnce sync.Once
-	scanned := make(chan struct{})
-	var scanNotified atomic.Bool
+	fragmentRead := make(chan struct{})
+	var readNotified atomic.Bool
 	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -121,9 +142,9 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
 			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
 			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
-			afterScan: func() {
-				if scanNotified.CompareAndSwap(false, true) {
-					close(scanned)
+			afterRead: func(n int, _ error) {
+				if n > 0 && readNotified.CompareAndSwap(false, true) {
+					close(fragmentRead)
 				}
 			},
 			beforeReadinessCheck: func() {
@@ -150,9 +171,9 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	}
 	close(emitPartial)
 	select {
-	case <-scanned:
+	case <-fragmentRead:
 	case <-time.After(time.Second):
-		t.Fatal("partial event line was not scanned while readiness was paused")
+		t.Fatal("fragmented event bytes were not read while readiness was paused")
 	}
 	close(releaseCheck)
 	select {

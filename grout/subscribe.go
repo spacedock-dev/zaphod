@@ -53,6 +53,7 @@ type SubscribeConfig struct {
 	// Package-private deterministic concurrency seams used only by tests.
 	afterScan            func()
 	beforeReadinessCheck func()
+	afterRead            func(int, error)
 }
 
 type zellijPane struct {
@@ -67,6 +68,30 @@ type zellijPane struct {
 
 type targetSnapshot struct {
 	cwds map[string]struct{}
+}
+
+type readinessReader struct {
+	reader    io.Reader
+	boundary  *sync.Mutex
+	activity  *atomic.Uint64
+	ended     *atomic.Bool
+	afterRead func(int, error)
+}
+
+func (r readinessReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	r.boundary.Lock()
+	if n > 0 {
+		r.activity.Add(1)
+	}
+	if err != nil {
+		r.ended.Store(true)
+	}
+	r.boundary.Unlock()
+	if r.afterRead != nil {
+		r.afterRead(n, err)
+	}
+	return n, err
 }
 
 func canonicalTabID(value string) (uint64, error) {
@@ -354,7 +379,14 @@ func streamEvents(
 		return fmt.Errorf("source stream: expected text/event-stream, found %q", response.Header.Get("Content-Type"))
 	}
 
-	scanner := bufio.NewScanner(response.Body)
+	var streamBoundary sync.Mutex
+	var streamEnded atomic.Bool
+	var transportActivity atomic.Uint64
+	scanner := bufio.NewScanner(readinessReader{
+		reader: response.Body, boundary: &streamBoundary,
+		activity: &transportActivity, ended: &streamEnded,
+		afterRead: cfg.afterRead,
+	})
 	// An event is only a trigger today, but allow enough room for a server
 	// diagnostic without silently tokenizing it.
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
@@ -364,11 +396,13 @@ func streamEvents(
 		done bool
 	}
 	lines := make(chan scanResult)
-	var streamBoundary sync.Mutex
-	var streamEnded atomic.Bool
 	var streamActivity atomic.Uint64
+	var streamFragment atomic.Bool
 	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		advance, token, err = bufio.ScanLines(data, atEOF)
+		streamBoundary.Lock()
+		streamFragment.Store(token == nil && len(data) > 0 && !atEOF)
+		streamBoundary.Unlock()
 		if token != nil {
 			streamBoundary.Lock()
 			streamActivity.Add(1)
@@ -413,6 +447,7 @@ func streamEvents(
 	var settleTimer *time.Timer
 	var settleC <-chan time.Time
 	var settleGeneration uint64
+	var settleTransportGeneration uint64
 	var consumedActivity uint64
 	pendingDataChange := false
 	startSettle := func() {
@@ -422,6 +457,7 @@ func streamEvents(
 		settleTimer = time.NewTimer(25 * time.Millisecond)
 		settleC = settleTimer.C
 		settleGeneration = streamActivity.Load()
+		settleTransportGeneration = transportActivity.Load()
 	}
 	startCatchup := func() {
 		result := make(chan error, 1)
@@ -488,7 +524,8 @@ func streamEvents(
 			}
 			streamBoundary.Lock()
 			scanned := streamActivity.Load()
-			if scanned != settleGeneration || !startupStreamQuiet(scanned, consumedActivity, eventName) {
+			if scanned != settleGeneration || transportActivity.Load() != settleTransportGeneration ||
+				streamFragment.Load() || !startupStreamQuiet(scanned, consumedActivity, eventName) {
 				streamBoundary.Unlock()
 				startSettle()
 				continue

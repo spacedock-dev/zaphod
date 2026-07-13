@@ -35,8 +35,13 @@ zaphod_render_layout() {
     replacement="${replacement//|/\\|}"
     token_replacement="${recipient_token//&/\\&}"
     token_replacement="${token_replacement//|/\\|}"
-    sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
-        -e "s|__ZAPHOD_RECIPIENT__|$token_replacement|g" "$template" > "$output"
+    if [ -n "$recipient_token" ]; then
+        sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
+            -e "s|__ZAPHOD_RECIPIENT__|$token_replacement|g" "$template" > "$output"
+    else
+        sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
+            -e '/__ZAPHOD_RECIPIENT__/d' "$template" > "$output"
+    fi
 }
 
 zaphod_kdl_escape() {
