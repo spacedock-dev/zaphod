@@ -252,6 +252,9 @@ func streamEvents(
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("source stream: unexpected HTTP status %s", response.Status)
 	}
+	if err := startupSignal(cfg.StartupFD); err != nil {
+		return fmt.Errorf("stream-ready signal: %w", err)
+	}
 
 	scanner := bufio.NewScanner(response.Body)
 	// An event is only a trigger today, but allow enough room for a server

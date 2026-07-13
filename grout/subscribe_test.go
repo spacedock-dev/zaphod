@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -50,7 +51,13 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer startupReader.Close()
-	defer startupWriter.Close()
+	startupFD, err := syscall.Dup(int(startupWriter.Fd()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := startupWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
 	ready := make(chan string, 1)
 	go func() {
 		payload, _ := io.ReadAll(startupReader)
@@ -100,7 +107,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 			ZellijSession:     "WORK",
 			TabID:             "73",
 			RailURL:           railURL,
-			StartupFD:         int(startupWriter.Fd()),
+			StartupFD:         startupFD,
 			PipeTimeout:       time.Second,
 			SummaryClampBytes: 512,
 		}, nil)

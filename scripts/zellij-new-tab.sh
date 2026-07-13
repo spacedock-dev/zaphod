@@ -181,13 +181,13 @@ start_private_sidecar() {
         fail "sidecar-start-failed: could not launch private zaphod sidecar"
     fi
     set +e
-    IFS= read -r -t 2 startup_message < "$SIDECAR_START_FIFO"
+    IFS= read -r -t 10 startup_message < "$SIDECAR_START_FIFO"
     startup_status=$?
     set -e
     rm -f "$SIDECAR_START_FIFO"
     SIDECAR_START_FIFO=""
     if [ "$startup_status" -ne 0 ] || [ "$startup_message" != "ready" ]; then
-        fail "sidecar-start-failed: private zaphod sidecar did not exec"
+        fail "sidecar-start-failed: private zaphod sidecar did not establish the AgentsView stream"
     fi
 }
 

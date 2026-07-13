@@ -22,8 +22,9 @@ set -euo pipefail
 FQ="$(git rev-parse --show-toplevel)"
 AGENTSVIEW_BIN="$(command -v agentsview)"
 AGENTSVIEW_URL=http://127.0.0.1:8080
-MARKER="fq-$(date +%s)"
-SSE_MARKER="${MARKER}-sse"
+RUN_ID="$(date +%s)"
+MARKER="fq-initial-${RUN_ID}"
+SSE_MARKER="fq-sse-${RUN_ID}"
 printf 'selected checkout: %s\ninitial marker: %s\nSSE marker: %s\n' "$FQ" "$MARKER" "$SSE_MARKER"
 ```
 
@@ -73,7 +74,9 @@ shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-before.sha256
 ```
 
 Do not start another sidecar. The entry output must contain `TAB_ID`,
-`WASM_URL`, `SIDECAR_LOG`, and `SIDECAR_PID`.
+`WASM_URL`, `SIDECAR_LOG`, and `SIDECAR_PID`. The command emits those values
+only after the sidecar has completed its initial refresh and received a
+successful SSE response.
 
 ## 3. Create one real agent session
 
@@ -116,7 +119,8 @@ done
 
 The captain must now report a visible `AGENTS` header and `codex` row with the
 exact initial marker. This is only the baseline: the sidecar may have emitted
-it during its initial HTTP refresh, so it does not yet prove the SSE stream.
+an older session during its initial HTTP refresh, but this new session was
+created after the entry command's stream-ready handshake.
 
 ## 5. Prove a post-baseline SSE refresh
 

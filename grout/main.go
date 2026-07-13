@@ -31,9 +31,7 @@ type Config struct {
 }
 
 // startupSignal writes one short confirmation to the direct script's private
-// FIFO after this native process has successfully started. It is deliberately
-// not part of runSubscribe: a source or target failure after exec is terminal
-// sidecar lifecycle, not a failed host exec.
+// FIFO only after the initial refresh and SSE response are both established.
 func startupSignal(fd int) error {
 	if fd == -1 {
 		return nil
@@ -112,7 +110,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 	session := flags.String("zellij-session", "", "Zellij session")
 	tabID := flags.String("tab-id", "", "stable Zellij tab ID")
 	railURL := flags.String("rail-url", "", "canonical sidebar WASM URL")
-	startupFD := flags.Int("startup-fd", -1, "private direct-script startup confirmation fd")
+	startupFD := flags.Int("startup-fd", -1, "private direct-script stream-ready confirmation fd")
 	if err := flags.Parse(args); err != nil {
 		return SubscribeConfig{}, err
 	}
@@ -170,10 +168,6 @@ func runMain(args []string, stderr io.Writer) int {
 		}
 		subscribeUsage(stderr)
 		return 2
-	}
-	if err := startupSignal(cfg.StartupFD); err != nil {
-		fmt.Fprintf(stderr, "sidecar startup signal failed: %v\n", err)
-		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
