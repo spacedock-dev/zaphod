@@ -349,3 +349,54 @@ all local/live checks pass, and no unresolved implementation finding is known.
 Broader terminal/OS permutations, the optional detached-descendant reap, and
 the pristine interactive permission drill remain bounded follow-ups pending
 captain disposition; no new completion panel was started during the pause.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Reproduce and explain the frozen-head WORK timeout without further live mutation.
+  Stable tab `8`, exact recipient token, and the synthetic event reached the
+  intended rail, but the ready probe returned status 0 with empty output.
+- DONE: Identify the permission mechanism behind the empty acknowledgement.
+  Zellij's raw-path permission cache contained the older grants but omitted
+  `ReadCliPipes`; event admission ran, while `cli_pipe_output` could not return
+  `ready`. The native expanded-permission prompt remained unfocused.
+- DONE: Identify the mixed-version broadcast mechanism.
+  A legacy rail on another WORK tab still accepted the session-wide
+  `agent-event` name, so sender arguments could not isolate old receivers.
+- DONE: Preserve the live boundary after diagnosis.
+  No further WORK tab was created, focused, or switched during implementation;
+  all green evidence used disposable isolated tmux and Zellij sessions.
+- DONE: Add private versioned per-entry agent pipes with test-first evidence.
+  Red `0debecf` failed three Rust admission/render cases and two Go private-name
+  cases; green `45bd13d` derives ready, snapshot, and event names from the
+  fresh recipient token and leaves legacy names inert.
+- DONE: Add the real cached-permission upgrade boundary with test-first evidence.
+  Red `15db369` timed out at the owned sidecar because the old cache could not
+  expose an actionable prompt; green `8014ddd` retains the verified plugin ID
+  and focuses that exact pane before the bounded startup handshake.
+- DONE: Cover the Zellij 0.44 redraw race exposed after literal approval.
+  Red `93c3c70` made one successful `list-panes` call return empty output and
+  failed as malformed state; green `06e0bb0` retries only blank successful
+  replies three times and still fails closed on `[]`, malformed data, or a
+  tuple mismatch.
+- DONE: Synchronize the adversarial two-rail stable-tab proof.
+  Both rails deliberately share one private token; a bystander-addressed
+  barrier proves it processed the shared pipe before the target marker is
+  asserted absent. Commits `9c73547` and `faacfc1` close quick findings.
+- DONE: Verify the complete exact-head product packet.
+  Rust passed 137/137 plus `cargo check --tests`; Go passed `go test ./...` and
+  `go vet ./...`; the entry shell suite passed 9/9.
+- DONE: Verify all disposable real-Zellij boundaries.
+  Pre-granted entry, old-cache literal-`y` upgrade, and shared-token two-rail
+  smokes passed with native state, visible rows, persisted `ReadCliPipes`, and
+  complete cleanup.
+- DONE: Preserve operator-owned KDL.
+  Standing config hash remains `8ce2a42dcd962a7f069e3c66a76ed5b6e0296e4300db3024e8abbe69bc81a196`;
+  standing layout hash remains `f100474193d9c914eb59c01cc1252bf1ee6d53ece156d3d654b64eab13ca8d6e`.
+- DONE: Clear the exact-tip quick gate and stop at the convergence boundary.
+  Quick job `480` reviewed `faacfc11e6f5663ad7c1dfc5600c1f2739c2b7f8`
+  and passed with no findings. No `code_completion` panel was launched.
+
+### Summary
+
+Direct entry now isolates agent traffic, exposes native permission expansion
+on the verified rail, survives redraw races, and leaves standing KDL unchanged.
