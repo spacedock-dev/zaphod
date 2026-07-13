@@ -1,7 +1,7 @@
 ---
 id: v3d4m3zfryre1eypjnaetd37
 title: Alt slash only changes a Zaphod-created tab
-status: implementation
+status: validation
 source: staff review of fp merge 2026-07-12; captain direction
 sprint: s1-managed-tab-safety
 group: walking-skeleton
