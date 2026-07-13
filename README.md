@@ -148,7 +148,12 @@ checkout's canonical WASM URL. Only then does it start one private
 `target/zaphod subscribe` process with the same Zellij profile and session.
 The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
 `--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
-Do not run the sidecar yourself.
+The startup handshake confirms that the sidecar executable launched; it does
+not wait for AgentsView's HTTP API. Start AgentsView and wait for the sessions
+endpoint before direct entry because the sidecar exits on its first source
+failure and does not retry. Do not run the sidecar yourself. For a live
+session-row check, follow the
+[chat-guided AgentsView demo](docs/zellij-agentsview-live-demo.md).
 
 If that exact rail never appears, the command reports
 `sidecar-target-unready`, starts no sidecar, and preserves the newly created
