@@ -2180,6 +2180,36 @@ extern "C" fn host_run_plugin_command() {}
 mod tests {
     use super::*;
 
+    #[test]
+    fn cli_pipe_permission_is_reserved_for_token_bound_entry() {
+        let installed = BTreeMap::new();
+        let mut empty_token = BTreeMap::new();
+        empty_token.insert("recipient_token".to_owned(), String::new());
+        let mut direct_entry = BTreeMap::new();
+        direct_entry.insert("recipient_token".to_owned(), "entry-token".to_owned());
+        let installed_permissions = vec![
+            PermissionType::ReadApplicationState,
+            PermissionType::ChangeApplicationState,
+            PermissionType::ReadPaneContents,
+            PermissionType::Reconfigure,
+            PermissionType::RunCommands,
+        ];
+
+        assert_eq!(permissions_for_config(&installed), installed_permissions);
+        assert_eq!(permissions_for_config(&empty_token), installed_permissions);
+        assert_eq!(
+            permissions_for_config(&direct_entry),
+            vec![
+                PermissionType::ReadApplicationState,
+                PermissionType::ChangeApplicationState,
+                PermissionType::ReadPaneContents,
+                PermissionType::ReadCliPipes,
+                PermissionType::Reconfigure,
+                PermissionType::RunCommands,
+            ]
+        );
+    }
+
     fn pane(id: u32, is_plugin: bool, title: &str, y: usize, focused: bool) -> PaneInfo {
         PaneInfo {
             id,
