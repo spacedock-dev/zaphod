@@ -62,6 +62,7 @@ SIDECAR_PID=""
 SIDECAR_LOG=""
 SIDECAR_START_FIFO=""
 ENTRY_PID=""
+LAYOUT_VALIDATOR=""
 
 zellij_control() {
     env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
@@ -147,7 +148,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-for required in tmux jq shasum go; do
+for required in tmux jq shasum go cargo; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required for the tmux smoke"
 done
 zaphod_require_zellij_0443
@@ -208,6 +209,9 @@ AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 "$REPO_ROOT/build.sh" >/dev/null
+"$(command -v cargo)" build --quiet --features host-kdl-validator --bin zaphod-kdl-validate
+LAYOUT_VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
+[ -x "$LAYOUT_VALIDATOR" ] || fail "host KDL validator was not built"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive the candidate WASM URL"
 
@@ -261,13 +265,23 @@ send_literal() {
     tmux_command send-keys -l -t "$TMUX_PANE" -- "$1"
 }
 
+capture_validated_layout() {
+    local panes="$1"
+    local layout="$2"
+    local expectation="$3"
+    zaphod_capture_validated_layout "$LAYOUT_VALIDATOR" "$WASM_URL" "$expectation" \
+        "$panes" "$layout" zellij_session action dump-layout
+}
+
 capture_state() {
     local json="$1"
     local layout="$2"
     local screen="$3"
+    local expectation="$4"
     zellij_session action list-panes --json --all --command --geometry --state --tab > "$json"
     jq -S . "$json" > "$json.sorted"
-    zellij_session action dump-layout > "$layout"
+    capture_validated_layout "$json" "$layout" "$expectation" ||
+        fail "native layout capture failed for $layout"
     tmux_command capture-pane -p -t "$TMUX_PANE" > "$screen"
 }
 
@@ -380,7 +394,8 @@ wait_for_settled_candidate_resident() {
             grep -F 'PANES' "$screen" >/dev/null; then
             jq -S . "$panes" > "$panes.sorted"
             jq -S . "$tabs" > "$tabs.sorted"
-            zellij_session action dump-layout > "$layout"
+            capture_validated_layout "$panes" "$layout" present ||
+                fail "settled candidate layout did not validate atomically"
             return
         fi
         sleep 0.05
@@ -405,7 +420,7 @@ zaphod_valid_tab_inventory "$ROOT/foreign-tabs-before.json" ||
     fail "isolated foreign tab inventory was not a complete stable-ID record"
 TAB_COUNT_BEFORE="$(jq -er 'length' "$ROOT/foreign-tabs-before.json")"
 FOREIGN_TAB_ID="$(jq -er '.[] | select(.active) | .tab_id' "$ROOT/foreign-tabs-before.json")"
-capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreign-ready.screen"
+capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreign-ready.screen" absent
 jq -e --arg wasm_url "$WASM_URL" \
     'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
     fail "isolated profile unexpectedly started on the selected checkout rail"
@@ -658,7 +673,8 @@ wait_for_candidate_width "$ROOT/candidate-after.json" 1
 # inventory. Do not issue a second list-panes call in the swap transition;
 # v0.44 can briefly return an empty successful response while it redraws.
 jq -S . "$ROOT/candidate-after.json" > "$ROOT/candidate-after.json.sorted"
-zellij_session action dump-layout > "$ROOT/candidate-after.kdl"
+capture_validated_layout "$ROOT/candidate-after.json" "$ROOT/candidate-after.kdl" present ||
+    fail "post-toggle candidate layout did not validate atomically"
 tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/candidate-after.screen"
 without_geometry "$ROOT/candidate-after.json" "$ROOT/candidate-after.identity.json"
 candidate_geometry "$ROOT/candidate-after.json" "$ROOT/candidate-after.geometry.json"
@@ -678,10 +694,10 @@ cmp -s "$ROOT/candidate-before.screen" "$ROOT/candidate-after.screen" &&
 # send literal Alt / and require byte-identical foreign state.
 zellij_session action go-to-previous-tab
 wait_for_foreign_active_tab "$ROOT/foreign-tabs-after-route.json" "$FOREIGN_TAB_ID"
-capture_state "$ROOT/foreign-before.json" "$ROOT/foreign-before.kdl" "$ROOT/foreign-before.screen"
+capture_state "$ROOT/foreign-before.json" "$ROOT/foreign-before.kdl" "$ROOT/foreign-before.screen" present
 send_literal "$(printf '\033/')"
 sleep 0.10
-capture_state "$ROOT/foreign-after.json" "$ROOT/foreign-after.kdl" "$ROOT/foreign-after.screen"
+capture_state "$ROOT/foreign-after.json" "$ROOT/foreign-after.kdl" "$ROOT/foreign-after.screen" present
 cmp -s "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" || {
     diff -u "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" >&2 || true
     fail "post-route foreign Alt / changed native pane, focus, tab, or process state"
