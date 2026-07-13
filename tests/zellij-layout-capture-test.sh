@@ -110,4 +110,13 @@ set -e
 [ "$status" -ne 0 ] || fail "absent-pane identity mismatch unexpectedly succeeded"
 assert_attempts 1 absent-identity
 
+dd if=/dev/zero bs=1048576 count=5 2>/dev/null | tr '\0' x > "$ROOT/oversized.kdl"
+set +e
+"$VALIDATOR" "$ROOT/oversized.kdl" "$EXPECTED" present > "$ROOT/oversized.out" 2> "$ROOT/oversized.err"
+status=$?
+set -e
+[ "$status" -eq 20 ] || fail "oversized layout exited $status instead of malformed-record status 20"
+[ ! -s "$ROOT/oversized.out" ] || fail "oversized layout emitted unbounded stdout"
+grep -F 'exceeds 4194304' "$ROOT/oversized.err" >/dev/null || fail "oversized layout omitted its fixed ceiling"
+
 echo "PASS: native layout capture is atomic, bounded, and identity-bound"
