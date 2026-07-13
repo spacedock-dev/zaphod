@@ -101,6 +101,19 @@ mod tests {
     }
 
     #[test]
+    fn candidate_requires_one_exact_rail_child() {
+        let missing = "layout {\n plugin location=\"file:/candidate/zellij-sidebar.wasm\"\n}\n";
+        let wrong = "layout {\n plugin location=\"file:/candidate/zellij-sidebar.wasm\" {\n  rail \"0\"\n }\n}\n";
+        let duplicate = "layout {\n plugin location=\"file:/candidate/zellij-sidebar.wasm\" {\n  rail \"1\"\n  rail \"1\"\n }\n}\n";
+        for input in [missing, wrong, duplicate] {
+            assert_eq!(
+                validate_layout(input, EXPECTED, true),
+                Err(ValidationError::Identity)
+            );
+        }
+    }
+
+    #[test]
     fn complete_layout_without_candidate_is_valid_when_absent_is_expected() {
         let input = "layout {\n pane {\n  plugin location=\"zellij:tab-bar\"\n }\n}\n";
         assert_eq!(validate_layout(input, EXPECTED, false), Ok(()));
