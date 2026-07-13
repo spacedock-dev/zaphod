@@ -61,6 +61,7 @@ type SubscribeConfig struct {
 	beforeSplit            func()
 	afterTokenPendingClear func()
 	recipientWaitTimeout   time.Duration
+	nativeDiagnostics      io.Writer
 }
 
 type zellijPane struct {
@@ -217,6 +218,10 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 		if len(bytes.TrimSpace(output)) > 0 {
 			if err := json.Unmarshal(output, &panes); err != nil {
 				if isNativeLayoutReply(output) && attempt < 2 {
+					if cfg.nativeDiagnostics != nil {
+						fmt.Fprintf(cfg.nativeDiagnostics, "transient-native-pane-reply: %s\n",
+							nativePaneReplyProvenance(lastAttempt, output, stderrOutput))
+					}
 					select {
 					case <-ctx.Done():
 						return targetSnapshot{}, ctx.Err()
@@ -707,6 +712,7 @@ func runSubscribe(ctx context.Context, cfg SubscribeConfig, stderr io.Writer) er
 	if cfg.SourceTimeout <= 0 {
 		cfg.SourceTimeout = 5 * time.Second
 	}
+	cfg.nativeDiagnostics = stderr
 	if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
 		return err
 	}
