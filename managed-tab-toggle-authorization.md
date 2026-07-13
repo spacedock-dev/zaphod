@@ -1,7 +1,7 @@
 ---
 id: v3d4m3zfryre1eypjnaetd37
 title: Alt slash only changes a Zaphod-created tab
-status: ideation
+status: implementation
 source: staff review of fp merge 2026-07-12; captain direction
 sprint: s1-managed-tab-safety
 group: walking-skeleton
@@ -10,7 +10,7 @@ started: 2026-07-12T14:50:58Z
 completed:
 verdict:
 score: 1.0
-worktree:
+worktree: .worktrees/spacedock-ensign-managed-tab-toggle-authorization
 issue:
 pr:
 mod-block:
