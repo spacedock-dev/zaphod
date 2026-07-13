@@ -252,7 +252,9 @@ BYSTANDER_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-target\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"blocked\",\"summary\":\"BB_RECIPIENT_MARKER\"}"
-zellij_session pipe --name agent-event --args "recipient-tab-id=$TARGET_TAB_ID" -- "$PAYLOAD"
+PIPE_ACK_FILE="$ROOT/pipe-ack"
+zellij_session pipe --name agent-event --args "recipient-tab-id=$TARGET_TAB_ID" -- "$PAYLOAD" > "$PIPE_ACK_FILE"
+[ "$(cat "$PIPE_ACK_FILE")" = accepted ] || fail "target rail did not acknowledge the accepted row"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 
 zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"

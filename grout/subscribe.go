@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -203,28 +204,40 @@ func fetchSessions(ctx context.Context, client *http.Client, serverURL string, t
 	return page.Sessions, nil
 }
 
-func refreshSessions(
+func snapshotSessions(
 	ctx context.Context,
 	client *http.Client,
 	cfg SubscribeConfig,
 	stableTabID uint64,
-	stderr io.Writer,
-) error {
+) ([]sessionInfo, error) {
 	// Probing before the source call makes a vanished session/tab terminal even
 	// when the next list happens to be empty. A later probe before each pipe
 	// closes the race between list and delivery.
 	target, err := probeTarget(ctx, cfg, stableTabID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	sessions, err := fetchSessions(ctx, client, cfg.ServerURL, cfg.SourceTimeout)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	local := make([]sessionInfo, 0, len(sessions))
 	for _, session := range sessions {
-		if _, local := target.cwds[session.Cwd]; !local {
-			continue
+		if _, matches := target.cwds[session.Cwd]; matches {
+			local = append(local, session)
 		}
+	}
+	return local, nil
+}
+
+func deliverSessions(
+	ctx context.Context,
+	cfg SubscribeConfig,
+	stableTabID uint64,
+	sessions []sessionInfo,
+	stderr io.Writer,
+) error {
+	for _, session := range sessions {
 		current, err := probeTarget(ctx, cfg, stableTabID)
 		if err != nil {
 			return err
@@ -233,11 +246,25 @@ func refreshSessions(
 			continue
 		}
 		row := BuildSessionRow(session, time.Now(), cfg.SummaryClampBytes)
-		if err := EmitRowForTab(cfg.emitConfig(), row.Kind, row, cfg.TabID, stderr); err != nil {
+		if err := EmitRowForTab(ctx, cfg.emitConfig(), row.Kind, row, cfg.TabID, stderr); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func refreshSessions(
+	ctx context.Context,
+	client *http.Client,
+	cfg SubscribeConfig,
+	stableTabID uint64,
+	stderr io.Writer,
+) error {
+	sessions, err := snapshotSessions(ctx, client, cfg, stableTabID)
+	if err != nil {
+		return err
+	}
+	return deliverSessions(ctx, cfg, stableTabID, sessions, stderr)
 }
 
 func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
@@ -307,6 +334,7 @@ func streamEvents(
 		done bool
 	}
 	lines := make(chan scanResult)
+	var streamEnded atomic.Bool
 	go func() {
 		for scanner.Scan() {
 			select {
@@ -315,6 +343,7 @@ func streamEvents(
 				return
 			}
 		}
+		streamEnded.Store(true)
 		select {
 		case lines <- scanResult{err: scanner.Err(), done: true}:
 		case <-streamCtx.Done():
@@ -324,31 +353,72 @@ func streamEvents(
 	ready := false
 	readyTimer := time.NewTimer(100 * time.Millisecond)
 	defer readyTimer.Stop()
-	markReady := func() error {
-		if ready {
-			return nil
-		}
-		if err := waitForRecipient(ctx, cfg); err != nil {
-			return err
-		}
-		if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
-			return err
-		}
-		if err := startupSignal(cfg.StartupFD); err != nil {
-			return fmt.Errorf("stream-ready signal: %w", err)
-		}
-		ready = true
-		return nil
+	readyTimerC := readyTimer.C
+	type handshakeResult struct {
+		sessions []sessionInfo
+		err      error
 	}
+	var handshake <-chan handshakeResult
+	var settleTimer *time.Timer
+	var settleC <-chan time.Time
+	var initialSessions []sessionInfo
+	pendingDataChange := false
+	startHandshake := func() {
+		result := make(chan handshakeResult, 1)
+		handshake = result
+		go func() {
+			if err := waitForRecipient(streamCtx, cfg); err != nil {
+				result <- handshakeResult{err: err}
+				return
+			}
+			sessions, err := snapshotSessions(streamCtx, client, cfg, stableTabID)
+			result <- handshakeResult{sessions: sessions, err: err}
+		}()
+	}
+	defer func() {
+		if settleTimer != nil {
+			settleTimer.Stop()
+		}
+	}()
 
 	eventName := ""
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-readyTimer.C:
-			if err := markReady(); err != nil {
+		case <-readyTimerC:
+			readyTimerC = nil
+			startHandshake()
+		case result := <-handshake:
+			handshake = nil
+			if result.err != nil {
+				return result.err
+			}
+			initialSessions = result.sessions
+			// Keep consuming the stream for one final scheduling turn so an EOF
+			// already produced during the handshake wins before handoff.
+			settleTimer = time.NewTimer(25 * time.Millisecond)
+			settleC = settleTimer.C
+		case <-settleC:
+			settleC = nil
+			if streamEnded.Load() {
+				return ErrSourceEOF
+			}
+			if err := startupSignal(cfg.StartupFD); err != nil {
+				return fmt.Errorf("stream-ready signal: %w", err)
+			}
+			ready = true
+			// Replay no longer consumes the launcher's readiness deadline. Each
+			// row still revalidates and requires its own recipient acknowledgment.
+			if err := deliverSessions(ctx, cfg, stableTabID, initialSessions, stderr); err != nil {
 				return err
+			}
+			initialSessions = nil
+			if pendingDataChange {
+				pendingDataChange = false
+				if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
+					return err
+				}
 			}
 		case result := <-lines:
 			if result.done {
@@ -361,9 +431,13 @@ func streamEvents(
 				return fmt.Errorf("source stream: %w", result.err)
 			}
 			if result.line == "" {
-				if eventName == "data_changed" && ready {
-					if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
-						return err
+				if eventName == "data_changed" {
+					if ready {
+						if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
+							return err
+						}
+					} else {
+						pendingDataChange = true
 					}
 				} else if eventName == "heartbeat" && ready {
 					if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {

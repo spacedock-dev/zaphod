@@ -217,7 +217,7 @@ Zellij's grant cache is keyed by the raw WASM path; the smoke harness
 redirects `HOME` to a temporary root and uses a deliberately pre-granted
 fixture, so it never writes the operator's cache or fakes consent with
 keystrokes. `ReadCliPipes` is used only for the direct-entry subscriber's
-private recipient acknowledgment before it delivers initial rows.
+private recipient and accepted-row acknowledgments.
 `Reconfigure` changes only runtime keybinds; Zaphod does not save that route
 to disk. `RunCommands` is required only when a gate row floats `subspace-tui`.
 

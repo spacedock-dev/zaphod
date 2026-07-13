@@ -4,11 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -52,17 +54,48 @@ func EmitRow(cfg Config, kind string, row any, stderr io.Writer) error {
 	return emitRow(cfg, kind, row, "", stderr)
 }
 
-// EmitRowForTab is the private subscriber's one session-row delivery seam.
-// It retains the existing JSON row protocol, but supplies the stable tab ID
-// receiver guard on every otherwise-session-wide pipe broadcast.
+// EmitRowForTab is the private subscriber's acknowledged session-row seam.
+// The exact stable-tab receiver replies only after accepting the JSON row;
+// an unacknowledged successful broadcast is retried within PipeTimeout.
 func EmitRowForTab(
+	ctx context.Context,
 	cfg Config,
 	kind string,
 	row any,
 	recipientTabID string,
 	stderr io.Writer,
 ) error {
-	return emitRow(cfg, kind, row, recipientTabID, stderr)
+	payload, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	deliveryCtx, cancel := context.WithTimeout(ctx, cfg.PipeTimeout)
+	defer cancel()
+	args := append(zellijProfileArgs(cfg), pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID)...)
+	for {
+		var stdout bytes.Buffer
+		cmd := exec.CommandContext(deliveryCtx, cfg.ZellijBin, args...)
+		cmd.WaitDelay = 2 * time.Second
+		cmd.Stdout = &stdout
+		cmd.Stderr = stderr
+		err := cmd.Run()
+		if err == nil && strings.TrimSpace(stdout.String()) == "accepted" {
+			return nil
+		}
+		if deliveryCtx.Err() != nil {
+			return fmt.Errorf("pipe timeout after %s without recipient acknowledgment: kind=%s", cfg.PipeTimeout, kind)
+		}
+		if err != nil {
+			return err
+		}
+		retry := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-deliveryCtx.Done():
+			retry.Stop()
+			return fmt.Errorf("pipe timeout after %s without recipient acknowledgment: kind=%s", cfg.PipeTimeout, kind)
+		case <-retry.C:
+		}
+	}
 }
 
 func emitRow(

@@ -696,7 +696,13 @@ impl ZellijPlugin for Sidebar {
                 return false;
             };
             return match parse_agent_event(payload) {
-                Ok(event) => apply_agent_event(&mut self.sessions, &mut self.gates, event),
+                Ok(event) => {
+                    let changed = apply_agent_event(&mut self.sessions, &mut self.gates, event);
+                    if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+                        cli_pipe_output(pipe_id, "accepted");
+                    }
+                    changed
+                }
                 Err(reason) => {
                     trace!(self, "agent-event dropped: {}", reason);
                     false

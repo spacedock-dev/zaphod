@@ -33,6 +33,7 @@ func fakeSubscriberZellij(t *testing.T, dir, log, panes string) string {
 		"    case \"$*\" in *agent-event-ready*) : > "+readyPath+"; echo ready; exit 0 ;; esac\n"+
 		"    [ -f "+readyPath+" ] || exit 70\n"+
 		"    { echo \"$#\"; for value in \"$@\"; do printf '%s\\n' \"$value\"; done; } >> "+log+"\n"+
+		"    echo accepted\n"+
 		"    exit 0\n"+
 		"  fi\n"+
 		"done\n"+
@@ -300,5 +301,186 @@ func TestSubscribeTimesOutStalledInitialRefresh(t *testing.T) {
 	}
 	if readErr != nil || len(payload) != 0 {
 		t.Fatalf("stalled initial refresh signaled readiness: %q, %v", payload, readErr)
+	}
+}
+
+func TestTabDeliveryRetriesUntilExactRecipientAcknowledges(t *testing.T) {
+	dir := t.TempDir()
+	countPath := filepath.Join(dir, "count")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"count=0\n"+
+		"[ ! -f "+countPath+" ] || count=$(cat "+countPath+")\n"+
+		"count=$((count + 1))\n"+
+		"echo $count > "+countPath+"\n"+
+		"[ $count -lt 2 ] || echo accepted\n")
+	err := EmitRowForTab(context.Background(), Config{
+		ZellijBin:   zellij,
+		PipeName:    "agent-event",
+		PipeTimeout: time.Second,
+	}, "session", SessionRow{Kind: "session", ID: "retry"}, "73", nil)
+	if err != nil {
+		t.Fatalf("acknowledged retry failed: %v", err)
+	}
+	count, err := os.ReadFile(countPath)
+	if err != nil || strings.TrimSpace(string(count)) != "2" {
+		t.Fatalf("delivery attempts = %q, %v; want one dropped attempt plus acknowledged retry", count, err)
+	}
+}
+
+func TestSubscribeRejectsEOFDuringHandshake(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		delayReady    bool
+		stallSessions bool
+	}{
+		{name: "recipient wait", delayReady: true},
+		{name: "initial fetch", stallSessions: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			panesPath := filepath.Join(dir, "panes.json")
+			if err := os.WriteFile(panesPath, []byte(`[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			readyDelay := ""
+			if tc.delayReady {
+				readyDelay = "sleep 2\n"
+			}
+			zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+				"for arg in \"$@\"; do\n"+
+				"  if [ \"$arg\" = list-panes ]; then cat "+panesPath+"; exit 0; fi\n"+
+				"done\n"+
+				readyDelay+
+				"echo ready\n")
+			fetchStarted := make(chan struct{})
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/events":
+					w.Header().Set("Content-Type", "text/event-stream")
+					w.(http.Flusher).Flush()
+					if tc.stallSessions {
+						<-fetchStarted
+					} else {
+						time.Sleep(175 * time.Millisecond)
+					}
+				case "/api/v1/sessions":
+					if !tc.stallSessions {
+						t.Errorf("unexpected sessions request while recipient was unavailable")
+						return
+					}
+					close(fetchStarted)
+					<-r.Context().Done()
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer source.Close()
+
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = runSubscribe(context.Background(), SubscribeConfig{
+				ServerURL: source.URL, ZellijBin: zellij,
+				ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
+				ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
+				RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+				StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
+			}, nil)
+			_ = writer.Close()
+			payload, readErr := io.ReadAll(reader)
+			_ = reader.Close()
+			if !errors.Is(err, ErrSourceEOF) {
+				t.Fatalf("handshake closure error = %v, want source EOF", err)
+			}
+			if readErr != nil || len(payload) != 0 {
+				t.Fatalf("EOF during handshake signaled readiness: %q, %v", payload, readErr)
+			}
+		})
+	}
+}
+
+func TestSubscribeSignalsReadyBeforeMultiRowReplay(t *testing.T) {
+	dir := t.TempDir()
+	panesPath := filepath.Join(dir, "panes.json")
+	deliveryStarted := filepath.Join(dir, "delivery-started")
+	releaseDelivery := filepath.Join(dir, "release-delivery")
+	if err := os.WriteFile(panesPath, []byte(`[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \"$*\" in\n"+
+		"  *list-panes*) cat "+panesPath+" ;;\n"+
+		"  *agent-event-ready*) echo ready ;;\n"+
+		"  *agent-event*) : > "+deliveryStarted+"; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
+		"esac\n")
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions":
+			fmt.Fprint(w, `{"sessions":[
+ {"id":"one","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"},
+ {"id":"two","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"}
+]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer source.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runSubscribe(ctx, SubscribeConfig{
+			ServerURL: source.URL, ZellijBin: zellij,
+			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
+			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
+			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
+		}, nil)
+	}()
+	ready := make(chan string, 1)
+	go func() {
+		payload := make([]byte, 6)
+		n, _ := reader.Read(payload)
+		ready <- string(payload[:n])
+	}()
+	select {
+	case payload := <-ready:
+		if payload != "ready\n" {
+			t.Fatalf("startup payload = %q", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("multi-row replay blocked startup readiness")
+	}
+	for attempt := 0; attempt < 100; attempt++ {
+		if _, err := os.Stat(deliveryStarted); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(deliveryStarted); err != nil {
+		t.Fatalf("initial replay never began after readiness: %v", err)
+	}
+	if err := os.WriteFile(releaseDelivery, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	_ = writer.Close()
+	_ = reader.Close()
+	if err := <-errCh; err != nil {
+		t.Fatalf("subscriber cancellation = %v", err)
 	}
 }
