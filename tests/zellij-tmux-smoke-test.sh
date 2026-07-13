@@ -209,7 +209,8 @@ AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 "$REPO_ROOT/build.sh" >/dev/null
-"$(command -v cargo)" build --quiet --features host-kdl-validator --bin zaphod-kdl-validate
+"$(command -v cargo)" build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --features host-kdl-validator --bin zaphod-kdl-validate
 LAYOUT_VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
 [ -x "$LAYOUT_VALIDATOR" ] || fail "host KDL validator was not built"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
