@@ -225,12 +225,35 @@ start_private_sidecar() {
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
     fail "could not create a temporary Zaphod layout directory"
 RENDERED_LAYOUT="$TEMP_ROOT/zaphod.kdl"
+TABS_BEFORE="$TEMP_ROOT/tabs-before.json"
+TABS_AFTER="$TEMP_ROOT/tabs-after.json"
+NEW_TAB_STDOUT="$TEMP_ROOT/new-tab.stdout"
+NEW_TAB_STDERR="$TEMP_ROOT/new-tab.stderr"
 RECIPIENT_TOKEN="zaphod-$$-$RANDOM-$(date +%s)"
 zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT" "$RECIPIENT_TOKEN"
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
 
-TAB_ID="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
-    --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")")"
+ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+    action list-tabs --json --all --state --layout > "$TABS_BEFORE"
+set +e
+ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
+    --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")" \
+    > "$NEW_TAB_STDOUT" 2> "$NEW_TAB_STDERR"
+NEW_TAB_STATUS=$?
+set -e
+if [ "$NEW_TAB_STATUS" -ne 0 ]; then
+    cat "$NEW_TAB_STDERR" >&2
+    exit "$NEW_TAB_STATUS"
+fi
+TAB_ID=""
+for _attempt in $(seq 1 80); do
+    if ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+        action list-tabs --json --all --state --layout > "$TABS_AFTER" 2>/dev/null; then
+        TAB_ID="$(zaphod_new_tab_id_from_inventories "$TABS_BEFORE" "$TABS_AFTER" 2>/dev/null || true)"
+        [ -z "$TAB_ID" ] || break
+    fi
+    sleep 0.05
+done
 if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || ! wait_for_sidecar_target; then
     echo "sidecar-target-unready" >&2
     exit 1

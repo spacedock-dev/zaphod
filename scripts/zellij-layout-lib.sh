@@ -26,6 +26,32 @@ zaphod_canonical_file_url() {
     printf 'file:%s/%s\n' "$directory" "$basename"
 }
 
+# Print the one stable tab ID added between two complete native list-tabs JSON
+# inventories. Any malformed record, lost prior ID, or ambiguous addition is
+# rejected so callers never infer identity from action stdout or tab position.
+zaphod_new_tab_id_from_inventories() {
+    local before="$1"
+    local after="$2"
+    jq -er -n --slurpfile before "$before" --slurpfile after "$after" '
+        def stable_ids:
+            if type != "array" then error("tab inventory is not an array")
+            else map(
+                .tab_id |
+                if type == "number" and . >= 0 and floor == . then tostring
+                else error("tab_id is not a nonnegative integer")
+                end
+            ) | unique
+            end;
+        ($before[0] | stable_ids) as $old |
+        ($after[0] | stable_ids) as $new |
+        ($old - $new) as $lost |
+        ($new - $old) as $added |
+        if ($lost | length) == 0 and ($added | length) == 1 then $added[0]
+        else error("expected exactly one added tab and no lost tabs")
+        end
+    '
+}
+
 zaphod_render_layout() {
     local template="$1"
     local wasm_url="$2"
