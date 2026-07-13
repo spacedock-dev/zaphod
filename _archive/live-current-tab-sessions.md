@@ -1,6 +1,6 @@
 ---
 title: Live sessions arrive and lead back to work
-status: validation
+status: done
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
@@ -9,13 +9,14 @@ blocked-on:
 blocked-reason:
 score: 1.0
 started: 2026-07-12T00:02:21Z
-completed:
-verdict:
+completed: 2026-07-13T05:05:43Z
+verdict: passed
 worktree: .worktrees/spacedock-ensign-live-current-tab-sessions
 issue:
 pr:
 mod-block:
 id: bb3sedraaa53wa7wjp8xf0p7
+archived: 2026-07-13T05:05:43Z
 ---
 
 ## Problem
