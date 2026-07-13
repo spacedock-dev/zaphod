@@ -414,3 +414,44 @@ captain disposition; no new completion panel was started during the pause.
 
 Direct entry now isolates agent traffic, exposes native permission expansion
 on the verified rail, survives redraw races, and leaves standing KDL unchanged.
+
+## Stage Report: implementation (cycle 3)
+
+- DONE: Retry blank and native-empty pane inventories without masking terminal target loss.
+  Red `0065526`: `transient native [] list-panes reply was terminal:
+  target-lost: expected one resident rail in stable tab 73, found 0`.
+- DONE: Bound the native-empty retry and preserve terminal semantics.
+  Green `7ae4c50` retries blank or decoded `[]` at most three times; persistent
+  `[]`, malformed JSON, command failure, cancellation, and tuple loss remain terminal.
+- DONE: Publish SSE fragment, pending, and completed-token activity atomically at readiness.
+  Red `88c3a0b`: `token publication gap allowed readiness: "ready\n"`.
+- DONE: Close the deterministic ScanLines-token publication gap.
+  Green `c42b4d3` publishes fragment state, clears transport pending, increments
+  completed-token activity, and records EOF under one `streamBoundary` lock.
+- DONE: Preserve tokenless rail permissions while token-bound entry still obtains ReadCliPipes.
+  Red `acda8df`: Rust `E0425` reported `cannot find function
+  permissions_for_config in this scope` at all three permission assertions.
+- DONE: Make the permission vector depend on a non-empty recipient token.
+  Green `da26a89` keeps the five installed-layout grants for absent/empty tokens
+  and adds only `ReadCliPipes` for token-bound direct entry.
+- DONE: Complete the semantic adversarial pass over all three findings.
+  Blank→valid, `[]`→valid, persistent target loss, fragmented reads, queued
+  tokens, and the exact publication gap passed ten repetitions.
+- DONE: Verify native and real operator boundaries at exact head.
+  Go passed uncached full tests plus vet; Rust passed 138/138 plus check; entry
+  passed 9/9; artifact, pre-granted, permission-upgrade, and two-rail smokes passed.
+- DONE: Prove tokenless and token-bound permission behavior.
+  The Rust vector test covers absent, empty, and non-empty tokens; the isolated
+  upgrade smoke persisted `ReadCliPipes` after one literal `y` and rendered rows.
+- DONE: Preserve standing KDL and disposable cleanup.
+  Config/layout hashes remain `8ce2a42d...a196` and `f1004741...d6e`; every
+  isolated Zellij session, tmux server, sidecar, and temporary root was removed.
+- DONE: Clear exact-tip quick review and honor the convergence gate.
+  Quick job `521` passed at `980880099d59c57a154fe611cfe465f9dce51139`;
+  dispatch prohibited and no new `code_completion` panel was launched.
+
+### Summary
+
+The three panel-497 findings are fixed with independent red/green commits.
+Readiness and target identity remain fail closed, while tokenless installed
+rails avoid the direct-entry-only CLI-pipe permission.
