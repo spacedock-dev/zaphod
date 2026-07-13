@@ -57,6 +57,7 @@ type SubscribeConfig struct {
 	beforeNextScan       func()
 	beforeLineSend       func()
 	beforeSplit          func()
+	recipientWaitTimeout time.Duration
 }
 
 type zellijPane struct {
@@ -327,10 +328,14 @@ func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
 	// A newly added ReadCliPipes grant may put the ordinary permission prompt
 	// in front of the recipient. Leave the attached user time to approve it
 	// once while staying inside the entry script's overall startup bound.
-	deadline := time.NewTimer(18 * time.Second)
-	defer deadline.Stop()
+	waitTimeout := cfg.recipientWaitTimeout
+	if waitTimeout <= 0 {
+		waitTimeout = 18 * time.Second
+	}
+	waitCtx, cancelWait := context.WithTimeout(ctx, waitTimeout)
+	defer cancelWait()
 	for {
-		probeCtx, cancel := context.WithTimeout(ctx, cfg.PipeTimeout)
+		probeCtx, cancel := context.WithTimeout(waitCtx, cfg.PipeTimeout)
 		args := cfg.zellijArgs("pipe", "--name", "agent-event-ready", "--args", "recipient-tab-id="+cfg.TabID+",recipient-token="+cfg.RecipientToken)
 		command := exec.CommandContext(probeCtx, cfg.ZellijBin, args...)
 		command.Stdin = strings.NewReader("probe")
@@ -342,7 +347,10 @@ func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-deadline.C:
+		case <-waitCtx.Done():
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return fmt.Errorf("recipient-ready timeout for stable tab %s", cfg.TabID)
 		case <-time.After(50 * time.Millisecond):
 		}

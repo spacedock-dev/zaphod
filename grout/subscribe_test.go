@@ -100,6 +100,23 @@ func TestRecipientProbeAllowsMoreThanQuarterSecond(t *testing.T) {
 	}
 }
 
+func TestRecipientProbeHonorsOverallWaitDeadline(t *testing.T) {
+	dir := t.TempDir()
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nsleep 1\n")
+	started := time.Now()
+	err := waitForRecipient(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "s", TabID: "73", RecipientToken: "token",
+		PipeTimeout: time.Second, recipientWaitTimeout: 100 * time.Millisecond,
+	})
+	if err == nil || !strings.Contains(err.Error(), "recipient-ready timeout") {
+		t.Fatalf("hanging recipient error = %v; want overall wait timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("hanging recipient exceeded overall wait deadline: %s", elapsed)
+	}
+}
+
 func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	dir := t.TempDir()
 	panesPath := filepath.Join(dir, "panes.json")
