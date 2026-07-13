@@ -636,6 +636,35 @@ func TestProbeTargetRetriesOneTransientNativeEmptyInventory(t *testing.T) {
 	}
 }
 
+func TestProbeTargetMalformedErrorPreservesBoundedNativeReplyProvenance(t *testing.T) {
+	dir := t.TempDir()
+	stdout := "layout { pane; }\n" + strings.Repeat("x", 300)
+	stderr := "route saturated\n"
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"printf '%s' '"+stdout+"'\n"+
+		"printf '%s' '"+stderr+"' >&2\n")
+	_, err := probeTarget(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "WORK", RailURL: "file:/candidate/zellij-sidebar.wasm",
+		CheckoutCWD: "/work/managed",
+	}, 73)
+	if err == nil {
+		t.Fatal("malformed native pane state unexpectedly succeeded")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"command=list-panes", "attempt=1/3", "stdout_len=318", "stderr_len=16",
+		`stdout_prefix="layout { pane; }\\n`, `stderr_prefix="route saturated\\n"`,
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("malformed error = %q, want provenance %q", message, want)
+		}
+	}
+	if strings.Contains(message, strings.Repeat("x", 257)) {
+		t.Fatalf("malformed error leaked unbounded stdout: %q", message)
+	}
+}
+
 func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
