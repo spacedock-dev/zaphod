@@ -64,13 +64,13 @@ write_fake_zellij() {
         '        --data-dir) data_dir="${2:?}"; shift 2 ;;' \
         '        --session) session="${2:?}"; shift 2 ;;' \
         '        --version)' \
-        '            printf "version\\t%s\\t%s\\t%s\\t%s\\n" "$config_dir" "$config_file" "$data_dir" "${ZELLIJ_SESSION_NAME:-}" >> "$FAKE_ZELLIJ_CALLS"' \
+        '            printf "version\\t%s\\t%s\\t%s\\tclient=%s\\tsession=%s\\tpane=%s\\n" "$config_dir" "$config_file" "$data_dir" "${ZELLIJ+x}" "${ZELLIJ_SESSION_NAME+x}" "${ZELLIJ_PANE_ID+x}" >> "$FAKE_ZELLIJ_CALLS"' \
         '            printf "zellij 0.44.3\\n"' \
         '            exit 0' \
         '            ;;' \
         '        setup)' \
         '            [ "${2:-}" = --check ] || exit 64' \
-        '            printf "setup\\t%s\\t%s\\t%s\\t%s\\n" "$config_dir" "$config_file" "$data_dir" "${ZELLIJ_SESSION_NAME:-}" >> "$FAKE_ZELLIJ_CALLS"' \
+        '            printf "setup\\t%s\\t%s\\t%s\\tclient=%s\\tsession=%s\\tpane=%s\\n" "$config_dir" "$config_file" "$data_dir" "${ZELLIJ+x}" "${ZELLIJ_SESSION_NAME+x}" "${ZELLIJ_PANE_ID+x}" >> "$FAKE_ZELLIJ_CALLS"' \
         '            exit "${FAKE_ZELLIJ_SETUP_STATUS:-0}"' \
         '            ;;' \
         '        action)' \
@@ -464,6 +464,30 @@ test_empty_new_tab_stdout_uses_inventory_stable_id() {
     echo "PASS: empty new-tab stdout uses stable inventory identity"
 }
 
+test_inside_caller_identity_is_cleared_before_native_entry_calls() {
+    local root expected_url
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    expected_url="file:$FIXTURE_PHYSICAL/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+
+    ZELLIJ=0 ZELLIJ_SESSION_NAME=ambient-work ZELLIJ_PANE_ID=98765 \
+        run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR" || {
+        sed -n '1,200p' "$FIXTURE_ERROR" >&2
+        fail "inside-caller selected entry failed"
+    }
+
+    grep -F $'version\t' "$FAKE_ZELLIJ_CALLS" | grep -F $'client=\tsession=\tpane=' >/dev/null ||
+        fail "version probe inherited loaded Zellij client identity"
+    grep -F $'setup\t' "$FAKE_ZELLIJ_CALLS" | grep -F $'client=\tsession=\tpane=' >/dev/null ||
+        fail "setup check inherited loaded Zellij client identity"
+    grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "inside caller lost stable tab identity"
+    assert_private_sidecar_started "$expected_url"
+    assert_standing_kdl_unchanged
+    assert_temporary_files_cleaned
+    echo "PASS: inside caller identity is cleared before native entry calls"
+}
+
 test_ambiguous_tab_discovery_reports_bounded_native_provenance() {
     local root status stdout_payload stderr_payload
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
@@ -525,5 +549,6 @@ test_sidecar_exec_failure_is_visible
 test_sidecar_stream_timeout_reaps_process
 test_failed_tuple_handoff_reaps_ready_sidecar
 test_empty_new_tab_stdout_uses_inventory_stable_id
+test_inside_caller_identity_is_cleared_before_native_entry_calls
 test_ambiguous_tab_discovery_reports_bounded_native_provenance
 test_tokenless_layout_render_preserves_installed_identity
