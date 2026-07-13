@@ -148,11 +148,12 @@ checkout's canonical WASM URL. Only then does it start one private
 `target/zaphod subscribe` process with the same Zellij profile and session.
 The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
 `--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
-The startup handshake allows ten seconds for the sidecar to verify the exact
-stable-tab target and establish a correctly typed AgentsView SSE response that
-remains open through a short stability probe. Initial session replay begins
-after that stream handshake, so a
-large replay does not consume the deadline and stream events remain queued.
+The startup handshake allows 30 seconds for the sidecar to verify the exact
+stable-tab target, establish a correctly typed AgentsView SSE response that
+remains open through a short stability probe, and deliver one acknowledged
+initial snapshot. Changes arriving during that work are fetched and
+acknowledged before readiness; the sidecar reports success only after a short
+quiet window with no pending change.
 Start AgentsView and wait for the sessions endpoint before direct entry because
 the sidecar exits on its first later source failure and does not retry. A
 failed handshake terminates and reaps the unready sidecar. Do not run the

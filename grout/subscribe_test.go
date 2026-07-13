@@ -422,6 +422,7 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 	panesPath := filepath.Join(dir, "panes.json")
 	deliveryStarted := filepath.Join(dir, "delivery-started")
 	releaseDelivery := filepath.Join(dir, "release-delivery")
+	catchupDelivered := filepath.Join(dir, "catchup-delivered")
 	if err := os.WriteFile(panesPath, []byte(`[
   {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
   {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
@@ -433,18 +434,30 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 		"  *list-panes*) cat "+panesPath+" ;;\n"+
 		"  *agent-event-ready*) echo ready ;;\n"+
 		"  *agent-snapshot*) : > "+deliveryStarted+"; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
+		"  *agent-event*) : > "+catchupDelivered+"; echo accepted ;;\n"+
 		"esac\n")
+	change := make(chan struct{})
+	changeSent := make(chan struct{})
+	var lists atomic.Int32
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.(http.Flusher).Flush()
+			<-change
+			fmt.Fprint(w, "event: data_changed\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+			close(changeSent)
 			<-r.Context().Done()
 		case "/api/v1/sessions":
-			fmt.Fprint(w, `{"sessions":[
+			if lists.Add(1) == 1 {
+				fmt.Fprint(w, `{"sessions":[
  {"id":"one","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"},
  {"id":"two","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"}
 ]}`)
+				return
+			}
+			fmt.Fprint(w, `{"sessions":[{"id":"catchup","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"}]}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -480,6 +493,12 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 	if _, err := os.Stat(deliveryStarted); err != nil {
 		t.Fatalf("initial snapshot delivery never began: %v", err)
 	}
+	close(change)
+	select {
+	case <-changeSent:
+	case <-time.After(time.Second):
+		t.Fatal("data_changed was not emitted during snapshot delivery")
+	}
 	select {
 	case payload := <-ready:
 		t.Fatalf("startup signaled before snapshot acknowledgment: %q", payload)
@@ -496,10 +515,100 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("acknowledged multi-row snapshot did not release startup readiness")
 	}
+	if _, err := os.Stat(catchupDelivered); err != nil {
+		t.Fatalf("queued data_changed was not acknowledged before readiness: %v", err)
+	}
 	cancel()
 	_ = writer.Close()
 	_ = reader.Close()
 	if err := <-errCh; err != nil {
 		t.Fatalf("subscriber cancellation = %v", err)
+	}
+}
+
+func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
+	dir := t.TempDir()
+	panesPath := filepath.Join(dir, "panes.json")
+	snapshotStarted := filepath.Join(dir, "snapshot-started")
+	releaseSnapshot := filepath.Join(dir, "release-snapshot")
+	if err := os.WriteFile(panesPath, []byte(`[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \"$*\" in\n"+
+		"  *list-panes*) cat "+panesPath+" ;;\n"+
+		"  *agent-event-ready*) echo ready ;;\n"+
+		"  *agent-snapshot*) : > "+snapshotStarted+"; while [ ! -f "+releaseSnapshot+" ]; do sleep 0.01; done; echo accepted ;;\n"+
+		"  *agent-event*) echo accepted ;;\n"+
+		"esac\n")
+	change := make(chan struct{})
+	changeSent := make(chan struct{})
+	var lists atomic.Int32
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			<-change
+			fmt.Fprint(w, "event: data_changed\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+			close(changeSent)
+			<-r.Context().Done()
+		case "/api/v1/sessions":
+			if lists.Add(1) == 1 {
+				fmt.Fprint(w, `{"sessions":[]}`)
+				return
+			}
+			http.Error(w, "catchup failed", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer source.Close()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runSubscribe(context.Background(), SubscribeConfig{
+			ServerURL: source.URL, ZellijBin: zellij,
+			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
+			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
+			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed",
+			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
+		}, nil)
+	}()
+	for attempt := 0; attempt < 100; attempt++ {
+		if _, err := os.Stat(snapshotStarted); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(snapshotStarted); err != nil {
+		t.Fatalf("initial snapshot delivery never began: %v", err)
+	}
+	close(change)
+	select {
+	case <-changeSent:
+	case <-time.After(time.Second):
+		t.Fatal("queued change was not emitted")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := os.WriteFile(releaseSnapshot, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err = <-errCh
+	_ = writer.Close()
+	payload, readErr := io.ReadAll(reader)
+	_ = reader.Close()
+	if err == nil || !strings.Contains(err.Error(), "503") {
+		t.Fatalf("queued catchup error = %v, want source failure", err)
+	}
+	if readErr != nil || len(payload) != 0 {
+		t.Fatalf("failed queued catchup signaled readiness: %q, %v", payload, readErr)
 	}
 }

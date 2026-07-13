@@ -379,9 +379,24 @@ func streamEvents(
 		err error
 	}
 	var handshake <-chan handshakeResult
+	var catchup <-chan error
 	var settleTimer *time.Timer
 	var settleC <-chan time.Time
 	pendingDataChange := false
+	startSettle := func() {
+		if settleTimer != nil {
+			settleTimer.Stop()
+		}
+		settleTimer = time.NewTimer(25 * time.Millisecond)
+		settleC = settleTimer.C
+	}
+	startCatchup := func() {
+		result := make(chan error, 1)
+		catchup = result
+		go func() {
+			result <- refreshSessions(streamCtx, client, cfg, stableTabID, stderr)
+		}()
+	}
 	startHandshake := func() {
 		result := make(chan handshakeResult, 1)
 		handshake = result
@@ -416,12 +431,30 @@ func streamEvents(
 			if result.err != nil {
 				return result.err
 			}
-			// Keep consuming the stream for one final scheduling turn so an EOF
-			// already produced during the handshake wins before handoff.
-			settleTimer = time.NewTimer(25 * time.Millisecond)
-			settleC = settleTimer.C
+			if pendingDataChange {
+				pendingDataChange = false
+				startCatchup()
+			} else {
+				startSettle()
+			}
+		case err := <-catchup:
+			catchup = nil
+			if err != nil {
+				return err
+			}
+			if pendingDataChange {
+				pendingDataChange = false
+				startCatchup()
+			} else {
+				startSettle()
+			}
 		case <-settleC:
 			settleC = nil
+			if pendingDataChange {
+				pendingDataChange = false
+				startCatchup()
+				continue
+			}
 			if streamEnded.Load() {
 				return ErrSourceEOF
 			}
@@ -429,12 +462,6 @@ func streamEvents(
 				return fmt.Errorf("stream-ready signal: %w", err)
 			}
 			ready = true
-			if pendingDataChange {
-				pendingDataChange = false
-				if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
-					return err
-				}
-			}
 		case result := <-lines:
 			if result.done {
 				if ctx.Err() != nil {
