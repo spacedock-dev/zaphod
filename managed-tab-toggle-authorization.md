@@ -229,3 +229,20 @@ The captain's WORK drill is deliberately not run against a rejected candidate.
   authorizing an `Alt /` receipt after live focus lookup failed. Route a narrow
   strict-lookup repair to implementation; both offer and receipt must fail
   closed when current focus or its stable tab ID is unavailable.
+
+## Stage Report: implementation (cycle 1)
+
+- DONE: Make both Alt-/ authorization decisions require a fresh live focused-tab identity and current stable-ID mapping; cached UI state must not authorize.
+  `afa2ecf` adds a strict focus-to-current-TabUpdate lookup for route offer and pipe receipt while leaving the cached lookup for non-authorizing UI.
+- DONE: Turn the detached stale-active fallback refutation into a committed regression test for both offer and receipt paths.
+  Red output was `error[E0425]: cannot find function active_tab_for_toggle_authorization in this scope`; the committed regression proves unavailable focus and an unmapped stable ID produce `None` despite cached managed tab 3.
+- DONE: Re-run focused Rust, entry, and tmux smoke proof without expanding v3’s mechanism or reviving discarded infrastructure.
+  `cargo test -q` passed 138/138; `cargo check --tests` passed; the entry suite passed 9/9; and the isolated tmux smoke passed twice after `b3b003a` made its existing retry loop reject transient empty `dump-layout` responses.
+
+### Summary
+
+The repair is deliberately narrow: only Alt-/ route offer and keybind receipt
+read a fresh live stable tab identity, so a stale `MessagePluginId` delivery
+cannot authorize a former rail. The one smoke failure was a zero-byte native
+dump accepted as evidence; the test now retries that non-observation without
+changing its lookalike-inertness assertion or adding any product mechanism.
