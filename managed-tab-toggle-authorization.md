@@ -249,3 +249,64 @@ changing its lookalike-inertness assertion or adding any product mechanism.
 A later isolated-server readiness failure occurred before any candidate tab
 existed; an unchanged immediate rerun passed, so no startup retry was folded
 into this authorization repair and the first officer has the evidence.
+
+## Stage Report: validation (cycle 1)
+
+- DONE: Independently reproduce the repaired stale-focus boundary at exact
+  head `b3b003ab1608d95b475d8034e895fa7a516f044a`.
+  `cargo test -q tests::stale_cached_tab_cannot_authorize_a_toggle_offer_or_receipt -- --exact`
+  passed. It covers both an unavailable focused pane and a focused stable ID
+  absent from the current `TabUpdate` mapping; each leaves both route offer
+  and keybind-pipe receipt inert despite cached state naming the former rail.
+- DONE: Re-run all offline acceptance evidence once at that exact head.
+  `cargo test -q` passed 138/138, `cargo check --tests` passed, and
+  `bash tests/zellij-new-tab-test.sh` passed 9/9. One real run of
+  `bash tests/zellij-tmux-smoke-test.sh` passed: literal `Alt Shift z` created
+  one managed tab, literal `Alt /` changed its 28-column rail to 1 column,
+  and the same-WASM tiled lookalike stayed byte-identical in tab inventory,
+  focus, plugin projection, native layout, and settled screen. The smoke
+  reported disposable cleanup and did not touch standing configuration.
+- DONE: Run a detached adversarial refutation without changing product code.
+  In `/tmp/zaphod-v3-refutation.zLWJHl`, a deliberately unsafe fallback from
+  a missing/stale focused identity to the first cached tab position caused
+  the committed regression to fail at `src/main.rs:3931` (`Some(3)` rather
+  than `None`). This proves the regression detects the precise stale-route
+  defect; the detached checkout and its two ~933 MB build directories were
+  removed afterward.
+- READY: Prepare, but do not run, the captain's `WORK` drill. No nested code
+  review was requested or launched.
+
+### Captain drill — after this candidate is merged to `main`
+
+1. In a terminal pane attached to `WORK`, confirm the checkout is the merged
+   one, then run:
+
+   ```bash
+   cd /Users/clkao/git/zaphod
+   ./scripts/zellij-new-tab.sh --session WORK --name 'Zaphod v3 drill'
+   ```
+
+   Expect one new active Zaphod tab with a visible 28-column rail. Grant the
+   normal plugin permission only if Zellij asks.
+2. Press `Alt /` once. Expect that same rail to become the 1-column sliver;
+   no pane should be created, replaced, or focused elsewhere. Press it again
+   to return to the docked rail.
+3. Switch to an existing unmanaged or legacy tab in `WORK` and press
+   `Alt /`. Expect no layout, pane, or focus change there.
+4. Record the created tab ID and the result of:
+
+   ```bash
+   zellij --session WORK action list-panes --json --all --command --geometry --state --tab
+   zellij --session WORK action dump-layout
+   ```
+
+   The new rail's native declaration must contain `zaphod_managed_tab "v1"`
+   and the exact current candidate `zaphod_wasm_url`. Do not run the parked
+   worktree-profile harness or restart `WORK` for this drill.
+
+### Summary
+
+**PASS offline; ready for the captain's interactive `WORK` drill.** The
+strict lookup closes the rejected stale-focus path without changing ordinary
+managed-tab behavior. The only live action left is the captain-owned drill;
+the candidate needs no additional code-review subagent or retry cycle.
