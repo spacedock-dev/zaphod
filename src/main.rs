@@ -2482,11 +2482,35 @@ mod tests {
         // value. The target accepts exactly its canonical decimal recipient.
         assert!(target.pipe(agent_event_for_tab(session_line(), "0")));
         assert_eq!(target.sessions.len(), 1);
+        target.rows = vec![cwd_row(4)];
+        target.pane_cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod")]);
+        // P=1,S=1: the accepted session's first render line is 5. CWD only
+        // resolves focus after stable-tab admission has selected this rail.
+        assert_eq!(
+            decide_rail_click(
+                5,
+                &target.rows,
+                &target.sessions,
+                &target.gates,
+                &target.pane_cwds
+            ),
+            ClickAction::FocusPane(4)
+        );
 
         let mut bystander = Sidebar::default();
         arm_agent_recipient(&mut bystander, 2, &tabs);
         assert!(!bystander.pipe(agent_event_for_tab(session_line(), "0")));
         assert!(bystander.sessions.is_empty());
+        assert_eq!(
+            decide_rail_click(
+                5,
+                &[cwd_row(4)],
+                &bystander.sessions,
+                &bystander.gates,
+                &cwd_map(&[(4, "/Users/clkao/git/zaphod")])
+            ),
+            ClickAction::None
+        );
 
         let mut missing = Sidebar::default();
         arm_agent_recipient(&mut missing, 1, &tabs);
