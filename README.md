@@ -215,9 +215,11 @@ real-key candidate check.
 
 ### Permissions
 
-On first normal launch, the pane shows a permission prompt
-(`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`,
-`ReadCliPipes`, `Reconfigure`, `RunCommands`) — focus it and approve once.
+Tokenless installed-layout rails request `ReadApplicationState`,
+`ChangeApplicationState`, `ReadPaneContents`, `Reconfigure`, and `RunCommands`.
+A token-bound direct-entry rail also requests `ReadCliPipes` for its private
+subscriber. On the first request or grant expansion, focus the pane and
+approve its native prompt once.
 Zellij's grant cache is keyed by the raw WASM path. By default, the smoke
 harness redirects `HOME` to a temporary root and uses a pre-granted fixture.
 Its `upgrade` mode seeds an old grant without `ReadCliPipes`, focuses the exact
