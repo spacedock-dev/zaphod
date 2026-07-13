@@ -401,7 +401,7 @@ func streamEvents(
 	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
 		advance, token, err = bufio.ScanLines(data, atEOF)
 		streamBoundary.Lock()
-		streamFragment.Store(token == nil && len(data) > 0 && !atEOF)
+		streamFragment.Store(len(data) > advance && !atEOF)
 		streamBoundary.Unlock()
 		if token != nil {
 			streamBoundary.Lock()

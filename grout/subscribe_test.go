@@ -104,7 +104,7 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 			case <-r.Context().Done():
 				return
 			}
-			fmt.Fprint(w, "event: data_")
+			fmt.Fprint(w, ": keepalive\nevent: data_")
 			w.(http.Flusher).Flush()
 			select {
 			case <-finishEvent:
