@@ -288,7 +288,7 @@ test_new_tab_failure_leaves_standing_kdl_unchanged() {
 }
 
 test_term_during_new_tab_leaves_standing_kdl_unchanged() {
-    local root ready release runner_pid status attempt
+    local root ready release runner_pid status attempt config_during layout_during
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
     TEST_ROOT="$root"
     setup_fixture "$root"
@@ -307,7 +307,8 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged() {
     runner_pid=$!
     for attempt in $(seq 1 100); do [ ! -e "$ready" ] || break; sleep 0.05; done
     [ -e "$ready" ] || { cat "$FIXTURE_ERROR" >&2; fail "TERM fixture never reached new-tab"; }
-    assert_standing_kdl_unchanged
+    config_during="$(sha256 "$FIXTURE_CONFIG_FILE")"
+    layout_during="$(sha256 "$FIXTURE_LAYOUT")"
     kill -TERM "$runner_pid"
     : > "$release"
     set +e
@@ -315,6 +316,8 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged() {
     status=$?
     set -e
     [ "$status" -eq 143 ] || fail "TERM fixture exited $status instead of 143"
+    [ "$config_during" = "$CONFIG_BEFORE" ] || fail "entry point changed standing config.kdl in flight"
+    [ "$layout_during" = "$LAYOUT_BEFORE" ] || fail "entry point changed standing layouts/zaphod.kdl in flight"
     assert_standing_kdl_unchanged
     assert_temporary_files_cleaned
     echo "PASS: TERM during new-tab leaves standing KDL unchanged"
