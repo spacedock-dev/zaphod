@@ -51,13 +51,14 @@ type SubscribeConfig struct {
 	PipeTimeout       time.Duration
 	SummaryClampBytes int
 	// Package-private deterministic concurrency seams used only by tests.
-	afterScan            func()
-	beforeReadinessCheck func()
-	afterRead            func(int, error)
-	beforeNextScan       func()
-	beforeLineSend       func()
-	beforeSplit          func()
-	recipientWaitTimeout time.Duration
+	afterScan              func()
+	beforeReadinessCheck   func()
+	afterRead              func(int, error)
+	beforeNextScan         func()
+	beforeLineSend         func()
+	beforeSplit            func()
+	afterTokenPendingClear func()
+	recipientWaitTimeout   time.Duration
 }
 
 type zellijPane struct {
@@ -447,6 +448,9 @@ func streamEvents(
 		transportPending.Store(false)
 		streamBoundary.Unlock()
 		if token != nil {
+			if cfg.afterTokenPendingClear != nil {
+				cfg.afterTokenPendingClear()
+			}
 			streamBoundary.Lock()
 			streamActivity.Add(1)
 			if cfg.afterScan != nil {

@@ -296,6 +296,124 @@ func TestSubscribeDoesNotSignalWithScannedLineQueuedAtSettle(t *testing.T) {
 	}
 }
 
+func TestSubscribeDoesNotSignalBetweenTokenPendingAndActivityPublication(t *testing.T) {
+	dir := t.TempDir()
+	panesPath := filepath.Join(dir, "panes.json")
+	if err := os.WriteFile(panesPath, []byte(`[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \"$*\" in\n"+
+		"  *list-panes*) cat "+panesPath+" ;;\n"+
+		"  *zaphod-agent-v1-*-ready*) echo ready ;;\n"+
+		"  *zaphod-agent-v1-*-snapshot*) cat >/dev/null; echo accepted ;;\n"+
+		"esac\n")
+	emitToken := make(chan struct{})
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			select {
+			case <-emitToken:
+			case <-r.Context().Done():
+				return
+			}
+			fmt.Fprint(w, ": keepalive\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions":
+			fmt.Fprint(w, `{"sessions":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer source.Close()
+	checkStarted := make(chan struct{})
+	releaseCheck := make(chan struct{})
+	var checkOnce sync.Once
+	gapStarted := make(chan struct{})
+	releaseGap := make(chan struct{})
+	var gapOnce sync.Once
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	defer writer.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runSubscribe(ctx, SubscribeConfig{
+			ServerURL: source.URL, ZellijBin: zellij,
+			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
+			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
+			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
+			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
+			beforeReadinessCheck: func() {
+				checkOnce.Do(func() {
+					close(checkStarted)
+					select {
+					case <-releaseCheck:
+					case <-ctx.Done():
+					}
+				})
+			},
+			afterTokenPendingClear: func() {
+				gapOnce.Do(func() {
+					close(gapStarted)
+					select {
+					case <-releaseGap:
+					case <-ctx.Done():
+					}
+				})
+			},
+		}, nil)
+	}()
+	ready := make(chan string, 1)
+	go func() {
+		payload := make([]byte, 6)
+		n, _ := reader.Read(payload)
+		ready <- string(payload[:n])
+	}()
+	select {
+	case <-checkStarted:
+	case <-time.After(time.Second):
+		t.Fatal("readiness check did not reach the settle boundary")
+	}
+	close(emitToken)
+	select {
+	case <-gapStarted:
+	case <-time.After(time.Second):
+		t.Fatal("scanner did not pause in the token publication gap")
+	}
+	close(releaseCheck)
+	select {
+	case payload := <-ready:
+		t.Fatalf("token publication gap allowed readiness: %q", payload)
+	case <-time.After(75 * time.Millisecond):
+	}
+	close(releaseGap)
+	select {
+	case payload := <-ready:
+		if payload != "ready\n" {
+			t.Fatalf("startup payload = %q", payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("published keepalive activity did not release readiness")
+	}
+	cancel()
+	_ = writer.Close()
+	_ = reader.Close()
+	if err := <-errCh; err != nil {
+		t.Fatalf("subscriber cancellation = %v", err)
+	}
+}
+
 func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 	dir := t.TempDir()
 	argvLog := filepath.Join(dir, "zellij-argv.log")
