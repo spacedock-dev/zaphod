@@ -19,9 +19,10 @@ import (
 func main() {
 	readyFile := flag.String("ready-file", "", "path that receives the fixture URL")
 	cwd := flag.String("cwd", "", "session cwd returned by the fixture")
+	triggerFile := flag.String("trigger-file", "", "file that adds a second session and emits data_changed")
 	flag.Parse()
-	if *readyFile == "" || *cwd == "" {
-		fmt.Fprintln(os.Stderr, "--ready-file and --cwd are required")
+	if *readyFile == "" || *cwd == "" || *triggerFile == "" {
+		fmt.Fprintln(os.Stderr, "--ready-file, --cwd, and --trigger-file are required")
 		os.Exit(2)
 	}
 
@@ -32,11 +33,19 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": []map[string]any{{
+		sessions := []map[string]any{{
 			"id": "smoke-session", "cwd": *cwd, "agent": "codex",
-			"termination_status": "awaiting_user", "first_message": "SMOKE_SSE_ROW",
+			"termination_status": "awaiting_user", "first_message": "SMOKE_INITIAL_ROW",
 			"created_at": "2026-07-13T00:00:00Z",
-		}}})
+		}}
+		if _, err := os.Stat(*triggerFile); err == nil {
+			sessions = append(sessions, map[string]any{
+				"id": "smoke-second-session", "cwd": *cwd, "agent": "codex",
+				"termination_status": "awaiting_user", "first_message": "SMOKE_SECOND_ROW",
+				"created_at": "2026-07-14T00:00:00Z",
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": sessions})
 	})
 	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -48,7 +57,21 @@ func main() {
 		}
 		fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
 		flusher.Flush()
-		<-r.Context().Done()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				if _, err := os.Stat(*triggerFile); err == nil {
+					fmt.Fprint(w, "event: data_changed\ndata: {\"scope\":\"sessions\"}\n\n")
+					flusher.Flush()
+					<-r.Context().Done()
+					return
+				}
+			}
+		}
 	})
 
 	server := &http.Server{Handler: mux}

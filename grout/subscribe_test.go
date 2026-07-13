@@ -496,6 +496,7 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
+	var diagnostics strings.Builder
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runSubscribe(ctx, SubscribeConfig{
@@ -512,7 +513,7 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 			StartupFD:         startupFD,
 			PipeTimeout:       time.Second,
 			SummaryClampBytes: 512,
-		}, nil)
+		}, &diagnostics)
 	}()
 
 	select {
@@ -601,6 +602,15 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 	cancel()
 	if err := <-errCh; err != nil {
 		t.Fatalf("subscriber cancellation = %v", err)
+	}
+	diagnosticLog := diagnostics.String()
+	for _, want := range []string{
+		"transient-native-pane-reply", "command=list-panes", "attempt=1/3",
+		`stdout_prefix="layout { pane; }\n"`,
+	} {
+		if !strings.Contains(diagnosticLog, want) {
+			t.Fatalf("surviving transient diagnostic = %q, want %q", diagnosticLog, want)
+		}
 	}
 }
 
