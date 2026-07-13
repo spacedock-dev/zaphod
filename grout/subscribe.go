@@ -446,23 +446,19 @@ func streamEvents(
 		streamBoundary.Lock()
 		streamFragment.Store(len(data) > advance && !atEOF)
 		transportPending.Store(false)
-		streamBoundary.Unlock()
 		if token != nil {
 			if cfg.afterTokenPendingClear != nil {
 				cfg.afterTokenPendingClear()
 			}
-			streamBoundary.Lock()
 			streamActivity.Add(1)
 			if cfg.afterScan != nil {
 				cfg.afterScan()
 			}
-			streamBoundary.Unlock()
 		}
 		if atEOF && len(data) == 0 {
-			streamBoundary.Lock()
 			streamEnded.Store(true)
-			streamBoundary.Unlock()
 		}
+		streamBoundary.Unlock()
 		return advance, token, err
 	})
 	go func() {
