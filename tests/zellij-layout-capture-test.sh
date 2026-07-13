@@ -14,6 +14,9 @@ fail() {
     exit 1
 }
 
+command -v cargo >/dev/null 2>&1 || fail "cargo is required for the layout capture test"
+cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --features host-kdl-validator --bin zaphod-kdl-validate
 VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
 EXPECTED='file:/candidate/zellij-sidebar.wasm'
 PANES_PRESENT="$ROOT/panes-present.json"
@@ -24,10 +27,14 @@ printf '%s\n' '[{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_s
 GOOD="$ROOT/good.kdl"
 MISSING="$ROOT/missing.kdl"
 WRONG="$ROOT/wrong.kdl"
+MISSING_RAIL="$ROOT/missing-rail.kdl"
+WRONG_RAIL="$ROOT/wrong-rail.kdl"
 MALFORMED="$ROOT/malformed.kdl"
-printf '%s\n' 'layout {' ' pane {' '  plugin location="file:/candidate/zellij-sidebar.wasm"' ' }' '}' > "$GOOD"
+printf '%s\n' 'layout {' ' pane {' '  plugin location="file:/candidate/zellij-sidebar.wasm" {' '   rail "1"' '  }' ' }' '}' > "$GOOD"
 printf '%s\n' 'layout {' ' pane' '}' > "$MISSING"
 printf '%s\n' 'layout {' ' plugin location="file:/wrong/zellij-sidebar.wasm"' '}' > "$WRONG"
+printf '%s\n' 'layout {' ' plugin location="file:/candidate/zellij-sidebar.wasm"' '}' > "$MISSING_RAIL"
+printf '%s\n' 'layout {' ' plugin location="file:/candidate/zellij-sidebar.wasm" {' '  rail "0"' ' }' '}' > "$WRONG_RAIL"
 printf '%s' 'layout { pane' > "$MALFORMED"
 
 fake_dump() {
@@ -109,6 +116,21 @@ status=$?
 set -e
 [ "$status" -ne 0 ] || fail "absent-pane identity mismatch unexpectedly succeeded"
 assert_attempts 1 absent-identity
+
+for rail_case in missing-rail wrong-rail; do
+    reset_case
+    rail_source="$MISSING_RAIL"
+    [ "$rail_case" != wrong-rail ] || rail_source="$WRONG_RAIL"
+    for attempt in 1 2 3; do cp "$rail_source" "$ROOT/reply-$attempt.stdout"; done
+    set +e
+    zaphod_capture_validated_layout "$VALIDATOR" "$EXPECTED" present "$PANES_PRESENT" \
+        "$ROOT/accepted.kdl" fake_dump 2> "$ROOT/error"
+    status=$?
+    set -e
+    [ "$status" -ne 0 ] || fail "$rail_case identity unexpectedly succeeded"
+    assert_attempts 3 "$rail_case"
+    [ ! -e "$ROOT/accepted.kdl" ] || fail "$rail_case identity published an invalid layout"
+done
 
 dd if=/dev/zero bs=1048576 count=5 2>/dev/null | tr '\0' x > "$ROOT/oversized.kdl"
 set +e
