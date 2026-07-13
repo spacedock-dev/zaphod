@@ -10,9 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +42,7 @@ type SubscribeConfig struct {
 	ZellijSession     string
 	TabID             string
 	RailURL           string
+	CheckoutCWD       string
 	StartupFD         int
 	PipeTimeout       time.Duration
 	SummaryClampBytes int
@@ -53,7 +56,6 @@ type zellijPane struct {
 	IsFloating   bool    `json:"is_floating"`
 	IsSuppressed bool    `json:"is_suppressed"`
 	IsSelectable bool    `json:"is_selectable"`
-	PaneCwd      *string `json:"pane_cwd"`
 }
 
 type targetSnapshot struct {
@@ -82,8 +84,11 @@ func canonicalTabID(value string) (uint64, error) {
 func (cfg SubscribeConfig) validate() (uint64, error) {
 	if cfg.ServerURL == "" || cfg.ZellijBin == "" || cfg.ZellijConfigDir == "" ||
 		cfg.ZellijConfigFile == "" || cfg.ZellijDataDir == "" || cfg.ZellijSession == "" ||
-		cfg.RailURL == "" {
+		cfg.RailURL == "" || cfg.CheckoutCWD == "" {
 		return 0, fmt.Errorf("subscribe requires server, Zellij profile, session, tab id, and rail URL")
+	}
+	if !filepath.IsAbs(cfg.CheckoutCWD) {
+		return 0, fmt.Errorf("subscribe checkout cwd must be absolute")
 	}
 	server, err := url.Parse(cfg.ServerURL)
 	if err != nil || (server.Scheme != "http" && server.Scheme != "https") || server.Host == "" {
@@ -111,8 +116,9 @@ func (cfg SubscribeConfig) zellijArgs(command ...string) []string {
 }
 
 // probeTarget checks the only target identity that the sidecar may use: its
-// original stable server tab ID plus the exact canonical rail URL. A pane ID,
-// title, CWD, display position, or URL-only match cannot substitute for it.
+// original stable server tab ID plus the exact canonical rail URL. Native
+// list-panes may omit terminal cwd, so the direct entry's absolute checkout
+// root supplies the row filter after the tab still proves a terminal exists.
 func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (targetSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return targetSnapshot{}, err
@@ -131,7 +137,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 		return targetSnapshot{}, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
 	}
 	resident := 0
-	cwds := make(map[string]struct{})
+	terminals := 0
 	for _, pane := range panes {
 		if pane.TabID != stableTabID {
 			continue
@@ -140,14 +146,17 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 			!pane.IsFloating && !pane.IsSuppressed {
 			resident++
 		}
-		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed && pane.PaneCwd != nil && *pane.PaneCwd != "" {
-			cwds[*pane.PaneCwd] = struct{}{}
+		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed {
+			terminals++
 		}
 	}
 	if resident != 1 {
 		return targetSnapshot{}, fmt.Errorf("%w: expected one resident rail in stable tab %d, found %d", ErrTargetLost, stableTabID, resident)
 	}
-	return targetSnapshot{cwds: cwds}, nil
+	if terminals == 0 {
+		return targetSnapshot{}, fmt.Errorf("%w: stable tab %d has no selectable terminal", ErrTargetLost, stableTabID)
+	}
+	return targetSnapshot{cwds: map[string]struct{}{cfg.CheckoutCWD: {}}}, nil
 }
 
 func serverEndpoint(serverURL, suffix string) (string, error) {
@@ -239,7 +248,9 @@ func streamEvents(
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -252,48 +263,98 @@ func streamEvents(
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("source stream: unexpected HTTP status %s", response.Status)
 	}
-	if err := startupSignal(cfg.StartupFD); err != nil {
-		return fmt.Errorf("stream-ready signal: %w", err)
+	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if err != nil || mediaType != "text/event-stream" {
+		return fmt.Errorf("source stream: expected text/event-stream, found %q", response.Header.Get("Content-Type"))
 	}
 
 	scanner := bufio.NewScanner(response.Body)
 	// An event is only a trigger today, but allow enough room for a server
 	// diagnostic without silently tokenizing it.
 	scanner.Buffer(make([]byte, 1024), 1024*1024)
-	eventName := ""
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			if eventName == "data_changed" {
-				if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
-					return err
-				}
-			} else if eventName == "heartbeat" {
-				if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
-					return err
-				}
-			}
-			eventName = ""
-			continue
-		}
-		if strings.HasPrefix(line, "event:") {
-			eventName = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-		}
+	type scanResult struct {
+		line string
+		err  error
+		done bool
 	}
-	if err := scanner.Err(); err != nil {
-		if ctx.Err() != nil {
+	lines := make(chan scanResult)
+	go func() {
+		for scanner.Scan() {
+			select {
+			case lines <- scanResult{line: scanner.Text()}:
+			case <-streamCtx.Done():
+				return
+			}
+		}
+		select {
+		case lines <- scanResult{err: scanner.Err(), done: true}:
+		case <-streamCtx.Done():
+		}
+	}()
+
+	ready := false
+	readyTimer := time.NewTimer(100 * time.Millisecond)
+	defer readyTimer.Stop()
+	markReady := func() error {
+		if ready {
 			return nil
 		}
-		return fmt.Errorf("source stream: %w", err)
+		if err := startupSignal(cfg.StartupFD); err != nil {
+			return fmt.Errorf("stream-ready signal: %w", err)
+		}
+		ready = true
+		// Replay happens after the stream is known live, so data_changed frames
+		// arriving during a large initial list remain queued instead of lost.
+		return refreshSessions(ctx, client, cfg, stableTabID, stderr)
 	}
-	if ctx.Err() != nil {
-		return nil
+
+	eventName := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-readyTimer.C:
+			if err := markReady(); err != nil {
+				return err
+			}
+		case result := <-lines:
+			if result.done {
+				if ctx.Err() != nil {
+					return nil
+				}
+				if result.err == nil {
+					return ErrSourceEOF
+				}
+				return fmt.Errorf("source stream: %w", result.err)
+			}
+			if result.line == "" {
+				wasReady := ready
+				if eventName == "data_changed" || eventName == "heartbeat" {
+					if err := markReady(); err != nil {
+						return err
+					}
+				}
+				if eventName == "data_changed" && wasReady {
+					if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
+						return err
+					}
+				} else if eventName == "heartbeat" && wasReady {
+					if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
+						return err
+					}
+				}
+				eventName = ""
+				continue
+			}
+			if strings.HasPrefix(result.line, "event:") {
+				eventName = strings.TrimSpace(strings.TrimPrefix(result.line, "event:"))
+			}
+		}
 	}
-	return ErrSourceEOF
 }
 
 // runSubscribe has exactly one source connection. Initial state is listed
-// before connecting, then data_changed causes a fresh list. EOF, source
+// after connecting, then data_changed causes a fresh list. EOF, source
 // failure, or target loss stops the sidecar; there is no retry, pool, lease,
 // retarget, or external cleanup in this slice.
 func runSubscribe(ctx context.Context, cfg SubscribeConfig, stderr io.Writer) error {
@@ -307,13 +368,10 @@ func runSubscribe(ctx context.Context, cfg SubscribeConfig, stderr io.Writer) er
 	if cfg.SummaryClampBytes <= 0 {
 		cfg.SummaryClampBytes = 512
 	}
-	client := &http.Client{}
-	if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
+	if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
 		return err
 	}
+	client := &http.Client{}
 	err = streamEvents(ctx, client, cfg, stableTabID, stderr)
 	if ctx.Err() != nil {
 		return nil

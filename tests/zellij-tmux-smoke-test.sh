@@ -42,6 +42,9 @@ SESSION_NAME=""
 TMUX_SERVER=""
 TMUX_SESSION="zaphod-smoke"
 TMUX_PANE="$TMUX_SESSION:0.0"
+AGENTSVIEW_PID=""
+AGENTSVIEW_URL=""
+SIDECAR_PID=""
 
 zellij_control() {
     env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
@@ -63,6 +66,17 @@ cleanup() {
     local cleanup_status=0
     trap - EXIT INT TERM HUP
     set +e
+    if [ -n "$SIDECAR_PID" ]; then
+        kill -TERM "$SIDECAR_PID" 2>/dev/null || true
+        for _attempt in $(seq 1 100); do
+            kill -0 "$SIDECAR_PID" 2>/dev/null || break
+            sleep 0.05
+        done
+        if kill -0 "$SIDECAR_PID" 2>/dev/null; then
+            echo "private sidecar survived cleanup: $SIDECAR_PID" >&2
+            cleanup_status=1
+        fi
+    fi
     if [ -n "$SESSION_NAME" ]; then
         zellij_control delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
         if zellij_control --session "$SESSION_NAME" action list-panes --json --all \
@@ -75,6 +89,14 @@ cleanup() {
         tmux -L "$TMUX_SERVER" kill-server >/dev/null 2>&1 || true
         if tmux -L "$TMUX_SERVER" has-session -t "$TMUX_SESSION" >/dev/null 2>&1; then
             echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
+            cleanup_status=1
+        fi
+    fi
+    if [ -n "$AGENTSVIEW_PID" ]; then
+        kill -TERM "$AGENTSVIEW_PID" 2>/dev/null || true
+        wait "$AGENTSVIEW_PID" 2>/dev/null || true
+        if kill -0 "$AGENTSVIEW_PID" 2>/dev/null; then
+            echo "AgentsView fixture survived cleanup: $AGENTSVIEW_PID" >&2
             cleanup_status=1
         fi
     fi
@@ -104,7 +126,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-for required in tmux jq shasum; do
+for required in tmux jq shasum go; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required for the tmux smoke"
 done
 zaphod_require_zellij_0443
@@ -125,6 +147,20 @@ sed "s|<FIXED_OPERATOR_LAYOUT>|$ISOLATED_LAYOUT|" \
 printf '%s\n' 'layout { pane; }' > "$ISOLATED_LAYOUT"
 ISOLATED_CONFIG_BEFORE="$(file_state "$CONFIG_FILE")"
 ISOLATED_LAYOUT_BEFORE="$(file_state "$ISOLATED_LAYOUT")"
+
+go build -o "$ROOT/agentsview-fixture" "$SCRIPT_DIR/helpers/agentsview-fixture.go"
+"$ROOT/agentsview-fixture" --ready-file "$ROOT/agentsview-url" >"$ROOT/agentsview.out" 2>"$ROOT/agentsview.err" &
+AGENTSVIEW_PID=$!
+for _attempt in $(seq 1 100); do
+    [ ! -s "$ROOT/agentsview-url" ] || break
+    kill -0 "$AGENTSVIEW_PID" 2>/dev/null || break
+    sleep 0.05
+done
+[ -s "$ROOT/agentsview-url" ] || {
+    cat "$ROOT/agentsview.err" >&2 || true
+    fail "isolated AgentsView fixture did not become ready"
+}
+AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 "$REPO_ROOT/build.sh" >/dev/null
@@ -326,9 +362,13 @@ jq -e --arg wasm_url "$WASM_URL" \
 env ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
     ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
     "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
+    --agentsview-url "$AGENTSVIEW_URL" \
     > "$ROOT/entry.out"
 TAB_ID="$(sed -n 's/^TAB_ID=//p' "$ROOT/entry.out")"
+SIDECAR_PID="$(sed -n 's/^SIDECAR_PID=//p' "$ROOT/entry.out")"
 [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || fail "entry script did not report a stable tab ID"
+[[ "$SIDECAR_PID" =~ ^[1-9][0-9]*$ ]] || fail "entry script did not report a sidecar PID"
+kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited before smoke assertions"
 grep -Fx "WASM_URL=$WASM_URL" "$ROOT/entry.out" >/dev/null ||
     fail "entry script did not report the candidate WASM URL"
 wait_for_settled_candidate_resident \
@@ -419,5 +459,6 @@ jq -e --arg wasm_url "$WASM_URL" \
     fail "standing Zellij config changed during tmux smoke: $STANDING_CONFIG"
 [ "$(file_state "$STANDING_LAYOUT")" = "$STANDING_LAYOUT_BEFORE" ] ||
     fail "standing Zellij layout changed during tmux smoke: $STANDING_LAYOUT"
+kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited during smoke assertions"
 
 printf '%s\n' 'PASS: tmux-hosted Zellij smoke proved fresh entry, managed Alt /, post-route foreign inertness, and disposable cleanup'

@@ -84,6 +84,9 @@ write_fake_zellij() {
         '            [ "${1:-}" = --name ] && [ -n "${2:-}" ] || exit 64' \
         '            name="$2"' \
         '            shift 2' \
+        '            [ "${1:-}" = --cwd ] && [ -n "${2:-}" ] || exit 64' \
+        '            printf "%s\\n" "$2" > "$FAKE_ZELLIJ_CWD"' \
+        '            shift 2' \
         '            [ "${1:-}" = --layout-string ] && [ -n "${2:-}" ] && [ "$#" -eq 2 ] || exit 64' \
         '            printf "action-new-tab\\t%s\\t%s\\t%s\\t%s\\n" "$config_dir" "$config_file" "$data_dir" "$session" >> "$FAKE_ZELLIJ_CALLS"' \
         '            printf "%s\\n" "$session" > "$FAKE_ZELLIJ_SESSION"' \
@@ -139,6 +142,7 @@ setup_fixture() {
     FAKE_ZELLIJ_CALLS="$root/fake-zellij-calls"
     FAKE_ZELLIJ_SESSION="$root/fake-session"
     FAKE_ZELLIJ_NAME="$root/fake-name"
+    FAKE_ZELLIJ_CWD="$root/fake-cwd"
     FAKE_ZELLIJ_LAYOUT="$root/fake-layout.kdl"
     FAKE_ZELLIJ_NEW_TAB_COUNT="$root/fake-new-tab-count"
     FAKE_ZELLIJ_PANES="$root/fake-panes.json"
@@ -168,6 +172,7 @@ run_entry() {
         FAKE_ZELLIJ_CALLS="$FAKE_ZELLIJ_CALLS" \
         FAKE_ZELLIJ_SESSION="$FAKE_ZELLIJ_SESSION" \
         FAKE_ZELLIJ_NAME="$FAKE_ZELLIJ_NAME" \
+        FAKE_ZELLIJ_CWD="$FAKE_ZELLIJ_CWD" \
         FAKE_ZELLIJ_LAYOUT="$FAKE_ZELLIJ_LAYOUT" \
         FAKE_ZELLIJ_NEW_TAB_COUNT="$FAKE_ZELLIJ_NEW_TAB_COUNT" \
         FAKE_ZELLIJ_PANES="$FAKE_ZELLIJ_PANES" \
@@ -223,6 +228,7 @@ assert_private_sidecar_started() {
         --zellij-session WORK \
         --tab-id 73 \
         --rail-url "$expected_url" \
+        --checkout-cwd "$FIXTURE_PHYSICAL" \
         --startup-fd 3 > "$expected"
     diff -u "$expected" "$FAKE_SIDECAR_ARGV" >&2 ||
         fail "private sidecar did not receive the exact verified profile/tab/rail tuple"
@@ -248,6 +254,7 @@ test_selected_checkout_creates_one_inline_tab_without_writes() {
     [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = 1 ] || fail "entry point did not create exactly one tab"
     [ "$(cat "$FAKE_ZELLIJ_SESSION")" = WORK ] || fail "new-tab used the wrong session"
     [ "$(cat "$FAKE_ZELLIJ_NAME")" = 'Zaphod fixture' ] || fail "new-tab used the wrong name"
+    [ "$(cat "$FAKE_ZELLIJ_CWD")" = "$FIXTURE_PHYSICAL" ] || fail "new-tab used the wrong cwd"
     grep -F "plugin location=\"$expected_url\"" "$FAKE_ZELLIJ_LAYOUT" >/dev/null ||
         fail "inline layout did not contain selected checkout URL"
     assert_private_sidecar_started "$expected_url"
@@ -300,7 +307,8 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged() {
 
     env "PATH=$FIXTURE/bin:$PATH" "BUILD_LOG=$FIXTURE_BUILD_LOG" \
         "FAKE_ZELLIJ_CALLS=$FAKE_ZELLIJ_CALLS" "FAKE_ZELLIJ_SESSION=$FAKE_ZELLIJ_SESSION" \
-        "FAKE_ZELLIJ_NAME=$FAKE_ZELLIJ_NAME" "FAKE_ZELLIJ_LAYOUT=$FAKE_ZELLIJ_LAYOUT" \
+        "FAKE_ZELLIJ_NAME=$FAKE_ZELLIJ_NAME" "FAKE_ZELLIJ_CWD=$FAKE_ZELLIJ_CWD" \
+        "FAKE_ZELLIJ_LAYOUT=$FAKE_ZELLIJ_LAYOUT" \
         "FAKE_ZELLIJ_NEW_TAB_COUNT=$FAKE_ZELLIJ_NEW_TAB_COUNT" "FAKE_ZELLIJ_PANES=$FAKE_ZELLIJ_PANES" \
         "FAKE_SIDECAR_ARGV=$FAKE_SIDECAR_ARGV" "FAKE_ZELLIJ_READY_FILE=$ready" \
         "FAKE_ZELLIJ_RELEASE_FILE=$release" "ZELLIJ_CONFIG_DIR=$FIXTURE_CONFIG_DIR" \

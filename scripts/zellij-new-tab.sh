@@ -181,6 +181,7 @@ start_private_sidecar() {
         --zellij-session "$SESSION_NAME" \
         --tab-id "$TAB_ID" \
         --rail-url "$WASM_URL" \
+        --checkout-cwd "$REPO_ROOT" \
         --startup-fd 3 \
         3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
     start_status=$?
@@ -208,7 +209,7 @@ zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYO
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
 
 TAB_ID="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
-    --name "$TAB_NAME" --layout-string "$(cat "$RENDERED_LAYOUT")")"
+    --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")")"
 if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || ! wait_for_sidecar_target; then
     echo "sidecar-target-unready" >&2
     exit 1

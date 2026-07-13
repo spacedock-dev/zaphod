@@ -75,8 +75,10 @@ shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-before.sha256
 
 Do not start another sidecar. The entry output must contain `TAB_ID`,
 `WASM_URL`, `SIDECAR_LOG`, and `SIDECAR_PID`. The command emits those values
-only after the sidecar has completed its initial refresh and received a
-successful SSE response.
+only after the sidecar has verified the exact tab target and established a
+correctly typed SSE response that remains open through its stability probe.
+Initial replay follows that
+handshake while stream events remain queued.
 
 ## 3. Create one real agent session
 
