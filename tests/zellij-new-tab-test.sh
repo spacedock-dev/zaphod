@@ -77,6 +77,7 @@ write_fake_zellij() {
         '            [ -n "$session" ] || { printf "missing explicit session\\n" >&2; exit 64; }' \
         '            case "${2:-}" in' \
         '                list-panes) cat "$FAKE_ZELLIJ_PANES"; exit 0 ;;' \
+        '                list-tabs) cat "$FAKE_ZELLIJ_TABS"; exit 0 ;;' \
         '                focus-pane-id)' \
         '                    [ "${3:-}" = plugin_50 ] && [ "$#" -eq 3 ] || exit 64' \
         '                    printf "focus-pane-id\\t%s\\t%s\\n" "$session" "$3" >> "$FAKE_ZELLIJ_CALLS"' \
@@ -106,7 +107,12 @@ write_fake_zellij() {
         '            fi' \
         '            status="${FAKE_ZELLIJ_NEW_TAB_STATUS:-0}"' \
         '            [ "$status" -eq 0 ] || exit "$status"' \
-        '            printf "%s\\n" "${FAKE_ZELLIJ_TAB_ID:-73}"' \
+        '            printf "[{\"tab_id\":4},{\"tab_id\":%s}]\\n" "${FAKE_ZELLIJ_TAB_ID:-73}" > "$FAKE_ZELLIJ_TABS"' \
+        '            if [ "${FAKE_ZELLIJ_NEW_TAB_STDOUT+x}" = x ]; then' \
+        '                printf "%s" "$FAKE_ZELLIJ_NEW_TAB_STDOUT"' \
+        '            else' \
+        '                printf "%s\\n" "${FAKE_ZELLIJ_TAB_ID:-73}"' \
+        '            fi' \
         '            exit 0' \
         '            ;;' \
         '        *) printf "unexpected fake zellij invocation: %s\\n" "$*" >&2; exit 64 ;;' \
@@ -151,6 +157,7 @@ setup_fixture() {
     FAKE_ZELLIJ_LAYOUT="$root/fake-layout.kdl"
     FAKE_ZELLIJ_NEW_TAB_COUNT="$root/fake-new-tab-count"
     FAKE_ZELLIJ_PANES="$root/fake-panes.json"
+    FAKE_ZELLIJ_TABS="$root/fake-tabs.json"
     FAKE_SIDECAR_ARGV="$root/fake-sidecar-argv"
     FAKE_SIDECAR_PID_FILE="$root/fake-sidecar-pid"
 
@@ -168,6 +175,7 @@ setup_fixture() {
     FIXTURE_PHYSICAL="$(cd "$FIXTURE" && pwd -P)"
     printf '[{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:%s/target/wasm32-wasip1/release/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false}]\n' \
         "$FIXTURE_PHYSICAL" > "$FAKE_ZELLIJ_PANES"
+    printf '[{"tab_id":4}]\n' > "$FAKE_ZELLIJ_TABS"
     record_initial_file_bytes
 }
 
@@ -181,6 +189,7 @@ run_entry() {
         FAKE_ZELLIJ_LAYOUT="$FAKE_ZELLIJ_LAYOUT" \
         FAKE_ZELLIJ_NEW_TAB_COUNT="$FAKE_ZELLIJ_NEW_TAB_COUNT" \
         FAKE_ZELLIJ_PANES="$FAKE_ZELLIJ_PANES" \
+        FAKE_ZELLIJ_TABS="$FAKE_ZELLIJ_TABS" \
         FAKE_SIDECAR_ARGV="$FAKE_SIDECAR_ARGV" \
         FAKE_SIDECAR_PID_FILE="$FAKE_SIDECAR_PID_FILE" \
         ZELLIJ_CONFIG_DIR="$FIXTURE_CONFIG_DIR" \
@@ -428,6 +437,27 @@ test_failed_tuple_handoff_reaps_ready_sidecar() {
     echo "PASS: failed tuple handoff terminates and reaps its ready sidecar"
 }
 
+test_empty_new_tab_stdout_uses_inventory_stable_id() {
+    local root expected_url
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    expected_url="file:$FIXTURE_PHYSICAL/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+
+    FAKE_ZELLIJ_NEW_TAB_STDOUT="" run_entry --session WORK --name 'Zaphod empty stdout' \
+        > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR" || {
+        sed -n '1,200p' "$FIXTURE_ERROR" >&2
+        fail "empty new-tab stdout prevented stable-ID inventory discovery"
+    }
+
+    grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null ||
+        fail "inventory discovery did not report stable tab ID 73"
+    assert_private_sidecar_started "$expected_url"
+    assert_standing_kdl_unchanged
+    assert_temporary_files_cleaned
+    echo "PASS: empty new-tab stdout uses stable inventory identity"
+}
+
 test_tokenless_layout_render_preserves_installed_identity() {
     local root output
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-tokenless.XXXXXX")"
@@ -452,4 +482,5 @@ test_unready_resident_starts_no_sidecar
 test_sidecar_exec_failure_is_visible
 test_sidecar_stream_timeout_reaps_process
 test_failed_tuple_handoff_reaps_ready_sidecar
+test_empty_new_tab_stdout_uses_inventory_stable_id
 test_tokenless_layout_render_preserves_installed_identity
