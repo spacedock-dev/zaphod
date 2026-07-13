@@ -1,17 +1,17 @@
 ---
 title: Live sessions arrive and lead back to work
-status: ideation
+status: implementation
 source: captain direction 2026-07-11; Sprint 2 outcome shaping
 sprint: s2-dependable-per-tab-attention-loop
 group: walking-skeleton
-sprint-readiness: defer
-blocked-on: two-rail-recipient-isolation-proof
-blocked-reason: Binding staff review requires a live two-managed-rail same-CWD recipient-isolation proof before bb implementation; the interrupted spike produced no result.
+sprint-readiness: ready
+blocked-on:
+blocked-reason:
 score: 1.0
 started: 2026-07-12T00:02:21Z
 completed:
 verdict:
-worktree:
+worktree: .worktrees/spacedock-ensign-live-current-tab-sessions
 issue:
 pr:
 mod-block:
