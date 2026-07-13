@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -42,8 +43,19 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
   {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
   {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":"/work/managed"},
   {"id":9,"tab_id":81,"is_plugin":false,"is_selectable":true,"is_suppressed":false,"pane_cwd":"/work/foreign"}
-]`
+	]`
 	zellij := fakeSubscriberZellij(t, dir, argvLog, panes)
+	startupReader, startupWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer startupReader.Close()
+	defer startupWriter.Close()
+	ready := make(chan string, 1)
+	go func() {
+		payload, _ := io.ReadAll(startupReader)
+		ready <- string(payload)
+	}()
 
 	changed := make(chan struct{})
 	connected := make(chan struct{})
@@ -88,6 +100,7 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 			ZellijSession:     "WORK",
 			TabID:             "73",
 			RailURL:           railURL,
+			StartupFD:         int(startupWriter.Fd()),
 			PipeTimeout:       time.Second,
 			SummaryClampBytes: 512,
 		}, nil)
@@ -95,10 +108,19 @@ func TestSubscribeRefreshesOnDataChangedAndTargetsStableTab(t *testing.T) {
 
 	select {
 	case <-connected:
-		close(changed)
 	case <-ctx.Done():
 		t.Fatal("subscriber never opened its one SSE connection")
 	}
+	select {
+	case payload := <-ready:
+		if payload != "ready\n" {
+			t.Fatalf("stream-ready payload = %q, want ready newline", payload)
+		}
+	case <-ctx.Done():
+		close(changed)
+		t.Fatal("subscriber never signaled stream readiness")
+	}
+	close(changed)
 	if err := <-errCh; !errors.Is(err, ErrSourceEOF) {
 		t.Fatalf("runSubscribe error = %v, want source EOF", err)
 	}
@@ -150,6 +172,7 @@ func TestSubscribeFailsClosedWhenItsVerifiedTargetIsGone(t *testing.T) {
 		ZellijSession:     "WORK",
 		TabID:             "73",
 		RailURL:           "file:/candidate/zellij-sidebar.wasm",
+		StartupFD:         -1,
 		PipeTimeout:       time.Second,
 		SummaryClampBytes: 512,
 	}, nil)
