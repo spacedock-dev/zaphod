@@ -68,6 +68,9 @@ Task `v3` extends that proof to the tiled/sidebar-bearing adversary.
   a native `NewTab` action for its owner's one fixed configured layout.
 - Persistent `Alt /` stays `NoOp`; the managed tab owns any safe runtime
   behavior. No key path creates, retrofits, or restructures a foreign tab.
+- Global navigation routes such as `Alt .` remain fixed profile policy. This
+  hardening task adds no runtime keybinding and does not promise that a global
+  route addresses a selected-worktree resident.
 - The direct entry script must use the invoking checkout's artifact, never a
   stale global layout.
 

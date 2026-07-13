@@ -136,7 +136,10 @@ exactly one new tab. It does not parse, rewrite, stage, or restore the standing
 `config.kdl` or `layouts/zaphod.kdl`; failures and interruption leave both
 byte-identical. Persistent key policy, including `Alt /` and `Alt .`, remains
 global profile setup; the direct command neither validates nor retargets those
-routes. It never changes an existing tab.
+routes and adds no runtime keybinding. A global `Alt .` route may therefore
+remain tied to its fixed installed plugin; it is not a selected-checkout entry
+guarantee. The direct command guarantees the fresh tab and private session-row
+subscriber described below. It never changes an existing tab.
 
 This direct command is also the current session-row entry point. After
 `new-tab` returns, it waits for native `list-panes` state to show exactly one
