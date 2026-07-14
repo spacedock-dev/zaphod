@@ -212,6 +212,7 @@ run_entry() {
         ZELLIJ_CONFIG_DIR="$FIXTURE_CONFIG_DIR" \
         ZELLIJ_CONFIG_FILE="$FIXTURE_CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$FIXTURE_DATA_DIR" \
+		ZAPHOD_REGISTRY_DIR="$FIXTURE_DATA_DIR/agent-sessions-v1" \
         TMPDIR="$FIXTURE_TMP" \
         "$FIXTURE/scripts/zellij-new-tab.sh" "$@"
 }
@@ -263,6 +264,7 @@ assert_private_sidecar_started() {
         --rail-url "$expected_url" \
         --checkout-cwd "$FIXTURE_PHYSICAL" \
         --recipient-token "$recipient_token" \
+		--registry-dir "$FIXTURE_DATA_DIR/agent-sessions-v1" \
         --startup-fd 3 > "$expected"
     diff -u "$expected" "$FAKE_SIDECAR_ARGV" >&2 ||
         fail "private sidecar did not receive the exact verified profile/tab/rail tuple"
