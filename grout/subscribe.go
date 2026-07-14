@@ -55,6 +55,7 @@ type SubscribeConfig struct {
 	StartupFD         int
 	SourceTimeout     time.Duration
 	PipeTimeout       time.Duration
+	RefreshInterval   time.Duration
 	SummaryClampBytes int
 	// Package-private deterministic concurrency seams used only by tests.
 	afterScan              func()
@@ -205,7 +206,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 		return targetSnapshot{}, err
 	}
 	paneSnapshotStarted := time.Now().UTC()
-	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--command", "--geometry", "--state", "--tab")
+	args := cfg.zellijArgs("action", "list-panes", "--json", "--state", "--tab")
 	var output []byte
 	var panes []zellijPane
 	var stderrOutput string
@@ -614,6 +615,8 @@ func streamEvents(
 	var settleTransportGeneration uint64
 	var consumedActivity uint64
 	pendingDataChange := false
+	refreshTicker := time.NewTicker(cfg.RefreshInterval)
+	defer refreshTicker.Stop()
 	startSettle := func() {
 		if settleTimer != nil {
 			settleTimer.Stop()
@@ -656,6 +659,12 @@ func streamEvents(
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-refreshTicker.C:
+			if ready {
+				if err := refreshSessions(ctx, client, cfg, stableTabID, stderr); err != nil {
+					return err
+				}
+			}
 		case <-readyTimerC:
 			readyTimerC = nil
 			startHandshake()
@@ -768,6 +777,9 @@ func runSubscribe(ctx context.Context, cfg SubscribeConfig, stderr io.Writer) er
 	}
 	if cfg.SourceTimeout <= 0 {
 		cfg.SourceTimeout = 5 * time.Second
+	}
+	if cfg.RefreshInterval <= 0 {
+		cfg.RefreshInterval = 2 * time.Second
 	}
 	cfg.nativeDiagnostics = stderr
 	if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
