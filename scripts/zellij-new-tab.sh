@@ -328,4 +328,6 @@ printf 'TAB_ID=%s\n' "$TAB_ID"
 printf 'WASM_URL=%s\n' "$WASM_URL"
 printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
 printf 'SIDECAR_PID=%s\n' "$SIDECAR_PID"
+printf 'REGISTRY_DIR=%s\n' "$REGISTRY_DIR"
+printf 'RECIPIENT_TOKEN=%s\n' "$RECIPIENT_TOKEN"
 SIDECAR_HANDED_OFF=1

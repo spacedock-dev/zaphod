@@ -157,7 +157,10 @@ printf '%s\n' \
     '                    recipient_token "target-token"' \
     '                }' \
     '            }' \
-    "            pane cwd=\"$ESCAPED_CWD\"" \
+    '            pane split_direction="horizontal" {' \
+    "                pane cwd=\"$ESCAPED_CWD\"" \
+    "                pane cwd=\"$ESCAPED_CWD\"" \
+    '            }' \
     '        }' \
     '    }' \
     '    tab name="Bystander" {' \
@@ -260,7 +263,8 @@ BYSTANDER_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
 
 TARGET_PANE_ID="$(jq -er '
     [.[] | select((.tab_id | tostring) == "'"$TARGET_TAB_ID"'" and (.is_plugin | not) and .is_selectable and (.is_suppressed | not)) | .id]
-    | if length == 1 then .[0] else error("expected one Target terminal") end
+    | sort
+    | if length == 2 then .[0] else error("expected two Target terminals") end
 ' "$PANES")"
 BYSTANDER_PANE_ID="$(jq -er '
     [.[] | select((.tab_id | tostring) == "'"$BYSTANDER_TAB_ID"'" and (.is_plugin | not) and .is_selectable and (.is_suppressed | not)) | .id]
@@ -355,9 +359,35 @@ start_sidecar "$TARGET_TAB_ID" target-restart target-token
 TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
 wait_for_screen_marker 'KJ_TAB_A_ROW' "$ROOT/target-rehydrated.screen"
 
+# Closing the exact registered terminal leaves a spare pane and the resident
+# rail alive. A fresh sidecar generation must prune the stale claim and send
+# an empty snapshot without fetching the old exact record again.
+zellij_session action close-pane --pane-id "$TARGET_PANE_ID"
+for _attempt in $(seq 1 100); do
+	capture_panes
+	jq -e --arg id "$TARGET_PANE_ID" 'all(.[]; .is_plugin or ((.id | tostring) != $id))' "$PANES" >/dev/null && break
+	sleep 0.05
+done
+jq -e --arg id "$TARGET_PANE_ID" 'all(.[]; .is_plugin or ((.id | tostring) != $id))' "$PANES" >/dev/null ||
+	fail "registered Target terminal survived native close"
+kill -TERM "$TARGET_SIDECAR_PID"
+wait "$TARGET_SIDECAR_PID" 2>/dev/null || true
+TARGET_SIDECAR_PID=""
+start_sidecar "$TARGET_TAB_ID" target-after-close target-token
+TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
+for _attempt in $(seq 1 100); do
+	tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-after-close.screen"
+	grep -F 'KJ_TAB_A_ROW' "$ROOT/target-after-close.screen" >/dev/null || break
+	sleep 0.05
+done
+grep -F 'KJ_TAB_A_ROW' "$ROOT/target-after-close.screen" >/dev/null &&
+	fail "closed Target pane left a stale registered row"
+jq -e --arg id "$TARGET_PANE_ID" 'all(.registrations[]; (.pane_id | tostring) != $id)' \
+	"$REGISTRY_DIR"/session-*.json >/dev/null || fail "closed Target pane registration was not pruned"
+
 grep -Fx '/api/v1/sessions' "$ROOT/agentsview-requests.log" >/dev/null && fail "sidecar used the global session list"
 grep -F '019f5f95-cc22-77d2-9c3a-271b1edaabd8' "$ROOT/agentsview-requests.log" >/dev/null && fail "sidecar fetched the unregistered child"
 [ "$(grep -Fc '/api/v1/sessions/codex:019f5f94-a596-7d92-9928-398653669161' "$ROOT/agentsview-requests.log")" -eq 2 ] || fail "Target exact ID was not fetched once per sidecar generation"
 [ "$(grep -Fc '/api/v1/sessions/codex:019f5f95-bbfd-7993-8620-0d698008217f' "$ROOT/agentsview-requests.log")" -eq 1 ] || fail "Bystander exact ID was not fetched once"
 
-echo "PASS: two same-CWD tabs projected 1/1/0 and sidecar restart rehydrated one exact row"
+echo "PASS: two same-CWD tabs projected 1/1/0, restart rehydrated one exact row, and native close pruned it"

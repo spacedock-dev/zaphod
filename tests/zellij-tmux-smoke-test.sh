@@ -1157,5 +1157,5 @@ jq -e --arg wasm_url "$WASM_URL" \
 kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited during smoke assertions"
 
 phase smoke-complete
-printf 'PASS: %s caller with %s target/zaphod subscribe rendered SMOKE_INITIAL_ROW then SMOKE_SECOND_ROW, stayed alive, preserved routing, and cleaned up\n' \
+printf 'PASS: %s caller with %s target/zaphod subscribe registered and rendered SMOKE_SECOND_ROW, stayed alive, preserved routing, and cleaned up\n' \
     "$CALLER_ENV" "$SUBSCRIBER_MODE"
