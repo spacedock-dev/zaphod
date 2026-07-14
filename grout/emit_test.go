@@ -5,7 +5,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +16,38 @@ import (
 	"testing"
 	"time"
 )
+
+func TestLeasedSnapshotCarriesGenerationAndPositiveAcknowledgment(t *testing.T) {
+	dir := t.TempDir()
+	argvLog := filepath.Join(dir, "argv")
+	stdinLog := filepath.Join(dir, "stdin")
+	zellij := writeScript(t, dir, "leased-zellij", "#!/bin/sh\n"+
+		"{ echo \"$#\"; for a in \"$@\"; do printf '%s\\n' \"$a\"; done; } > "+argvLog+"\n"+
+		"cat > "+stdinLog+"\necho accepted\n")
+	cfg := Config{ZellijBin: zellij, ZellijSession: "managed", PipeTimeout: time.Second}
+	paneID := uint32(7)
+	rows := []SessionRow{{Kind: "session", ID: "codex:one", PaneID: &paneID}}
+	if err := EmitLeasedSnapshotForTab(context.Background(), cfg, rows, "73", "token", "generation-a", 500*time.Millisecond, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	argv := readInvocations(t, argvLog)
+	if len(argv) != 1 {
+		t.Fatalf("invocations = %d", len(argv))
+	}
+	joined := strings.Join(argv[0], " ")
+	for _, want := range []string{"zaphod-agent-v1-token-snapshot", "recipient-tab-id=73", "recipient-token=token", "watch-generation=generation-a", "lease-ms=500"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("leased snapshot argv omitted %q: %q", want, argv[0])
+		}
+	}
+	payload, err := os.ReadFile(stdinLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(payload, []byte(`"pane_id":7`)) {
+		t.Fatalf("leased snapshot payload = %s", payload)
+	}
+}
 
 func writeScript(t *testing.T, dir, name, body string) string {
 	t.Helper()
