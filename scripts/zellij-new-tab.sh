@@ -83,6 +83,14 @@ elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
 else
 	REGISTRY_DIR="${TMPDIR:-/tmp}/zaphod-agent-sessions-v1-$(id -u)"
 fi
+case "$REGISTRY_DIR" in
+    /*) ;;
+    *) fail "ZAPHOD_REGISTRY_DIR must be absolute" ;;
+esac
+MANAGED_SHELL="${SHELL:-/bin/sh}"
+[ -x "$MANAGED_SHELL" ] || fail "managed shell is not executable: $MANAGED_SHELL"
+ENV_BIN="$(command -v env)"
+[ -x "$ENV_BIN" ] || fail "env command is not executable: $ENV_BIN"
 
 ZELLIJ_ARGS=(--config-dir "$ZELLIJ_ROOT" --config "$CONFIG_FILE")
 ZELLIJ_ARGS+=(--data-dir "$DATA_DIR")
@@ -288,6 +296,7 @@ capture_initial_tab_inventory "$TABS_BEFORE" "$TABS_BEFORE_STDERR" || exit 1
 set +e
 ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
     --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")" \
+    -- "$ENV_BIN" "ZAPHOD_REGISTRY_DIR=$REGISTRY_DIR" "$MANAGED_SHELL" -l \
     > "$NEW_TAB_STDOUT" 2> "$NEW_TAB_STDERR"
 NEW_TAB_STATUS=$?
 set -e

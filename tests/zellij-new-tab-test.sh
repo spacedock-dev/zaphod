@@ -103,11 +103,14 @@ write_fake_zellij() {
         '            [ "${1:-}" = --cwd ] && [ -n "${2:-}" ] || exit 64' \
         '            printf "%s\\n" "$2" > "$FAKE_ZELLIJ_CWD"' \
         '            shift 2' \
-        '            [ "${1:-}" = --layout-string ] && [ -n "${2:-}" ] && [ "$#" -eq 2 ] || exit 64' \
+        '            [ "${1:-}" = --layout-string ] && [ -n "${2:-}" ] || exit 64' \
         '            printf "action-new-tab\\t%s\\t%s\\t%s\\t%s\\n" "$config_dir" "$config_file" "$data_dir" "$session" >> "$FAKE_ZELLIJ_CALLS"' \
         '            printf "%s\\n" "$session" > "$FAKE_ZELLIJ_SESSION"' \
         '            printf "%s\\n" "$name" > "$FAKE_ZELLIJ_NAME"' \
         '            printf "%s" "$2" > "$FAKE_ZELLIJ_LAYOUT"' \
+        '            shift 2' \
+        '            [ "${1:-}" = -- ] && [ "$#" -eq 5 ] || exit 64' \
+        '            [ -z "${FAKE_ZELLIJ_COMMAND:-}" ] || printf "%s\\n" "$@" > "$FAKE_ZELLIJ_COMMAND"' \
         '            count=0' \
         '            [ ! -f "$FAKE_ZELLIJ_NEW_TAB_COUNT" ] || count="$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")"' \
         '            printf "%s\\n" "$((count + 1))" > "$FAKE_ZELLIJ_NEW_TAB_COUNT"' \
