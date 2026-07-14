@@ -274,6 +274,18 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   must choose the smallest supported registration carrier and name its owner;
   implementation remains out of scope for this ideation rework.
 
+#### Cycle 2 — 2026-07-14 — captain rejected canonical structure
+
+- Preserve the passed real-harness spike and the cycle-2 identity mechanism;
+  the design direction is accepted and must not be reopened.
+- Replace the superseded canonical Problem / Proposed approach / Acceptance
+  criteria / Test plan / Out of scope sections with the cycle-2 contract
+  instead of leaving the revision under a parallel heading.
+- Preserve this feedback history, but make `spacedock status --read
+  managed-tab-safety-session-integration --ac-scan` discover AC-O1 through
+  AC-O6 and AC-I1 as the task's authoritative acceptance criteria. Remove or
+  relocate stale cycle-1 ACs so they cannot drive a later dispatch or gate.
+
 ## Cycle 2 revised contract — explicit session-to-pane registration
 
 This contract supersedes the cycle-1 CWD-bound journey. The previous merge
