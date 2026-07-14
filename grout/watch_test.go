@@ -168,7 +168,7 @@ func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
 {"id":8,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
 ]`)
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+argsPath+"\ncat "+panesPath+"\n")
-	cfg := SubscribeConfig{
+	cfg := WatchRoute{
 		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
 		ZellijDataDir: "/d", ZellijSession: "managed", RailURL: "file:/candidate/sidebar.wasm",
 	}

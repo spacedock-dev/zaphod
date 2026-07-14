@@ -58,7 +58,7 @@ func EmitRow(cfg Config, kind string, row any, stderr io.Writer) error {
 	return emitRow(cfg, kind, row, "", stderr)
 }
 
-// EmitRowForTab is the private subscriber's acknowledged session-row seam.
+// EmitRowForTab is the private watcher's acknowledged session-row seam.
 // The exact stable-tab receiver replies only after accepting the JSON row;
 // an unacknowledged successful broadcast is retried within PipeTimeout.
 func EmitRowForTab(

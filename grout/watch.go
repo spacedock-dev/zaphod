@@ -16,12 +16,26 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
 const watchProtocol = "zaphod-watch-tab-v1"
 const maxWatchHookBytes = 1 << 20
 const maxWatchEnvelopeBytes = maxWatchHookBytes + 1024
+
+var codexSessionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+type codexSessionStartHook struct {
+	SessionID      string          `json:"session_id"`
+	TranscriptPath json.RawMessage `json:"transcript_path"`
+	Cwd            string          `json:"cwd"`
+	HookEventName  string          `json:"hook_event_name"`
+	Model          string          `json:"model"`
+	PermissionMode string          `json:"permission_mode"`
+	Source         string          `json:"source"`
+}
 
 type watchEnvelopeV1 struct {
 	Protocol      string                `json:"protocol"`
@@ -41,6 +55,47 @@ type WatchTarget struct {
 	TabID          uint64
 	TerminalPaneID uint32
 	RailPaneID     uint64
+}
+
+func validateZellijSession(value string) error {
+	if value == "" || len(value) > 255 || strings.TrimSpace(value) != value {
+		return fmt.Errorf("invalid Zellij session name")
+	}
+	for _, r := range value {
+		if r == 0 || r < 0x20 || r == 0x7f {
+			return fmt.Errorf("invalid Zellij session name")
+		}
+	}
+	return nil
+}
+
+func canonicalPaneID(value string) (uint32, error) {
+	if value == "" {
+		return 0, fmt.Errorf("missing Zellij pane id")
+	}
+	if len(value) > 1 && value[0] == '0' {
+		return 0, fmt.Errorf("Zellij pane id %q is not canonical", value)
+	}
+	for _, c := range value {
+		if c < '0' || c > '9' {
+			return 0, fmt.Errorf("Zellij pane id %q is not unsigned decimal", value)
+		}
+	}
+	id, err := strconv.ParseUint(value, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("Zellij pane id %q: %w", value, err)
+	}
+	return uint32(id), nil
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	var trailing any
+	if err := decoder.Decode(&trailing); errors.Is(err, io.EOF) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("decode trailing JSON data: %w", err)
+	}
+	return fmt.Errorf("input contains more than one JSON value")
 }
 
 func watchSocketPath(root, zellijSession, paneValue string) (string, error) {
@@ -316,7 +371,7 @@ func validateUniqueJSONValue(decoder *json.Decoder) error {
 	return nil
 }
 
-func resolveWatchTarget(ctx context.Context, cfg SubscribeConfig, watchedPane uint32) (WatchTarget, error) {
+func resolveWatchTarget(ctx context.Context, cfg WatchRoute, watchedPane uint32) (WatchTarget, error) {
 	panes, err := watchNativePanes(ctx, cfg)
 	if err != nil {
 		return WatchTarget{}, err
@@ -347,7 +402,7 @@ func resolveWatchTarget(ctx context.Context, cfg SubscribeConfig, watchedPane ui
 	return WatchTarget{TabID: tabID, TerminalPaneID: watchedPane, RailPaneID: railID}, nil
 }
 
-func probeWatchTarget(ctx context.Context, cfg SubscribeConfig, target WatchTarget) error {
+func probeWatchTarget(ctx context.Context, cfg WatchRoute, target WatchTarget) error {
 	panes, err := watchNativePanes(ctx, cfg)
 	if err != nil {
 		return err
@@ -371,7 +426,7 @@ func probeWatchTarget(ctx context.Context, cfg SubscribeConfig, target WatchTarg
 	return nil
 }
 
-func watchNativePanes(ctx context.Context, cfg SubscribeConfig) ([]zellijPane, error) {
+func watchNativePanes(ctx context.Context, cfg WatchRoute) ([]zellijPane, error) {
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--state", "--tab")
 	command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
 	var stderr strings.Builder

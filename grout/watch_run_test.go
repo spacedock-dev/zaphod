@@ -66,7 +66,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- runWatchTab(ctx, WatchConfig{
-			SubscribeConfig: SubscribeConfig{
+			WatchRoute: WatchRoute{
 				ServerURL: source.URL, ZellijBin: zellij,
 				ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d",
 				ZellijSession: "managed", RailURL: "file:/candidate/sidebar.wasm", RecipientToken: "token",

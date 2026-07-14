@@ -1,5 +1,5 @@
-// ABOUTME: The native artifact exposes only its private subscribe subcommand.
-// ABOUTME: Missing target/profile arguments fail before any source or Zellij work.
+// ABOUTME: The native artifact exposes only manual watcher and hook subcommands.
+// ABOUTME: The superseded automatic subscriber is not an executable surface.
 
 package main
 
@@ -14,7 +14,11 @@ import (
 	"time"
 )
 
-func TestCLIRequiresPrivateSubscribeTarget(t *testing.T) {
+func validCodexSessionStart(sessionID string) []byte {
+	return []byte(`{"session_id":"` + sessionID + `","transcript_path":null,"cwd":"/same/cwd","hook_event_name":"SessionStart","model":"gpt-5.6","permission_mode":"default","source":"startup"}`)
+}
+
+func TestCLIExposesOnlyManualWatcherSurface(t *testing.T) {
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -33,11 +37,11 @@ func TestCLIRequiresPrivateSubscribeTarget(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{"no subcommand", nil, []string{"usage", "zaphod subscribe"}},
+		{"no subcommand", nil, []string{"usage", "zaphod watch-tab"}},
 		{
-			"missing stable target",
-			[]string{"subscribe", "--server", "http://127.0.0.1:8080", "--zellij-bin", "zellij"},
-			[]string{"usage", "--tab-id", "--rail-url"},
+			"removed subscriber",
+			[]string{"subscribe"},
+			[]string{"usage", "zaphod watch-tab"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,6 +63,9 @@ func TestCLIRequiresPrivateSubscribeTarget(t *testing.T) {
 				if !strings.Contains(got, want) {
 					t.Errorf("stderr %q missing %q", got, want)
 				}
+			}
+			if strings.Contains(got, "zaphod subscribe") {
+				t.Fatalf("removed subscriber remains in usage: %q", got)
 			}
 		})
 	}
@@ -98,7 +105,7 @@ func TestRegisterAgentSessionCLIUsesHookStdinAndInheritedPaneIdentity(t *testing
 	const id = "019f5f94-a596-7d92-9928-398653669161"
 	command := exec.Command(bin, "register-agent-session", "--watch-dir", watchRoot)
 	command.Env = append(os.Environ(), "ZELLIJ_SESSION_NAME=managed", "ZELLIJ_PANE_ID=7")
-	command.Stdin = bytes.NewReader(validHook(id))
+	command.Stdin = bytes.NewReader(validCodexSessionStart(id))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("register: %v\n%s", err, output)
 	}

@@ -21,7 +21,7 @@ import (
 )
 
 type WatchConfig struct {
-	SubscribeConfig
+	WatchRoute
 	PaneID     uint32
 	SocketRoot string
 	Lease      time.Duration
@@ -55,7 +55,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		cfg.RailURL == "" || cfg.RecipientToken == "" {
 		return fmt.Errorf("watch-tab requires source, Zellij target, rail, recipient, and socket root")
 	}
-	target, err := resolveWatchTarget(ctx, cfg.SubscribeConfig, cfg.PaneID)
+	target, err := resolveWatchTarget(ctx, cfg.WatchRoute, cfg.PaneID)
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	}()
 
 	client := &http.Client{}
-	streamEvents, streamErrors, closeStream, err := openWatchEventStream(ctx, client, cfg.SubscribeConfig)
+	streamEvents, streamErrors, closeStream, err := openWatchEventStream(ctx, client, cfg.WatchRoute)
 	if err != nil {
 		return err
 	}
@@ -83,12 +83,12 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	if err != nil {
 		return err
 	}
-	if err := waitForRecipient(ctx, cfg.SubscribeConfig); err != nil {
+	if err := waitForRecipient(ctx, cfg.WatchRoute); err != nil {
 		return err
 	}
 	var registration *WatchRegistration
 	refresh := func() error {
-		if err := probeWatchTarget(ctx, cfg.SubscribeConfig, target); err != nil {
+		if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
 			return err
 		}
 		rows := make([]SessionRow, 0, 1)
@@ -98,7 +98,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 				return err
 			}
 			if err == nil {
-				if err := probeWatchTarget(ctx, cfg.SubscribeConfig, target); err != nil {
+				if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
 					return err
 				}
 				rows = append(rows, BuildRegisteredSessionRow(session, registration.PaneID, time.Now(), cfg.SummaryClampBytes))
@@ -117,7 +117,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		}
 	}
 	defer func() {
-		if probeWatchTarget(context.Background(), cfg.SubscribeConfig, target) == nil {
+		if probeWatchTarget(context.Background(), cfg.WatchRoute, target) == nil {
 			clearCtx, cancel := context.WithTimeout(context.Background(), cfg.PipeTimeout)
 			defer cancel()
 			_ = EmitLeasedSnapshotForTab(clearCtx, cfg.emitConfig(), nil, cfg.TabID, cfg.RecipientToken, generation, 100*time.Millisecond, stderr)
@@ -197,7 +197,7 @@ func newWatchGeneration() (string, error) {
 func openWatchEventStream(
 	ctx context.Context,
 	client *http.Client,
-	cfg SubscribeConfig,
+	cfg WatchRoute,
 ) (<-chan struct{}, <-chan error, func(), error) {
 	endpoint, err := serverEndpoint(cfg.ServerURL, "/api/v1/events")
 	if err != nil {
