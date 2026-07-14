@@ -195,6 +195,15 @@ func listenWatchSocket(root, zellijSession, paneValue string) (*net.UnixListener
 }
 
 func acceptWatchRegistration(ctx context.Context, listener *net.UnixListener, expectedSession, expectedPane string) (WatchRegistration, error) {
+	return acceptWatchRegistrationWithAdmission(ctx, listener, expectedSession, expectedPane, nil)
+}
+
+func acceptWatchRegistrationWithAdmission(
+	ctx context.Context,
+	listener *net.UnixListener,
+	expectedSession, expectedPane string,
+	admit func(WatchRegistration) error,
+) (WatchRegistration, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := listener.SetDeadline(deadline); err != nil {
 			return WatchRegistration{}, err
@@ -221,6 +230,11 @@ func acceptWatchRegistration(ctx context.Context, listener *net.UnixListener, ex
 	registration, err := decodeWatchEnvelope(payload, expectedSession, expectedPane)
 	if err != nil {
 		return WatchRegistration{}, err
+	}
+	if admit != nil {
+		if err := admit(registration); err != nil {
+			return WatchRegistration{}, err
+		}
 	}
 	if _, err := io.WriteString(connection, "accepted\n"); err != nil {
 		return WatchRegistration{}, fmt.Errorf("acknowledge watch hook: %w", err)

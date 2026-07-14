@@ -83,9 +83,6 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	if err != nil {
 		return err
 	}
-	if err := waitForRecipient(ctx, cfg.WatchRoute); err != nil {
-		return err
-	}
 	var registration *WatchRegistration
 	rows := make([]SessionRow, 0, 1)
 	emit := func() error {
@@ -114,7 +111,21 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		rows = nextRows
 		return emit()
 	}
-	if err := emit(); err != nil {
+	if err := waitForRecipient(ctx, cfg.WatchRoute); err != nil {
+		return err
+	}
+	select {
+	case next := <-registrations:
+		copy := next
+		registration = &copy
+	default:
+	}
+	if registration != nil {
+		err = refreshSource()
+	} else {
+		err = emit()
+	}
+	if err != nil {
 		return err
 	}
 	if cfg.Ready != nil {
@@ -178,17 +189,19 @@ func acceptWatchHooks(
 	errs chan<- error,
 ) {
 	for {
-		registration, err := acceptWatchRegistration(ctx, listener, zellijSession, paneValue)
+		_, err := acceptWatchRegistrationWithAdmission(ctx, listener, zellijSession, paneValue, func(registration WatchRegistration) error {
+			select {
+			case registrations <- registration:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
 		if err != nil {
 			select {
 			case errs <- err:
 			case <-ctx.Done():
 			}
-			return
-		}
-		select {
-		case registrations <- registration:
-		case <-ctx.Done():
 			return
 		}
 	}

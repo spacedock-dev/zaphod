@@ -138,3 +138,75 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 		t.Fatalf("watch socket survived authority loss: %v", err)
 	}
 }
+
+func TestWatcherReadinessIncludesSessionStartAcceptedBeforeBoundary(t *testing.T) {
+	dir := t.TempDir()
+	runtimeRoot, err := os.MkdirTemp("/tmp", "zwt.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeRoot) })
+	readyGate := filepath.Join(dir, "recipient-ready")
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \" $* \" in\n"+
+		"  *' list-panes '*) printf '%s\\n' '[{\"id\":50,\"tab_id\":73,\"is_plugin\":true,\"plugin_url\":\"file:/candidate/sidebar.wasm\",\"is_floating\":false,\"is_suppressed\":false},{\"id\":7,\"tab_id\":73,\"is_plugin\":false,\"is_selectable\":true,\"is_suppressed\":false}]' ;;\n"+
+		"  *' pipe '*) case \"$*\" in *-ready*) [ -e "+readyGate+" ] && echo ready ;; *-snapshot*) cat > "+snapshotPath+"; echo accepted ;; esac ;;\n"+
+		"esac\n")
+
+	const agentID = "019f60ff-1111-7222-8333-444455556666"
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions/codex:" + agentID:
+			fmt.Fprintf(w, `{"id":"codex:%s","agent":"codex","first_message":"PRE_READY_ROW"}`, agentID)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer source.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan WatchReady, 1)
+	errs := make(chan error, 1)
+	go func() {
+		errs <- runWatchTab(ctx, WatchConfig{WatchRoute: WatchRoute{
+			ServerURL: source.URL, ZellijBin: zellij, ZellijConfigDir: "/c",
+			ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d", ZellijSession: "managed",
+			RailURL: "file:/candidate/sidebar.wasm", RecipientToken: "token",
+			PipeTimeout: time.Second, SourceTimeout: time.Second, SummaryClampBytes: 512,
+		}, PaneID: 7, SocketRoot: runtimeRoot, Lease: 500 * time.Millisecond,
+			Heartbeat: 100 * time.Millisecond, Ready: ready}, &bytes.Buffer{})
+	}()
+	socket, err := watchSocketPath(runtimeRoot, "managed", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Lstat(socket); err == nil {
+			break
+		}
+	}
+	hook := []byte(`{"session_id":"` + agentID + `","hook_event_name":"SessionStart","source":"startup"}`)
+	if err := sendWatchHook(ctx, runtimeRoot, "managed", "7", hook); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(readyGate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ready:
+		payload, _ := os.ReadFile(snapshotPath)
+		if !strings.Contains(string(payload), "PRE_READY_ROW") {
+			t.Fatalf("readiness preceded accepted SessionStart projection: %s", payload)
+		}
+	case err := <-errs:
+		t.Fatalf("watcher failed before ready: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("watcher readiness timed out")
+	}
+}
