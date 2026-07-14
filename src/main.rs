@@ -126,6 +126,8 @@ struct Sidebar {
 trait StatusRefreshHost {
     fn running_command(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
     fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String>;
+    #[cfg(test)]
+    fn viewport_trap(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
 }
 
 struct ZellijStatusRefreshHost;
@@ -137,6 +139,11 @@ impl StatusRefreshHost for ZellijStatusRefreshHost {
 
     fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String> {
         get_pane_cwd(pane_id)
+    }
+
+    #[cfg(test)]
+    fn viewport_trap(&mut self, pane_id: PaneId) -> Result<Vec<String>, String> {
+        get_pane_scrollback(pane_id, false).map(|contents| contents.viewport)
     }
 }
 
@@ -2894,11 +2901,14 @@ mod tests {
     }
 
     struct RecordingRefreshHost {
+        command_calls: usize,
+        cwd_calls: usize,
         scrollback_calls: usize,
     }
 
     impl StatusRefreshHost for RecordingRefreshHost {
         fn running_command(&mut self, pane_id: PaneId) -> Result<Vec<String>, String> {
+            self.command_calls += 1;
             match pane_id {
                 PaneId::Terminal(1) => Ok(vec!["codex".to_owned()]),
                 PaneId::Terminal(2) => Ok(vec!["bash".to_owned()]),
@@ -2907,7 +2917,13 @@ mod tests {
         }
 
         fn cwd(&mut self, _pane_id: PaneId) -> Result<PathBuf, String> {
+            self.cwd_calls += 1;
             Ok(PathBuf::from("/shared"))
+        }
+
+        fn viewport_trap(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+            self.scrollback_calls += 1;
+            Err("scrollback trap invoked".to_owned())
         }
 
     }
@@ -2934,11 +2950,16 @@ mod tests {
                 ..Default::default()
             },
         ];
-        let mut host = RecordingRefreshHost { scrollback_calls: 0 };
+        let mut host = RecordingRefreshHost {
+            command_calls: 0,
+            cwd_calls: 0,
+            scrollback_calls: 0,
+        };
 
         assert!(sidebar.refresh_statuses_with(&mut host));
 
         assert_eq!(host.scrollback_calls, 0, "periodic refresh started pane scrollback");
+        assert_eq!((host.command_calls, host.cwd_calls), (2, 2));
         assert_eq!(sidebar.rows[0].agent.kind, agent::AgentKind::Codex);
         assert_eq!(sidebar.rows[0].agent.state, agent::AgentState::Blocked);
         assert_eq!(sidebar.rows[0].agent.status, "allow command?");
@@ -2951,6 +2972,55 @@ mod tests {
     }
 
     #[test]
+    fn periodic_refresh_host_work_is_linear_without_viewport_calls() {
+        struct CountingRefreshHost {
+            command_calls: usize,
+            cwd_calls: usize,
+            viewport_calls: usize,
+        }
+
+        impl StatusRefreshHost for CountingRefreshHost {
+            fn running_command(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+                self.command_calls += 1;
+                Ok(vec!["bash".to_owned()])
+            }
+
+            fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String> {
+                self.cwd_calls += 1;
+                Ok(PathBuf::from(format!("/pane/{pane_id:?}")))
+            }
+
+            fn viewport_trap(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+                self.viewport_calls += 1;
+                Err("scrollback trap invoked".to_owned())
+            }
+        }
+
+        const PANES: usize = 512;
+        let mut sidebar = Sidebar::default();
+        sidebar.rows = (1..=PANES as u32)
+            .map(|pane_id| Row {
+                pane_id,
+                title: "plain shell".to_owned(),
+                ..Default::default()
+            })
+            .collect();
+        let mut host = CountingRefreshHost {
+            command_calls: 0,
+            cwd_calls: 0,
+            viewport_calls: 0,
+        };
+
+        assert!(sidebar.refresh_statuses_with(&mut host));
+        assert_eq!((host.command_calls, host.cwd_calls), (PANES, PANES));
+        assert_eq!(host.viewport_calls, 0);
+        assert!(sidebar
+            .rows
+            .iter()
+            .all(|row| agent::status_line(&row.agent, 80) == "unknown . unknown"));
+    }
+
+    #[test]
     fn independent_watchdog_detects_a_bad_scrollback_fixture() {
         use std::sync::mpsc;
 
@@ -2959,8 +3029,16 @@ mod tests {
             release: mpsc::Receiver<()>,
         }
 
-        impl BlockingScrollback {
-            fn invoke(self) -> Result<Vec<String>, String> {
+        impl StatusRefreshHost for BlockingScrollback {
+            fn running_command(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+                unreachable!()
+            }
+
+            fn cwd(&mut self, _pane_id: PaneId) -> Result<PathBuf, String> {
+                unreachable!()
+            }
+
+            fn viewport_trap(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
                 self.entered.send(()).unwrap();
                 self.release.recv().unwrap();
                 Err("released trap".to_owned())
@@ -2971,11 +3049,11 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let host = BlockingScrollback {
+            let mut host = BlockingScrollback {
                 entered: entered_tx,
                 release: release_rx,
             };
-            let _ = host.invoke();
+            let _ = host.viewport_trap(PaneId::Terminal(1));
             done_tx.send(()).unwrap();
         });
 
