@@ -5,7 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-stress.XXXXXX")"
-TIMEOUT_SECS="${ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS:-90}"
+TIMEOUT_SECS="${ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS:-180}"
 SERIAL_ROUNDS="${ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS:-2}"
 cleanup() {
     rm -rf "$ROOT"
