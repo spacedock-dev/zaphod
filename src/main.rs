@@ -2,7 +2,7 @@
 // ABOUTME: last terminal line; Alt-/ flips it between a docked rail and a 1-col sliver.
 
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use zellij_tile::prelude::*;
@@ -267,9 +267,33 @@ fn apply_agent_snapshot(
     let payload = payload.ok_or_else(|| "missing snapshot payload".to_owned())?;
     let events: Vec<AgentEvent> =
         serde_json::from_str(payload).map_err(|error| error.to_string())?;
-    Ok(events.into_iter().fold(false, |changed, event| {
-        apply_agent_event(sessions, gates, event) || changed
-    }))
+    let mut next_sessions = Vec::new();
+    let mut next_gates = Vec::new();
+    let mut ids = BTreeSet::new();
+    let mut pane_ids = BTreeSet::new();
+    for event in events {
+        match event {
+            AgentEvent::Session(session) => {
+                let pane_id = session.pane_id.ok_or_else(|| {
+                    format!("session {:?} has no registered pane_id", session.id)
+                })?;
+                if session.id.is_empty() || !ids.insert(session.id.clone()) {
+                    return Err(format!("missing or duplicate session id {:?}", session.id));
+                }
+                if !pane_ids.insert(pane_id) {
+                    return Err(format!("duplicate registered pane_id {pane_id}"));
+                }
+                next_sessions.push(session);
+            }
+            AgentEvent::Gate(gate) => next_gates.push(gate),
+        }
+    }
+    let mut changed = *sessions != next_sessions;
+    *sessions = next_sessions;
+    for gate in next_gates {
+        changed = apply_agent_event(sessions, gates, AgentEvent::Gate(gate)) || changed;
+    }
+    Ok(changed)
 }
 
 // Upserts one event into the rail's session/gate lists: sessions keyed by
