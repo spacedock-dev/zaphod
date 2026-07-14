@@ -313,6 +313,17 @@ capture_proven_panes() {
             rm -f "$stderr_file"
             return 1
         fi
+        if jq -e 'length == 0' "$output" >/dev/null 2>&1; then
+            if [ "$attempt" -lt 20 ]; then
+                sleep 0.05
+                continue
+            fi
+            provenance="$(zaphod_bounded_reply_provenance "list-panes attempt=$attempt/20" \
+                "$status" "$output" "$stderr_file")"
+            echo "native-panes-unready: persistent empty inventory; $provenance" >&2
+            rm -f "$stderr_file"
+            return 1
+        fi
         if zaphod_panes_prove_layout_expectation "$WASM_URL" "$expectation" "$output"; then
             rm -f "$stderr_file"
             return 0

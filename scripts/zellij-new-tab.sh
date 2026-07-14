@@ -92,14 +92,20 @@ capture_initial_tab_inventory() {
         status=0
         ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
             action list-tabs --json --all --state --layout > "$output" 2> "$stderr_file" || status=$?
-        if [ "$status" -ne 0 ] || [ -s "$output" ]; then
-            if [ "$status" -eq 0 ] && zaphod_valid_tab_inventory "$output"; then
-                return 0
-            fi
+        if [ "$status" -ne 0 ]; then
             provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
                 "$status" "$output" "$stderr_file")"
             printf 'tab-inventory-unready: %s\n' "$provenance" >&2
             return 1
+        fi
+        if [ -s "$output" ] && ! zaphod_valid_tab_inventory "$output"; then
+            provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
+                "$status" "$output" "$stderr_file")"
+            printf 'tab-inventory-unready: %s\n' "$provenance" >&2
+            return 1
+        fi
+        if [ -s "$output" ] && jq -e 'length > 0' "$output" >/dev/null 2>&1; then
+            return 0
         fi
         if [ "$attempt" -lt 20 ]; then
             sleep 0.05
@@ -107,7 +113,7 @@ capture_initial_tab_inventory() {
         fi
         provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
             "$status" "$output" "$stderr_file")"
-        printf 'tab-inventory-unready: persistent empty reply; %s\n' "$provenance" >&2
+        printf 'tab-inventory-unready: persistent empty inventory; %s\n' "$provenance" >&2
         return 1
     done
     return 1

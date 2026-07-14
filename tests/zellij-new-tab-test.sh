@@ -84,6 +84,7 @@ write_fake_zellij() {
         '                    count=$((count + 1))' \
         '                    printf "%s\n" "$count" > "$list_tabs_count_file"' \
         '                    if [ "${FAKE_ZELLIJ_EMPTY_LIST_TABS_ONCE:-}" = 1 ] && [ "$count" -eq 1 ]; then exit 0; fi' \
+        '                    if [ "${FAKE_ZELLIJ_EMPTY_ARRAY_LIST_TABS_ONCE:-}" = 1 ] && [ "$count" -eq 1 ]; then printf "[]\n"; exit 0; fi' \
         '                    cat "$FAKE_ZELLIJ_TABS"' \
         '                    exit 0' \
         '                    ;;' \
@@ -497,6 +498,28 @@ test_empty_initial_tab_inventory_retries_before_creation() {
     echo "PASS: empty initial tab inventory retries before creation"
 }
 
+test_empty_array_initial_tab_inventory_retries_before_creation() {
+    local root expected_url
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    expected_url="file:$FIXTURE_PHYSICAL/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+
+    FAKE_ZELLIJ_EMPTY_ARRAY_LIST_TABS_ONCE=1 run_entry --session WORK \
+        > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR" || {
+        sed -n '1,200p' "$FIXTURE_ERROR" >&2
+        fail "empty-array initial tab inventory did not recover"
+    }
+
+    [ "$(cat "$FAKE_ZELLIJ_LIST_TABS_COUNT")" -ge 3 ] ||
+        fail "empty-array initial inventory was not retried before post-create discovery"
+    grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "empty-array retry lost stable tab identity"
+    assert_private_sidecar_started "$expected_url"
+    assert_standing_kdl_unchanged
+    assert_temporary_files_cleaned
+    echo "PASS: empty-array initial tab inventory retries before creation"
+}
+
 test_inside_caller_identity_is_cleared_before_native_entry_calls() {
     local root expected_url
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
@@ -583,6 +606,7 @@ test_sidecar_stream_timeout_reaps_process
 test_failed_tuple_handoff_reaps_ready_sidecar
 test_empty_new_tab_stdout_uses_inventory_stable_id
 test_empty_initial_tab_inventory_retries_before_creation
+test_empty_array_initial_tab_inventory_retries_before_creation
 test_inside_caller_identity_is_cleared_before_native_entry_calls
 test_ambiguous_tab_discovery_reports_bounded_native_provenance
 test_tokenless_layout_render_preserves_installed_identity
