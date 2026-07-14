@@ -57,6 +57,8 @@ INJECT_FAILURE_PHASE="${ZAPHOD_SMOKE_INJECT_FAILURE_PHASE:-}"
 INJECT_FAILURE_PAYLOAD_BYTES="${ZAPHOD_SMOKE_INJECT_FAILURE_PAYLOAD_BYTES:-0}"
 INJECT_CLEANUP_PROBE_HANG="${ZAPHOD_SMOKE_INJECT_CLEANUP_PROBE_HANG:-none}"
 RESPONSIVENESS_CHECK="${ZAPHOD_SMOKE_RESPONSIVENESS_CHECK:-0}"
+INJECT_RESPONSIVE_TIMEOUT="${ZAPHOD_SMOKE_INJECT_RESPONSIVE_TIMEOUT:-}"
+RESPONSIVE_TIMEOUT_INJECTED=0
 CURRENT_PHASE="boot"
 INJECTED_FAILURE=""
 ENTRY_START_TIMEOUT=30
@@ -446,6 +448,12 @@ case "$RESPONSIVENESS_CHECK" in
     0|1) ;;
     *) fail "ZAPHOD_SMOKE_RESPONSIVENESS_CHECK must be 0 or 1" ;;
 esac
+case "$INJECT_RESPONSIVE_TIMEOUT" in
+    ""|pane-1|pane-2|pane-3|new-tab|tab-1|tab-2|sidebar-closed|quiet-after) ;;
+    *) fail "ZAPHOD_SMOKE_INJECT_RESPONSIVE_TIMEOUT names an unknown observation" ;;
+esac
+[ -z "$INJECT_RESPONSIVE_TIMEOUT" ] || [ "$RESPONSIVENESS_CHECK" = 1 ] ||
+    fail "responsive timeout injection requires ZAPHOD_SMOKE_RESPONSIVENESS_CHECK=1"
 zaphod_require_zellij_0443
 WEDGE_THRESHOLD_SECS="$(sed -nE \
     's/^const WEDGE_THRESHOLD: Duration = Duration::from_secs\(([0-9]+)\);/\1/p' \
@@ -604,6 +612,14 @@ capture_action_inventory() {
     local panes="$2"
     local tabs="$3"
     local pane_status=0 tab_status=0
+    if [ "$label" = "$INJECT_RESPONSIVE_TIMEOUT" ] &&
+        [ "$RESPONSIVE_TIMEOUT_INJECTED" -eq 0 ]; then
+        RESPONSIVE_TIMEOUT_INJECTED=1
+        phase responsive-action-timeout
+        bounded_exec "$WEDGE_THRESHOLD_SECS" sleep 60 \
+            > "$panes" 2> "$panes.err" || pane_status=$?
+        fail "injected $label native pane observation timed out: status $pane_status"
+    fi
     zellij_session_with_timeout "$WEDGE_THRESHOLD_SECS" \
         action list-panes --json --all --command --geometry --state --tab \
         > "$panes" 2> "$panes.err" || pane_status=$?
