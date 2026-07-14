@@ -1224,3 +1224,219 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 		t.Fatalf("failed queued catchup signaled readiness: %q", payload)
 	}
 }
+
+func TestSubscribePollProjectsRegistrationCommittedAfterReadiness(t *testing.T) {
+	dir := t.TempDir()
+	registryDir := filepath.Join(dir, "registry")
+	panes := `[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`
+	zellij := fakeSubscriberZellij(t, dir, filepath.Join(dir, "pipe.log"), panes)
+	const id = "019f5f94-a596-7d92-9928-398653669161"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions/codex:" + id:
+			fmt.Fprintf(w, `{"id":"codex:%s","agent":"codex","first_message":"late-registration"}`, id)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runSubscribe(ctx, SubscribeConfig{
+			ServerURL: server.URL, ZellijBin: zellij,
+			ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d",
+			ZellijSession: "WORK", TabID: "73", RailURL: "file:/candidate/zellij-sidebar.wasm",
+			CheckoutCWD: "/work", RecipientToken: "token", RegistryDir: registryDir,
+			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
+			RefreshInterval: 20 * time.Millisecond,
+		}, nil)
+	}()
+	ready := make([]byte, 6)
+	if _, err := io.ReadFull(reader, ready); err != nil || string(ready) != "ready\n" {
+		t.Fatalf("startup readiness = %q, %v", ready, err)
+	}
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, id, "WORK", "7")); err != nil {
+		t.Fatal(err)
+	}
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	for attempt := 0; attempt < 100; attempt++ {
+		payload, _ := os.ReadFile(snapshotPath)
+		if strings.Contains(string(payload), "late-registration") {
+			cancel()
+			_ = writer.Close()
+			_ = reader.Close()
+			if err := <-errCh; err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("registration committed after readiness was not projected by polling")
+}
+
+func TestSubscribePollRecoversExactRecordAfterInitial404(t *testing.T) {
+	dir := t.TempDir()
+	registryDir := filepath.Join(dir, "registry")
+	const id = "019f5f94-a596-7d92-9928-398653669161"
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, id, "WORK", "7")); err != nil {
+		t.Fatal(err)
+	}
+	panes := `[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`
+	zellij := fakeSubscriberZellij(t, dir, filepath.Join(dir, "pipe.log"), panes)
+	var available atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions/codex:" + id:
+			if !available.Load() {
+				http.NotFound(w, r)
+				return
+			}
+			fmt.Fprintf(w, `{"id":"codex:%s","agent":"codex","first_message":"indexed-later"}`, id)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runSubscribe(ctx, SubscribeConfig{
+			ServerURL: server.URL, ZellijBin: zellij,
+			ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d",
+			ZellijSession: "WORK", TabID: "73", RailURL: "file:/candidate/zellij-sidebar.wasm",
+			CheckoutCWD: "/work", RecipientToken: "token", RegistryDir: registryDir,
+			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
+			RefreshInterval: 20 * time.Millisecond,
+		}, nil)
+	}()
+	ready := make([]byte, 6)
+	if _, err := io.ReadFull(reader, ready); err != nil || string(ready) != "ready\n" {
+		t.Fatalf("startup readiness = %q, %v", ready, err)
+	}
+	available.Store(true)
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	for attempt := 0; attempt < 100; attempt++ {
+		payload, _ := os.ReadFile(snapshotPath)
+		if strings.Contains(string(payload), "indexed-later") {
+			cancel()
+			_ = writer.Close()
+			_ = reader.Close()
+			if err := <-errCh; err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("initially missing exact record was not recovered by polling")
+}
+
+func TestSubscribePollRemovesPaneMovedWithoutSourceEvent(t *testing.T) {
+	dir := t.TempDir()
+	registryDir := filepath.Join(dir, "registry")
+	const id = "019f5f94-a596-7d92-9928-398653669161"
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, id, "WORK", "7")); err != nil {
+		t.Fatal(err)
+	}
+	panesPath := filepath.Join(dir, "panes.json")
+	initial := `[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+  {"id":9,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`
+	if err := os.WriteFile(panesPath, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	readyPath := filepath.Join(dir, "ready")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\ncase \"$*\" in\n"+
+		"  *list-panes*) cat "+panesPath+" ;;\n"+
+		"  *-ready*) : > "+readyPath+"; echo ready ;;\n"+
+		"  *-snapshot*) [ -f "+readyPath+" ] || exit 70; cat > "+snapshotPath+"; echo accepted ;;\n"+
+		"esac\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions/codex:" + id:
+			fmt.Fprintf(w, `{"id":"codex:%s","agent":"codex","first_message":"moves-away"}`, id)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- runSubscribe(ctx, SubscribeConfig{
+			ServerURL: server.URL, ZellijBin: zellij,
+			ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d",
+			ZellijSession: "WORK", TabID: "73", RailURL: "file:/candidate/zellij-sidebar.wasm",
+			CheckoutCWD: "/work", RecipientToken: "token", RegistryDir: registryDir,
+			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
+			RefreshInterval: 20 * time.Millisecond,
+		}, nil)
+	}()
+	ready := make([]byte, 6)
+	if _, err := io.ReadFull(reader, ready); err != nil || string(ready) != "ready\n" {
+		t.Fatalf("startup readiness = %q, %v", ready, err)
+	}
+	moved := `[
+  {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+  {"id":7,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+  {"id":9,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`
+	if err := os.WriteFile(panesPath, []byte(moved), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 100; attempt++ {
+		payload, _ := os.ReadFile(snapshotPath)
+		if string(payload) == "[]" {
+			cancel()
+			_ = writer.Close()
+			_ = reader.Close()
+			if err := <-errCh; err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("pane moved without source event left a stale row")
+}
