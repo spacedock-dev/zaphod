@@ -4,12 +4,14 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -155,6 +157,67 @@ func watchDaemonChildArgs(args []string, startupFD int) ([]string, error) {
 	child = append(child, args...)
 	child = append(child, "--foreground", "--startup-fd", strconv.Itoa(startupFD))
 	return child, nil
+}
+
+func launchWatchDaemon(executable string, args []string, stderr io.Writer) error {
+	childArgs, err := watchDaemonChildArgs(args, 3)
+	if err != nil {
+		return err
+	}
+	readiness, signalWriter, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create watcher readiness pipe: %w", err)
+	}
+	defer readiness.Close()
+
+	logRoot := os.Getenv("ZAPHOD_ZELLIJ_DATA_DIR")
+	if logRoot == "" {
+		logRoot = os.TempDir()
+	}
+	if err := os.MkdirAll(logRoot, 0o700); err != nil {
+		signalWriter.Close()
+		return fmt.Errorf("create watcher log directory: %w", err)
+	}
+	logFile, err := os.CreateTemp(logRoot, "zaphod-watch-tab.*.log")
+	if err != nil {
+		signalWriter.Close()
+		return fmt.Errorf("create watcher log: %w", err)
+	}
+	defer logFile.Close()
+	_ = logFile.Chmod(0o600)
+
+	command := exec.Command(executable, childArgs...)
+	command.Stdin = nil
+	command.Stdout = logFile
+	command.Stderr = logFile
+	command.ExtraFiles = []*os.File{signalWriter}
+	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := command.Start(); err != nil {
+		signalWriter.Close()
+		return fmt.Errorf("start watch-tab daemon: %w", err)
+	}
+	signalWriter.Close()
+	failed := func(cause error) error {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return cause
+	}
+	if err := readiness.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return failed(fmt.Errorf("bound watcher readiness: %w", err))
+	}
+	line, err := bufio.NewReader(io.LimitReader(readiness, 64)).ReadString('\n')
+	if err != nil {
+		return failed(fmt.Errorf("watch-tab daemon exited before readiness: %w", err))
+	}
+	if line != "ready\n" {
+		return failed(fmt.Errorf("watch-tab daemon returned invalid readiness %q", strings.TrimSpace(line)))
+	}
+	pid := command.Process.Pid
+	if err := command.Process.Release(); err != nil {
+		return fmt.Errorf("release watch-tab daemon: %w", err)
+	}
+	fmt.Fprintf(stderr, "watch-tab ready pid=%d log=%s\n", pid, logFile.Name())
+	return nil
 }
 
 func defaultWatchRoot() string {
@@ -313,12 +376,42 @@ func runMain(args []string, stderr io.Writer) int {
 			return 2
 		}
 		if !cfg.Foreground {
-			fmt.Fprintln(stderr, "watch-tab daemon launch is unavailable; use --foreground")
-			return 2
+			executable, err := os.Executable()
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			if err := launchWatchDaemon(executable, args[1:], stderr); err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			return 0
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := runWatchTab(ctx, cfg.WatchConfig, stderr); err != nil {
+		ready := make(chan WatchReady, 1)
+		cfg.Ready = ready
+		watchResult := make(chan error, 1)
+		go func() { watchResult <- runWatchTab(ctx, cfg.WatchConfig, stderr) }()
+		select {
+		case started := <-ready:
+			if err := startupSignal(cfg.StartupFD); err != nil {
+				stop()
+				<-watchResult
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			fmt.Fprintf(stderr, "watch-tab foreground ready session=%s tab=%d pane=%d rail=%d socket=%s generation=%s\n",
+				cfg.ZellijSession, started.Target.TabID, started.Target.TerminalPaneID, started.Target.RailPaneID,
+				started.SocketPath, started.Generation)
+		case err := <-watchResult:
+			if err != nil {
+				fmt.Fprintln(stderr, err)
+				return 1
+			}
+			return 0
+		}
+		if err := <-watchResult; err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
 		}
