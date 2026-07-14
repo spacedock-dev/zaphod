@@ -8,9 +8,9 @@ tab and what does it want from me?**
 ```
 ┌ sidebar ──────────────┐
 │▾ PANES             ⇄ │
-│● codex literature   │   ← blocked/working agent state marker
-│    blocked . codex  │   ← state, agent, and latest prompt/status
-│✓ claude planner     │   ← idle known agent
+│● codex literature   │   ← known agent from command/title
+│    unknown . codex  │   ← fresh pane has no viewport status
+│✓ claude planner     │   ← last known status remains stale
 │    idle . claude    │
 │  clkao@mac:~/git/x    │
 │    unknown . unknown  │
@@ -25,8 +25,9 @@ tab and what does it want from me?**
 - The periodic refresh uses best-effort command/CWD metadata and preserves the last known status when live viewport data is unavailable.
 - Plugin-only command/title classification identifies Claude, Codex, and Pi;
   a new unresolved shell pane appears as `unknown . unknown`.
-- Blocked prompts outrank working prompts, with state markers in the first
-  line and details in the dimmed second line
+- Terminal pane rows classify command/title identity only. Their state and
+  status remain stale when previously known and start unknown when unavailable;
+  AgentsView session rows separately carry externally supplied workflow state.
 - **Keyboard navigation mode**: `j/k`/arrows move a highlight, `Enter` jumps,
   `Esc` returns focus where it was
 - `Alt /` (or the `⇄` header) toggles the docked 28-col rail down to a
