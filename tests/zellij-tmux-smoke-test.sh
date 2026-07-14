@@ -471,10 +471,11 @@ ROOT="$(mktemp -d /tmp/zs.XXXXXX)" || fail "could not create a short isolated sm
 CONFIG_DIR="$ROOT/config"
 CONFIG_FILE="$CONFIG_DIR/config.kdl"
 DATA_DIR="$ROOT/data"
+REGISTRY_DIR="$ROOT/registry"
 SOCKET_DIR="$ROOT/socket"
 SESSION_NAME="zs$$"
 TMUX_SERVER="zs$$"
-mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$SOCKET_DIR" "$ROOT/tmp"
+mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$REGISTRY_DIR" "$SOCKET_DIR" "$ROOT/tmp"
 phase root-created
 ISOLATED_LAYOUT="$CONFIG_DIR/layouts/zaphod.kdl"
 sed "s|<FIXED_OPERATOR_LAYOUT>|$ISOLATED_LAYOUT|" \
@@ -851,6 +852,7 @@ entry_command() {
         "${client_env[@]}" \
         ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
+		ZAPHOD_REGISTRY_DIR="$REGISTRY_DIR" \
         CARGO_TARGET_DIR="$REPO_ROOT/target" \
         ZAPHOD_TEST_PREBUILT_ARTIFACTS="${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" \
         ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \
@@ -948,6 +950,7 @@ foreground_entry() {
         --rail-url "$WASM_URL" \
         --checkout-cwd "$REPO_ROOT" \
         --recipient-token "$recipient_token" \
+		--registry-dir "$REGISTRY_DIR" \
         --startup-fd 3 \
         3>"$SIDECAR_START_FIFO" > >(tee -a "$SIDECAR_LOG") 2>&1 &
     SIDECAR_PID=$!
@@ -1028,32 +1031,29 @@ wait_for_settled_candidate_resident \
     "$ROOT/candidate-before.screen" \
     "$ROOT/candidate-tabs-before.json"
 phase candidate-settled
-for _attempt in $(seq 1 100); do
-    tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/agents-row.screen"
-    if grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null &&
-        grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-row.screen" >/dev/null; then
-        break
-    fi
-    sleep 0.05
-done
-grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row section never rendered"
-grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row was lost before recipient arming"
-phase initial-row-rendered
+zellij_session action list-panes --json --all --command --geometry --state --tab > "$ROOT/registration-panes.json"
+REGISTERED_PANE_ID="$(jq -er --arg tab_id "$TAB_ID" \
+    '[.[] | select((.tab_id | tostring) == $tab_id and (.is_plugin | not) and .is_selectable and (.is_suppressed | not))] | if length == 1 then .[0].id | tostring else error("expected one terminal") end' \
+    "$ROOT/registration-panes.json")" || fail "managed tab did not expose one terminal for SessionStart registration"
+printf '%s\n' '{"session_id":"019f5f94-a596-7d92-9928-398653669161","transcript_path":null,"cwd":"/deliberately/wrong","hook_event_name":"SessionStart","model":"fixture","permission_mode":"default","source":"startup"}' |
+    ZAPHOD_REGISTRY_DIR="$REGISTRY_DIR" \
+    ZELLIJ_SESSION_NAME="$SESSION_NAME" \
+    ZELLIJ_PANE_ID="$REGISTERED_PANE_ID" \
+    "$REPO_ROOT/target/zaphod" register-agent-session
+phase session-registered
 touch "$ROOT/agentsview-second-session"
 for _attempt in $(seq 1 160); do
     tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/agents-second-row.screen"
-    if grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-second-row.screen" >/dev/null &&
-        grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
+    if grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
         break
     fi
     kill -0 "$SIDECAR_PID" 2>/dev/null || break
     sleep 0.05
 done
-if ! grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-second-row.screen" >/dev/null ||
-    ! grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
+if ! grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
     sed -n '1,40p' "$SIDECAR_LOG" >&2 || true
     sed -n '1,80p' "$ROOT/agents-second-row.screen" >&2 || true
-    fail "post-readiness data_changed did not render both distinct session rows"
+	fail "post-registration data_changed did not render the exact registered session row"
 fi
 kill -0 "$SIDECAR_PID" 2>/dev/null || fail "subscriber exited after post-readiness data_changed delivery"
 phase second-row-rendered

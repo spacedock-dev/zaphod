@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -31,21 +32,29 @@ func main() {
 		panic(err)
 	}
 	mux := http.NewServeMux()
+	const sessionID = "codex:019f5f94-a596-7d92-9928-398653669161"
+	sessionRecord := func() map[string]any {
+		firstMessage := "SMOKE_INITIAL_ROW"
+		if _, err := os.Stat(*triggerFile); err == nil {
+			firstMessage = "SMOKE_SECOND_ROW"
+		}
+		return map[string]any{
+			"id": sessionID, "cwd": *cwd, "agent": "codex",
+			"termination_status": "awaiting_user", "first_message": firstMessage,
+			"created_at": "2026-07-13T00:00:00Z",
+		}
+	}
+	mux.HandleFunc("/api/v1/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimPrefix(r.URL.Path, "/api/v1/sessions/") != sessionID {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sessionRecord())
+	})
 	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		sessions := []map[string]any{{
-			"id": "smoke-session", "cwd": *cwd, "agent": "codex",
-			"termination_status": "awaiting_user", "first_message": "SMOKE_INITIAL_ROW",
-			"created_at": "2026-07-13T00:00:00Z",
-		}}
-		if _, err := os.Stat(*triggerFile); err == nil {
-			sessions = append(sessions, map[string]any{
-				"id": "smoke-second-session", "cwd": *cwd, "agent": "codex",
-				"termination_status": "awaiting_user", "first_message": "SMOKE_SECOND_ROW",
-				"created_at": "2026-07-14T00:00:00Z",
-			})
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": sessions})
+		_ = json.NewEncoder(w).Encode(map[string]any{"sessions": []map[string]any{sessionRecord()}})
 	})
 	mux.HandleFunc("/api/v1/events", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
