@@ -167,3 +167,19 @@ func TestWatchTabArgsUseOnlyExplicitRouteContext(t *testing.T) {
 		t.Fatalf("watch config = %#v", cfg)
 	}
 }
+
+func TestWatchDaemonChildArgsAreSingleForegroundGeneration(t *testing.T) {
+	got, err := watchDaemonChildArgs([]string{"--server", "http://127.0.0.1:8080", "--watch-dir", "/tmp/watch"}, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"watch-tab", "--server", "http://127.0.0.1:8080", "--watch-dir", "/tmp/watch", "--foreground", "--startup-fd", "3"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("child argv = %q, want %q", got, want)
+	}
+	for _, invalid := range [][]string{{"--foreground"}, {"--startup-fd", "9"}} {
+		if _, err := watchDaemonChildArgs(invalid, 3); err == nil {
+			t.Fatalf("accepted caller-supplied internal flags: %q", invalid)
+		}
+	}
+}
