@@ -15,25 +15,25 @@ observes the two-tab manual watcher journey below.
 
 ## Stored review packet
 
-The implementation's isolated Roborev daemon was intentionally removed after
-review, so its live endpoint cannot be queried. That is an **evidence defect**
-at the ephemeral-daemon retention boundary, not an outcome defect. Validation
-did not add a controller or rerun an unchanged green panel.
+The implementation's first isolated Roborev daemon was intentionally removed
+after review. That exposed an **evidence defect** at the ephemeral-daemon
+retention boundary, not an outcome defect. Its immutable raw result was valid,
+but the captain requested a replacement run with durable restart evidence.
 
-Instead, validation read the immutable raw `roborev show --job 8 --json` tool
-result from implementation session
-`codex:019f5fc2-a2f9-7da1-be9c-971047acf512`, message ordinal 1274. It records:
+Replacement run `87a8c780-3160-4389-8ba6-d622296a3278` records:
 
-- run UUID `ecc48d63-e2cc-4074-9479-33d3122821b1`;
 - panel `code_completion`;
 - the exact range above, whose right endpoint is the frozen head;
-- correctness job 5, journey job 6, and proof job 7, each present exactly once,
+- correctness job 1, journey job 2, and proof job 3, each present exactly once,
   `done`, and verdict `P`;
-- synthesis parent 8, verdict `P`, output `No issues found.`
+- synthesis parent 4, `done`, verdict `P`, output `No issues found.`
 
-Message ordinal 1283 records deletion of the isolated database and temporary
-profile. The archived raw result validly establishes the frozen review packet;
-the absent live daemon does not justify a replacement panel.
+The exported parent is `/tmp/kj-roborev-rerun/parent-4.json`; the retained
+database is `/tmp/kj-roborev-rerun/reviews.db`. The temporary daemon stopped
+cleanly after export and can be restarted against that database. This repaired
+the evidence boundary without changing product files, the frozen range, or
+standing configuration, and without adding another controller or lifecycle
+layer to the deliverable.
 
 ## Offline acceptance results
 
@@ -78,9 +78,10 @@ them afterward. It did not modify the implementation worktree.
   entry starts no subscriber, `Alt /` remains managed-only, and the documented
   watcher-before-Codex journey matches the shipped CLI.
 
-No adversarial attack survived against AC-O1 through AC-O6. The archived
-Roborev endpoint gap is confined to proof retention and was satisfied from the
-immutable raw result without changing the deliverable or its lifecycle.
+No adversarial attack survived against AC-O1 through AC-O6. The Roborev
+endpoint gap was confined to proof retention; the captain-requested replacement
+packet now retains both exported parent JSON and a restartable database without
+changing the deliverable or its lifecycle.
 
 ## Captain-live demo: AC-I1
 

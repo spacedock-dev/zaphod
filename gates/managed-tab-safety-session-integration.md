@@ -45,9 +45,11 @@ criteria:
 Offline validation is green at `dec685e8cf6efbc84ef2b26f60a81e4eda9aacf5`.
 The stored `code_completion` panel covers the exact merge-base range, contains
 correctness, journey, and proof once each with no execution failure, and has a
-passing synthesis verdict. Its removed ephemeral endpoint was an evidence
-retention defect; the immutable raw `roborev show` tool result supplies the
-same packet without a rerun or new lifecycle layer.
+passing synthesis verdict. The original removed endpoint was an evidence
+retention defect. At the captain's request, replacement run
+`87a8c780-3160-4389-8ba6-d622296a3278` produced parent 4 and retained both its
+raw JSON and restartable database; no product file or standing configuration
+changed.
 
 The artifact records the independent command packet, six named adversarial
 attacks, and the exact fresh-session AC-I1 script. Keep this gate pending until

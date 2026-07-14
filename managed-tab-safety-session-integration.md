@@ -839,10 +839,11 @@ actionable authority while daemon cleanup remains explicitly best effort.
 - DONE: Verify the stored exact-head code_completion packet, then run the
   required adversarial refutation audit on a throwaway checkout without
   changing the implementation worktree.
-  Archived raw parent 8 covers `9343129..dec685e`, names `code_completion`,
-  contains correctness 5, journey 6, and proof 7 once each at P/done, and is
-  P; three throwaway mutations went red at exact binding, atomic record
-  validation, and stale-lease boundaries, with three additional named attacks.
+  Captain-requested replacement parent 4 covers `9343129..dec685e`, names
+  `code_completion`, contains correctness 1, journey 2, and proof 3 once each
+  at P/done, and is P; its raw JSON and restartable database are retained under
+  `/tmp/kj-roborev-rerun`. Three throwaway mutations also went red at exact
+  binding, atomic record validation, and stale-lease boundaries.
 - DONE: Prepare the exact captain-live AC-I1 demo and a Subspace gate record
   that distinguishes offline proof from the captain's observation.
   `gates/managed-tab-safety-session-integration.md` validates as a Subspace v0
@@ -854,9 +855,9 @@ actionable authority while daemon cleanup remains explicitly best effort.
 
 ### Summary
 
-All six offline criteria pass independent validation, and the exact-head
-Roborev panel is verified from its immutable raw tool result. The removed
-isolated daemon endpoint is an evidence-retention defect only; validation
-added no controller and reran no green panel. The gate is ready for the
-captain's two-tab manual watcher demo, after which its Subspace decision log
-will record the live outcome.
+All six offline criteria pass independent validation. At the captain's
+request, the ephemeral-review retention evidence defect was repaired with a
+replacement exact-head panel whose exported parent JSON and restartable
+database remain available; no product file or standing configuration changed.
+The gate is ready for the captain's two-tab manual watcher demo, after which
+its Subspace decision log will record the live outcome.
