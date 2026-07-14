@@ -275,12 +275,53 @@ capture_validated_layout() {
         "$panes" "$layout" zellij_session action dump-layout
 }
 
+capture_proven_panes() {
+    local output="$1"
+    local expectation="$2"
+    local stderr_file="$ROOT/list-panes-capture.err"
+    local attempt status provenance
+    for attempt in $(seq 1 20); do
+        status=0
+        zellij_session action list-panes --json --all --command --geometry --state --tab \
+            > "$output" 2> "$stderr_file" || status=$?
+        if [ "$status" -ne 0 ]; then
+            provenance="$(zaphod_bounded_reply_provenance "list-panes attempt=$attempt/20" \
+                "$status" "$output" "$stderr_file")"
+            echo "native-panes-unready: $provenance" >&2
+            rm -f "$stderr_file"
+            return 1
+        fi
+        if ! jq -e 'type == "array"' "$output" >/dev/null 2>&1; then
+            provenance="$(zaphod_bounded_reply_provenance "list-panes attempt=$attempt/20" \
+                "$status" "$output" "$stderr_file")"
+            echo "native-panes-unready: malformed inventory; $provenance" >&2
+            rm -f "$stderr_file"
+            return 1
+        fi
+        if zaphod_panes_prove_layout_expectation "$WASM_URL" "$expectation" "$output"; then
+            rm -f "$stderr_file"
+            return 0
+        fi
+        if [ "$attempt" -lt 20 ]; then
+            sleep 0.05
+            continue
+        fi
+        provenance="$(zaphod_bounded_reply_provenance "list-panes attempt=$attempt/20" \
+            "$status" "$output" "$stderr_file")"
+        echo "native-panes-unready: persistent $expectation identity mismatch; $provenance" >&2
+        rm -f "$stderr_file"
+        return 1
+    done
+    return 1
+}
+
 capture_state() {
     local json="$1"
     local layout="$2"
     local screen="$3"
     local expectation="$4"
-    zellij_session action list-panes --json --all --command --geometry --state --tab > "$json"
+    capture_proven_panes "$json" "$expectation" ||
+        fail "native pane capture failed for $json"
     jq -S . "$json" > "$json.sorted"
     capture_validated_layout "$json" "$layout" "$expectation" ||
         fail "native layout capture failed for $layout"
