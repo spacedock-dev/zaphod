@@ -63,8 +63,11 @@ zaphod_fixture_refresh_record_valid() {
             and .is_selectable == false
         )] as $sidebar
         | ($record | type == "object")
-          and (($record | keys | sort) == ["pane_ids", "plugin_id"])
+          and (($record | keys | sort) == ["event", "pane_ids", "plugin_id", "refresh_id"])
+          and ($record.event == "complete")
           and (($record.plugin_id | tostring) == $sidebar_id)
+          and (($record.refresh_id | type) == "number")
+          and ($record.refresh_id >= 1)
           and ($record.pane_ids | type == "array")
           and (all($record.pane_ids[]; type == "number"))
           and (($record.pane_ids | unique | length) == ($record.pane_ids | length))
@@ -72,6 +75,45 @@ zaphod_fixture_refresh_record_valid() {
           and (($fixture | length) == 1)
           and (($sidebar | length) == 1)
     ' "$panes" >/dev/null
+}
+
+zaphod_refresh_log_records() {
+    local log="$1"
+    local plugin_id="$2"
+    local event="$3"
+    awk -v plugin_id="$plugin_id" '
+        BEGIN { needle = "zaphod-trace[" plugin_id "]: zaphod-refresh " }
+        index($0, needle) {
+            print substr($0, index($0, needle) + length(needle))
+        }
+    ' "$log" | jq -Rrc --arg event "$event" --arg plugin_id "$plugin_id" '
+        fromjson?
+        | select(
+            type == "object"
+            and (keys | sort) == ["event", "pane_ids", "plugin_id", "refresh_id"]
+            and .event == $event
+            and (.plugin_id | tostring) == $plugin_id
+            and (.refresh_id | type) == "number"
+            and .refresh_id >= 1
+            and (.pane_ids | type) == "array"
+            and all(.pane_ids[]; type == "number")
+            and ((.pane_ids | unique | length) == (.pane_ids | length))
+        )
+    '
+}
+
+zaphod_refresh_id_is_in_flight() {
+    local log="$1"
+    local plugin_id="$2"
+    local refresh_id="$3"
+    local starts completes
+    starts="$(zaphod_refresh_log_records "$log" "$plugin_id" start |
+        jq -sc --arg refresh_id "$refresh_id" \
+            '[.[] | select((.refresh_id | tostring) == $refresh_id)] | length')"
+    completes="$(zaphod_refresh_log_records "$log" "$plugin_id" complete |
+        jq -sc --arg refresh_id "$refresh_id" \
+            '[.[] | select((.refresh_id | tostring) == $refresh_id)] | length')"
+    [ "$starts" -eq 1 ] && [ "$completes" -eq 0 ]
 }
 
 zaphod_action_deadline_ms() {
