@@ -40,6 +40,10 @@ assert_cleanup_proven() {
         fail "$label cleanup used only a named-session probe"
     grep -F 'tmux_server_unreachable_after=1' "$result" >/dev/null ||
         fail "$label cleanup did not prove the dedicated tmux server unreachable"
+    grep -F 'tmux_server_pid_alive_after=0' "$result" >/dev/null ||
+        fail "$label cleanup did not prove the dedicated tmux server PID exited"
+    grep -F 'tmux_absence_basis=native-unreachable+pid-exited' "$result" >/dev/null ||
+        fail "$label cleanup conflated socket remediation with server-exit proof"
     grep -F 'tmux_socket_absent_after=1' "$result" >/dev/null ||
         fail "$label cleanup did not prove the dedicated tmux socket disappeared"
 }
