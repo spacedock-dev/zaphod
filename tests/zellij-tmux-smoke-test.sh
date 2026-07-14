@@ -216,20 +216,20 @@ cleanup() {
     record_precleanup_evidence "$status"
     terminate_owned_pid "$ENTRY_PID" "entry process" || cleanup_status=1
     terminate_owned_pid "$SIDECAR_PID" "private sidecar" || cleanup_status=1
+    if [ -n "$TMUX_SERVER" ]; then
+        tmux_with_timeout 2 kill-server >/dev/null 2>&1 || true
+        if tmux_with_timeout 1 has-session -t "$TMUX_SESSION" >/dev/null 2>&1; then
+            echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
+            tmux_alive_after=1
+            cleanup_status=1
+        fi
+    fi
     if [ -n "$SESSION_NAME" ]; then
         zellij_control_with_timeout 2 delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
         if zellij_control_with_timeout 1 --session "$SESSION_NAME" action list-panes --json --all \
             >/dev/null 2>&1; then
             echo "isolated Zellij session survived cleanup: $SESSION_NAME" >&2
             session_alive_after=1
-            cleanup_status=1
-        fi
-    fi
-    if [ -n "$TMUX_SERVER" ]; then
-        tmux_with_timeout 2 kill-server >/dev/null 2>&1 || true
-        if tmux_with_timeout 1 has-session -t "$TMUX_SESSION" >/dev/null 2>&1; then
-            echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
-            tmux_alive_after=1
             cleanup_status=1
         fi
     fi
