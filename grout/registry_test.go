@@ -7,7 +7,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -149,5 +151,34 @@ func TestRegistryCrashBeforeRenamePreservesCompletePriorGeneration(t *testing.T)
 	}
 	if len(snapshot.Registrations) != 1 || snapshot.Registrations[0].AgentSessionID != firstID {
 		t.Fatalf("prior generation was not preserved: %#v", snapshot)
+	}
+}
+
+func TestRegistryLockContentionHasAnIndependentDeadline(t *testing.T) {
+	store := agentRegistryStore{root: t.TempDir(), lockTimeout: 50 * time.Millisecond}
+	if err := store.prepareRoot(); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(store.lockPath("managed"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	}()
+	registration := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
+	started := time.Now()
+	err = store.upsert(registration)
+	if err == nil || !strings.Contains(err.Error(), "lock timeout") {
+		t.Fatalf("contended upsert error = %v, want lock timeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > 150*time.Millisecond {
+		t.Fatalf("contended upsert exceeded independent deadline: %s", elapsed)
 	}
 }
