@@ -150,3 +150,71 @@ func TestWatchSocketCarriesOneBoundedInMemoryRegistration(t *testing.T) {
 		t.Fatal("over-limit hook reached the watcher")
 	}
 }
+
+func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
+	dir := t.TempDir()
+	panesPath := filepath.Join(dir, "panes.json")
+	argsPath := filepath.Join(dir, "args")
+	writePanes := func(value string) {
+		t.Helper()
+		if err := os.WriteFile(panesPath, []byte(value), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePanes(`[
+{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+{"id":60,"tab_id":74,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+{"id":8,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`)
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nprintf '%s\\n' \"$*\" >> "+argsPath+"\ncat "+panesPath+"\n")
+	cfg := SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "managed", RailURL: "file:/candidate/sidebar.wasm",
+	}
+	target, err := resolveWatchTarget(context.Background(), cfg, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.TabID != 73 || target.TerminalPaneID != 7 || target.RailPaneID != 50 {
+		t.Fatalf("target = %#v", target)
+	}
+	if err := probeWatchTarget(context.Background(), cfg, target); err != nil {
+		t.Fatal(err)
+	}
+
+	// A same-WASM rail in another tab is not the original authority.
+	writePanes(`[
+{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`)
+	if err := probeWatchTarget(context.Background(), cfg, target); err != nil {
+		t.Fatalf("bystander removal revoked target: %v", err)
+	}
+
+	// Removing the exact original rail fails closed even though an otherwise
+	// identical rail remains visible in another tab.
+	writePanes(`[
+{"id":60,"tab_id":74,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`)
+	if err := probeWatchTarget(context.Background(), cfg, target); err == nil {
+		t.Fatal("replacement same-WASM rail preserved authority")
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(args)), "\n") {
+		for _, required := range []string{"--all", "--state", "--tab"} {
+			if !strings.Contains(line, required) {
+				t.Fatalf("native authority probe omitted %s: %s", required, line)
+			}
+		}
+		for _, forbidden := range []string{"--command", "--geometry", "--cwd"} {
+			if strings.Contains(line, forbidden) {
+				t.Fatalf("native authority probe requested %s: %s", forbidden, line)
+			}
+		}
+	}
+}
