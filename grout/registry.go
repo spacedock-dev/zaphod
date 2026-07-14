@@ -49,6 +49,7 @@ type AgentRegistryV1 struct {
 
 type agentRegistryStore struct {
 	root         string
+	beforeOpen   func(string)
 	beforeRename func() error
 	lockTimeout  time.Duration
 }
@@ -213,21 +214,29 @@ func (s agentRegistryStore) withLock(zellijSession string, exclusive bool, fn fu
 func (s agentRegistryStore) readUnlocked(zellijSession string) (AgentRegistryV1, error) {
 	registry := AgentRegistryV1{Version: agentRegistryVersion, ZellijSession: zellijSession, Registrations: []AgentPaneRegistrationV1{}}
 	path := s.registryPath(zellijSession)
-	info, err := os.Lstat(path)
+	if s.beforeOpen != nil {
+		s.beforeOpen(path)
+	}
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_CLOEXEC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if errors.Is(err, os.ErrNotExist) {
 		return registry, nil
 	}
 	if err != nil {
-		return AgentRegistryV1{}, fmt.Errorf("stat registry: %w", err)
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
-		return AgentRegistryV1{}, fmt.Errorf("registry is not a private regular file")
-	}
-	file, err := os.Open(path)
-	if err != nil {
 		return AgentRegistryV1{}, fmt.Errorf("open registry: %w", err)
 	}
+	file := os.NewFile(uintptr(fd), path)
+	if file == nil {
+		_ = syscall.Close(fd)
+		return AgentRegistryV1{}, fmt.Errorf("open registry: invalid file descriptor")
+	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return AgentRegistryV1{}, fmt.Errorf("stat opened registry: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+		return AgentRegistryV1{}, fmt.Errorf("registry is not a private regular file")
+	}
 	const maxRegistryBytes = 1 << 20
 	payload, err := io.ReadAll(io.LimitReader(file, maxRegistryBytes+1))
 	if err != nil {
