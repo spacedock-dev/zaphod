@@ -77,7 +77,6 @@ type zellijPane struct {
 
 type targetSnapshot struct {
 	paneTabs map[uint32]uint64
-	cwds     map[string]struct{}
 }
 
 type registeredSession struct {
@@ -289,7 +288,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	if terminals == 0 {
 		return targetSnapshot{}, fmt.Errorf("%w: stable tab %d has no selectable terminal", ErrTargetLost, stableTabID)
 	}
-	return targetSnapshot{paneTabs: paneTabs, cwds: map[string]struct{}{cfg.CheckoutCWD: {}}}, nil
+	return targetSnapshot{paneTabs: paneTabs}, nil
 }
 
 func serverEndpoint(serverURL, suffix string) (string, error) {
@@ -300,39 +299,6 @@ func serverEndpoint(serverURL, suffix string) (string, error) {
 	base.Path = strings.TrimRight(base.Path, "/") + suffix
 	base.RawQuery = ""
 	return base.String(), nil
-}
-
-func fetchSessions(ctx context.Context, client *http.Client, serverURL string, timeout time.Duration) ([]sessionInfo, error) {
-	requestCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	endpoint, err := serverEndpoint(serverURL, "/api/v1/sessions")
-	if err != nil {
-		return nil, fmt.Errorf("source endpoint: %w", err)
-	}
-	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
-	}
-	query := req.URL.Query()
-	query.Set("include_one_shot", "true")
-	query.Set("include_children", "true")
-	query.Set("limit", "1000")
-	req.URL.RawQuery = query.Encode()
-	response, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("source list: %w", err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("source list: unexpected HTTP status %s", response.Status)
-	}
-	var page struct {
-		Sessions []sessionInfo `json:"sessions"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&page); err != nil {
-		return nil, fmt.Errorf("source list: decode: %w", err)
-	}
-	return page.Sessions, nil
 }
 
 func fetchExactSession(ctx context.Context, client *http.Client, serverURL, sessionID string, timeout time.Duration) (sessionInfo, error) {
@@ -407,69 +373,55 @@ func snapshotSessions(
 	client *http.Client,
 	cfg SubscribeConfig,
 	stableTabID uint64,
-) ([]sessionInfo, error) {
-	// Probing before the source call makes a vanished session/tab terminal even
-	// when the next list happens to be empty. A later probe before each pipe
-	// closes the race between list and delivery.
-	target, err := probeTarget(ctx, cfg, stableTabID)
-	if err != nil {
-		return nil, err
-	}
-	sessions, err := fetchSessions(ctx, client, cfg.ServerURL, cfg.SourceTimeout)
-	if err != nil {
-		return nil, err
-	}
-	local := make([]sessionInfo, 0, len(sessions))
-	for _, session := range sessions {
-		if _, matches := target.cwds[session.Cwd]; matches {
-			local = append(local, session)
-		}
-	}
-	return local, nil
+) ([]registeredSession, error) {
+	return registeredSessionsForTab(ctx, client, cfg, stableTabID)
 }
 
-func deliverSessions(
+func deliverRegisteredSnapshot(
 	ctx context.Context,
 	cfg SubscribeConfig,
 	stableTabID uint64,
-	sessions []sessionInfo,
-	stderr io.Writer,
-) error {
-	for _, session := range sessions {
-		current, err := probeTarget(ctx, cfg, stableTabID)
-		if err != nil {
-			return err
-		}
-		if _, stillLocal := current.cwds[session.Cwd]; !stillLocal {
-			continue
-		}
-		row := BuildSessionRow(session, time.Now(), cfg.SummaryClampBytes)
-		if err := EmitRowForTab(ctx, cfg.emitConfig(), row.Kind, row, cfg.TabID, cfg.RecipientToken, stderr); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func deliverSnapshot(
-	ctx context.Context,
-	cfg SubscribeConfig,
-	stableTabID uint64,
-	sessions []sessionInfo,
+	sessions []registeredSession,
 	stderr io.Writer,
 ) error {
 	current, err := probeTarget(ctx, cfg, stableTabID)
 	if err != nil {
 		return err
 	}
+	registryDir := cfg.RegistryDir
+	if registryDir == "" {
+		registryDir = defaultAgentRegistryDir()
+	}
+	registry, err := (agentRegistryStore{root: registryDir}).read(cfg.ZellijSession)
+	if err != nil {
+		return fmt.Errorf("read agent registry before delivery: %w", err)
+	}
+	allowed := make(map[string]struct{})
+	for _, registration := range deliverableRegistrations(registry.Registrations, current.paneTabs) {
+		if current.paneTabs[registration.PaneID] == stableTabID {
+			key := fmt.Sprintf("%d\x00%s", registration.PaneID, registration.AgentsViewSessionID)
+			allowed[key] = struct{}{}
+		}
+	}
 	rows := make([]SessionRow, 0, len(sessions))
 	for _, session := range sessions {
-		if _, stillLocal := current.cwds[session.Cwd]; !stillLocal {
+		key := fmt.Sprintf("%d\x00%s", session.PaneID, session.Session.ID)
+		if _, stillRegistered := allowed[key]; !stillRegistered {
 			continue
 		}
-		rows = append(rows, BuildSessionRow(session, time.Now(), cfg.SummaryClampBytes))
+		rows = append(rows, BuildRegisteredSessionRow(session.Session, session.PaneID, time.Now(), cfg.SummaryClampBytes))
 	}
 	return EmitSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, stderr)
+}
+
+func deliverSnapshot(
+	ctx context.Context,
+	cfg SubscribeConfig,
+	stableTabID uint64,
+	sessions []registeredSession,
+	stderr io.Writer,
+) error {
+	return deliverRegisteredSnapshot(ctx, cfg, stableTabID, sessions, stderr)
 }
 
 func refreshSessions(
@@ -483,7 +435,7 @@ func refreshSessions(
 	if err != nil {
 		return err
 	}
-	return deliverSessions(ctx, cfg, stableTabID, sessions, stderr)
+	return deliverRegisteredSnapshot(ctx, cfg, stableTabID, sessions, stderr)
 }
 
 func waitForRecipient(ctx context.Context, cfg SubscribeConfig) error {

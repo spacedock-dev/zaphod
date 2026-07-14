@@ -466,14 +466,19 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 	changed := make(chan struct{})
 	connected := make(chan struct{})
 	var lists atomic.Int32
+	registryDir := filepath.Join(dir, "registry")
+	const registeredID = "019f5f94-a596-7d92-9928-398653669161"
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, registeredID, "WORK", "7")); err != nil {
+		t.Fatal(err)
+	}
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/v1/sessions":
+		case "/api/v1/sessions/codex:" + registeredID:
 			w.Header().Set("Content-Type", "application/json")
 			if lists.Add(1) == 1 {
-				fmt.Fprint(w, `{"sessions":[{"id":"session-1","cwd":"/work/managed","agent":"codex","termination_status":"awaiting_user","first_message":"initial marker","created_at":"2026-07-13T00:00:00Z"}]}`)
+				fmt.Fprintf(w, `{"id":"codex:%s","cwd":"/wrong/cwd","agent":"codex","termination_status":"awaiting_user","first_message":"initial marker","created_at":"2026-07-13T00:00:00Z"}`, registeredID)
 			} else {
-				fmt.Fprint(w, `{"sessions":[{"id":"session-2","cwd":"/work/managed","agent":"codex","termination_status":"awaiting_user","first_message":"fq-second-marker","created_at":"2026-07-14T00:00:00Z"}]}`)
+				fmt.Fprintf(w, `{"id":"codex:%s","cwd":"/wrong/cwd","agent":"codex","termination_status":"awaiting_user","first_message":"fq-second-marker","created_at":"2026-07-14T00:00:00Z"}`, registeredID)
 			}
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -510,6 +515,7 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 			RailURL:           railURL,
 			CheckoutCWD:       "/work/managed",
 			RecipientToken:    "test-token",
+			RegistryDir:       registryDir,
 			StartupFD:         startupFD,
 			PipeTimeout:       time.Second,
 			SummaryClampBytes: 512,
@@ -535,6 +541,7 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 	}
 	close(changed)
 	var eventLog []byte
+	var refreshedPayload []byte
 	for attempt := 0; attempt < 100; attempt++ {
 		select {
 		case err := <-errCh:
@@ -542,13 +549,14 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 		default:
 		}
 		eventLog, _ = os.ReadFile(argvLog)
-		if strings.Contains(string(eventLog), "fq-second-marker") {
+		refreshedPayload, _ = os.ReadFile(snapshotPath)
+		if strings.Contains(string(refreshedPayload), "fq-second-marker") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(string(eventLog), "fq-second-marker") {
-		t.Fatalf("second marked session was not delivered: %q", eventLog)
+	if !strings.Contains(string(refreshedPayload), "fq-second-marker") {
+		t.Fatalf("second marked session was not delivered: argv=%q snapshot=%q", eventLog, refreshedPayload)
 	}
 	select {
 	case err := <-errCh:
@@ -566,8 +574,8 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 	if err := json.Unmarshal(snapshotPayload, &snapshot); err != nil {
 		t.Fatalf("initial snapshot stdin is not valid row JSON: %v", err)
 	}
-	if len(snapshot) != 1 || snapshot[0].ID != "session-1" || snapshot[0].Cwd != "/work/managed" {
-		t.Fatalf("initial snapshot = %#v, want exact managed session row", snapshot)
+	if len(snapshot) != 1 || snapshot[0].ID != "codex:"+registeredID || snapshot[0].PaneID != 7 || snapshot[0].Summary != "fq-second-marker" {
+		t.Fatalf("refreshed snapshot = %#v, want exact registered session row", snapshot)
 	}
 
 	invs := readInvocations(t, argvLog)
@@ -583,21 +591,14 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 		"--config", "/isolated/config/config.kdl",
 		"--data-dir", "/isolated/data",
 		"--session", "WORK",
-		"pipe", "--name", "zaphod-agent-v1-test-token-event",
+		"pipe", "--name", "zaphod-agent-v1-test-token-snapshot",
 		"--args", "recipient-tab-id=73,recipient-token=test-token",
-		"--",
 	}
-	if len(argv) != len(wantPrefix)+1 || strings.Join(argv[:len(wantPrefix)], "\x00") != strings.Join(wantPrefix, "\x00") {
-		t.Fatalf("pipe argv = %q, want prefix %q plus JSON", argv, wantPrefix)
+	if len(argv) != len(wantPrefix) || strings.Join(argv, "\x00") != strings.Join(wantPrefix, "\x00") {
+		t.Fatalf("pipe argv = %q, want snapshot argv %q", argv, wantPrefix)
 	}
 	if strings.Contains(strings.Join(argv, "\x00"), "--plugin") {
 		t.Fatalf("pipe argv unexpectedly names a plugin: %q", argv)
-	}
-	if !strings.Contains(argv[len(argv)-1], `"id":"session-2"`) ||
-		!strings.Contains(argv[len(argv)-1], `"summary":"fq-second-marker"`) ||
-		!strings.Contains(argv[len(argv)-1], `"cwd":"/work/managed"`) ||
-		!strings.Contains(argv[len(argv)-1], `"kind":"session"`) {
-		t.Fatalf("pipe payload = %s, want source session row", argv[len(argv)-1])
 	}
 	cancel()
 	if err := <-errCh; err != nil {
@@ -825,6 +826,11 @@ func TestSubscribeRejectsInvalidStreamBeforeReadiness(t *testing.T) {
 
 func TestSubscribeTimesOutStalledInitialRefresh(t *testing.T) {
 	dir := t.TempDir()
+	registryDir := filepath.Join(dir, "registry")
+	const registeredID = "019f5f94-a596-7d92-9928-398653669161"
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, registeredID, "WORK", "7")); err != nil {
+		t.Fatal(err)
+	}
 	zellij := fakeSubscriberZellij(t, dir, filepath.Join(dir, "argv.log"), `[
   {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
   {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
@@ -835,7 +841,7 @@ func TestSubscribeTimesOutStalledInitialRefresh(t *testing.T) {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
-		case "/api/v1/sessions":
+		case "/api/v1/sessions/codex:" + registeredID:
 			<-r.Context().Done()
 		}
 	}))
@@ -855,6 +861,7 @@ func TestSubscribeTimesOutStalledInitialRefresh(t *testing.T) {
 		RailURL:           "file:/candidate/zellij-sidebar.wasm",
 		CheckoutCWD:       "/work/managed",
 		RecipientToken:    "test-token",
+		RegistryDir:       registryDir,
 		StartupFD:         int(writer.Fd()),
 		SourceTimeout:     100 * time.Millisecond,
 		PipeTimeout:       time.Second,
@@ -905,6 +912,13 @@ func TestSubscribeRejectsEOFDuringHandshake(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
+			registryDir := filepath.Join(dir, "registry")
+			const registeredID = "019f5f94-a596-7d92-9928-398653669161"
+			if tc.stallSessions {
+				if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, registeredID, "WORK", "7")); err != nil {
+					t.Fatal(err)
+				}
+			}
 			panesPath := filepath.Join(dir, "panes.json")
 			if err := os.WriteFile(panesPath, []byte(`[
   {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
@@ -933,7 +947,7 @@ func TestSubscribeRejectsEOFDuringHandshake(t *testing.T) {
 					} else {
 						time.Sleep(175 * time.Millisecond)
 					}
-				case "/api/v1/sessions":
+				case "/api/v1/sessions/codex:" + registeredID:
 					if !tc.stallSessions {
 						t.Errorf("unexpected sessions request while recipient was unavailable")
 						return
@@ -955,7 +969,7 @@ func TestSubscribeRejectsEOFDuringHandshake(t *testing.T) {
 				ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
 				ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
 				RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
-				StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
+				RegistryDir: registryDir, StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: time.Second,
 			}, nil)
 			_ = writer.Close()
 			payload, readErr := io.ReadAll(reader)
@@ -978,20 +992,28 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 	catchupDelivered := filepath.Join(dir, "catchup-delivered")
 	if err := os.WriteFile(panesPath, []byte(`[
   {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
-  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+	  {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+	  {"id":8,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
 ]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	registryDir := filepath.Join(dir, "registry")
+	const firstID = "019f5f94-a596-7d92-9928-398653669161"
+	const secondID = "019f5f95-bbfd-7993-8620-0d698008217f"
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, firstID, "WORK", "7")); err != nil {
+		t.Fatal(err)
+	}
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, secondID, "WORK", "8")); err != nil {
 		t.Fatal(err)
 	}
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
 		"case \"$*\" in\n"+
 		"  *list-panes*) cat "+panesPath+" ;;\n"+
 		"  *zaphod-agent-v1-*-ready*) echo ready ;;\n"+
-		"  *zaphod-agent-v1-*-snapshot*) : > "+deliveryStarted+"; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
-		"  *zaphod-agent-v1-*-event*) : > "+catchupDelivered+"; echo accepted ;;\n"+
+		"  *zaphod-agent-v1-*-snapshot*) cat >/dev/null; if [ -f "+deliveryStarted+" ]; then : > "+catchupDelivered+"; else : > "+deliveryStarted+"; fi; while [ ! -f "+releaseDelivery+" ]; do sleep 0.01; done; echo accepted ;;\n"+
 		"esac\n")
 	change := make(chan struct{})
 	changeSent := make(chan struct{})
-	var lists atomic.Int32
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/events":
@@ -1006,15 +1028,10 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 			w.(http.Flusher).Flush()
 			close(changeSent)
 			<-r.Context().Done()
-		case "/api/v1/sessions":
-			if lists.Add(1) == 1 {
-				fmt.Fprint(w, `{"sessions":[
- {"id":"one","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"},
- {"id":"two","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"}
-]}`)
-				return
-			}
-			fmt.Fprint(w, `{"sessions":[{"id":"catchup","cwd":"/work/managed","agent":"codex","created_at":"2026-07-13T00:00:00Z"}]}`)
+		case "/api/v1/sessions/codex:" + firstID:
+			fmt.Fprintf(w, `{"id":"codex:%s","cwd":"/wrong","agent":"codex","created_at":"2026-07-13T00:00:00Z"}`, firstID)
+		case "/api/v1/sessions/codex:" + secondID:
+			fmt.Fprintf(w, `{"id":"codex:%s","cwd":"/wrong","agent":"codex","created_at":"2026-07-13T00:00:00Z"}`, secondID)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1033,7 +1050,7 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
 			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
 			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
-			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
+			RegistryDir: registryDir, StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
 		}, nil)
 	}()
 	ready := make(chan string, 1)
@@ -1086,6 +1103,11 @@ func TestSubscribeSignalsReadyAfterAcknowledgedMultiRowSnapshot(t *testing.T) {
 
 func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 	dir := t.TempDir()
+	registryDir := filepath.Join(dir, "registry")
+	const registeredID = "019f5f94-a596-7d92-9928-398653669161"
+	if err := (agentRegistryStore{root: registryDir}).upsert(registrationForTest(t, registeredID, "WORK", "7")); err != nil {
+		t.Fatal(err)
+	}
 	panesPath := filepath.Join(dir, "panes.json")
 	snapshotStarted := filepath.Join(dir, "snapshot-started")
 	releaseSnapshot := filepath.Join(dir, "release-snapshot")
@@ -1129,9 +1151,9 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 			w.(http.Flusher).Flush()
 			close(changeSent)
 			<-r.Context().Done()
-		case "/api/v1/sessions":
+		case "/api/v1/sessions/codex:" + registeredID:
 			if lists.Add(1) == 1 {
-				fmt.Fprint(w, `{"sessions":[]}`)
+				fmt.Fprintf(w, `{"id":"codex:%s","cwd":"/wrong","agent":"codex"}`, registeredID)
 				return
 			}
 			http.Error(w, "catchup failed", http.StatusServiceUnavailable)
@@ -1153,7 +1175,7 @@ func TestSubscribeDoesNotSignalWhenQueuedCatchupFails(t *testing.T) {
 			ZellijConfigDir: "/isolated/config", ZellijConfigFile: "/isolated/config/config.kdl",
 			ZellijDataDir: "/isolated/data", ZellijSession: "WORK", TabID: "73",
 			RailURL: "file:/candidate/zellij-sidebar.wasm", CheckoutCWD: "/work/managed", RecipientToken: "test-token",
-			StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
+			RegistryDir: registryDir, StartupFD: int(writer.Fd()), SourceTimeout: time.Second, PipeTimeout: 2 * time.Second,
 		}, nil)
 	}()
 	for attempt := 0; attempt < 100; attempt++ {

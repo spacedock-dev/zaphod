@@ -101,7 +101,8 @@ func TestDeliverRegisteredSnapshotRechecksPaneMembershipAfterFetch(t *testing.T)
 	panesPath := filepath.Join(dir, "panes.json")
 	panes := `[
       {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
-      {"id":7,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+	  {"id":9,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+	  {"id":7,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
     ]`
 	if err := os.WriteFile(panesPath, []byte(panes), 0o600); err != nil {
 		t.Fatal(err)
