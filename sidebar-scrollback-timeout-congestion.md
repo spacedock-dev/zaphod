@@ -218,6 +218,21 @@ beyond the pane, tab, switching, and delayed-burst behavior measured above.
   standing-config preservation, the concrete documentation changes, and the
   captain's exact post-offline live demo. No manual watcher is required.
 
+### Feedback Cycles
+
+#### Convergence round 4 authorized — 2026-07-14
+
+- The captain authorized one bounded implementation repair and one exact-head
+  fourth `code_completion` panel. This does not reset the stable-contract
+  three-round budget or authorize broader command/CWD metadata redesign.
+- Repair only the three surviving proof-truth gaps from parent `1001`:
+  preserve every pane tuple and sidebar identity across actions; bind the
+  native `tail` fixture to `TAB_ID` and prove sidebar receipt plus a completed
+  periodic refresh; and start each one-second deadline before `send_literal`
+  so delivery latency counts.
+- A PASS parent may advance to validation. Another FAIL returns to the captain
+  with the frozen head and surviving findings; do not launch a fifth panel.
+
 ## Stage Report: implementation
 
 - DONE: Prove red-first that a periodic refresh never invokes pane scrollback, while command/title classification and exact stale/unknown/unbound degradation remain correct.
