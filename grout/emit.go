@@ -4,11 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -16,13 +18,17 @@ func pipeArgs(name, payload string) []string {
 	return []string{"pipe", "--name", name, "--", payload}
 }
 
+func privateAgentPipeName(recipientToken, kind string) string {
+	return "zaphod-agent-v1-" + recipientToken + "-" + kind
+}
+
 // pipeArgsForTab leaves delivery as a named-pipe broadcast while carrying the
 // stable server tab ID for every receiver to verify. It never names a plugin:
 // Zellij would launch an absent plugin for --plugin, which is not delivery.
-func pipeArgsForTab(name, payload, recipientTabID string) []string {
+func pipeArgsForTab(name, payload, recipientTabID, recipientToken string) []string {
 	return []string{
 		"pipe", "--name", name,
-		"--args", "recipient-tab-id=" + recipientTabID,
+		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-token=" + recipientToken,
 		"--", payload,
 	}
 }
@@ -52,17 +58,85 @@ func EmitRow(cfg Config, kind string, row any, stderr io.Writer) error {
 	return emitRow(cfg, kind, row, "", stderr)
 }
 
-// EmitRowForTab is the private subscriber's one session-row delivery seam.
-// It retains the existing JSON row protocol, but supplies the stable tab ID
-// receiver guard on every otherwise-session-wide pipe broadcast.
+// EmitRowForTab is the private subscriber's acknowledged session-row seam.
+// The exact stable-tab receiver replies only after accepting the JSON row;
+// an unacknowledged successful broadcast is retried within PipeTimeout.
 func EmitRowForTab(
+	ctx context.Context,
 	cfg Config,
 	kind string,
 	row any,
 	recipientTabID string,
+	recipientToken string,
 	stderr io.Writer,
 ) error {
-	return emitRow(cfg, kind, row, recipientTabID, stderr)
+	payload, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	args := pipeArgsForTab(privateAgentPipeName(recipientToken, "event"), string(payload), recipientTabID, recipientToken)
+	return emitAcknowledged(ctx, cfg, kind, args, "", stderr)
+}
+
+// EmitSnapshotForTab sends the complete initial snapshot through stdin in one
+// bounded CLI invocation, avoiding both argv limits and per-row startup cost.
+func EmitSnapshotForTab(
+	ctx context.Context,
+	cfg Config,
+	rows []SessionRow,
+	recipientTabID string,
+	recipientToken string,
+	stderr io.Writer,
+) error {
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	args := []string{
+		"pipe", "--name", privateAgentPipeName(recipientToken, "snapshot"),
+		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-token=" + recipientToken,
+	}
+	return emitAcknowledged(ctx, cfg, "snapshot", args, string(payload), stderr)
+}
+
+func emitAcknowledged(
+	ctx context.Context,
+	cfg Config,
+	kind string,
+	pipeArgs []string,
+	stdinPayload string,
+	stderr io.Writer,
+) error {
+	deliveryCtx, cancel := context.WithTimeout(ctx, cfg.PipeTimeout)
+	defer cancel()
+	args := append(zellijProfileArgs(cfg), pipeArgs...)
+	for {
+		var stdout bytes.Buffer
+		cmd := exec.CommandContext(deliveryCtx, cfg.ZellijBin, args...)
+		cmd.WaitDelay = 2 * time.Second
+		if stdinPayload != "" {
+			cmd.Stdin = strings.NewReader(stdinPayload)
+		}
+		cmd.Stdout = &stdout
+		cmd.Stderr = stderr
+		err := cmd.Run()
+		if err == nil && strings.TrimSpace(stdout.String()) == "accepted" {
+			return nil
+		}
+		if deliveryCtx.Err() != nil {
+			return fmt.Errorf("pipe timeout after %s without recipient acknowledgment: kind=%s", cfg.PipeTimeout, kind)
+		}
+		if err != nil {
+			return err
+		}
+		retry := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-deliveryCtx.Done():
+			retry.Stop()
+			return fmt.Errorf("pipe timeout after %s without recipient acknowledgment: kind=%s", cfg.PipeTimeout, kind)
+		case <-retry.C:
+		}
+	}
 }
 
 func emitRow(
@@ -80,7 +154,7 @@ func emitRow(
 	defer cancel()
 	args := pipeArgs(cfg.PipeName, string(payload))
 	if recipientTabID != "" {
-		args = pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID)
+		args = pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID, "")
 	}
 	args = append(zellijProfileArgs(cfg), args...)
 	cmd := exec.CommandContext(ctx, cfg.ZellijBin, args...)

@@ -18,6 +18,7 @@ layout {
                 pane size=28 borderless=true name="sidebar" {
                     plugin location="__ZAPHOD_WASM__" {
                         rail "1"
+                        recipient_token "__ZAPHOD_RECIPIENT__"
                     }
                 }
                 pane stacked=true {
@@ -38,6 +39,7 @@ layout {
                 pane size=1 borderless=true name="sidebar" {
                     plugin location="__ZAPHOD_WASM__" {
                         rail "1"
+                        recipient_token "__ZAPHOD_RECIPIENT__"
                     }
                 }
                 pane stacked=true {
@@ -57,6 +59,7 @@ layout {
             pane size=28 borderless=true name="sidebar" {
                 plugin location="__ZAPHOD_WASM__" {
                     rail "1"
+                    recipient_token "__ZAPHOD_RECIPIENT__"
                 }
             }
             pane stacked=true {

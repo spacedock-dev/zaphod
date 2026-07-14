@@ -7,11 +7,13 @@
 This document describes the later workspace product, not a prerequisite for
 the first operator journey. Sprint 1 has a usable narrow onramp in the existing
 Zellij plugin: `scripts/zellij-new-tab.sh --session <name>` creates a fresh
-layout-owned tab from the selected checkout, and activated `Alt Shift z` does
-the same native fresh-tab action. The ordinary `Alt /` path changes that tab's
-docked/sliver layout. Task `v3` is closing the remaining adversarial proof that
-a tiled sidebar-shaped unmanaged resident cannot qualify for the route; no
-future architecture may treat visual shape or a URL substring as ownership.
+layout-owned tab from the selected checkout without rewriting standing KDL.
+A separately installed `Alt Shift z` route can open only its one fixed layout;
+it is not a selected-checkout entry. The ordinary `Alt /` path changes the
+direct-entry tab's docked/sliver layout. Task `v3` is closing the remaining
+adversarial proof that a tiled sidebar-shaped unmanaged resident cannot qualify
+for the route; no future architecture may treat visual shape or a URL substring
+as ownership.
 There is no controller, stable binding record, create-or-focus behavior,
 adoption, hub, or portable CLI in this slice.
 
@@ -112,11 +114,12 @@ starts or reuses the workspace hub, and creates or focuses the binding's
 managed tab or window. It leaves the invoking foreign view unchanged and never
 starts a nested multiplexer.
 
-Inside Zellij, the current Sprint 1 entry is intentionally simpler: after
-activation, `Alt Shift z` creates a fresh layout-owned tab, and `Alt /` works
-only in that initialized tab. It does not create-or-focus, adopt the invoking
-tab, or record a stable binding. The future driver described below may add
-idempotent create-or-focus only when an observed operator failure requires it.
+Inside Zellij, the current Sprint 1 entry is intentionally simpler: the direct
+script creates one fresh layout-owned tab from the selected checkout, and
+`Alt /` works only in that initialized tab. It does not create-or-focus, adopt
+the invoking tab, rewrite global key policy, or record a stable binding. The
+future driver described below may add idempotent create-or-focus only when an
+observed operator failure requires it.
 
 #### Attach to an existing session
 

@@ -40,6 +40,22 @@ const STATUS_MIN_COLS: usize = 8;
 // the user is still watching land.
 const TOGGLE_COOLDOWN: Duration = Duration::from_millis(600);
 
+fn permissions_for_config(config: &BTreeMap<String, String>) -> Vec<PermissionType> {
+    let mut permissions = vec![
+        PermissionType::ReadApplicationState,
+        PermissionType::ChangeApplicationState,
+        PermissionType::ReadPaneContents,
+    ];
+    if config
+        .get("recipient_token")
+        .is_some_and(|token| !token.is_empty())
+    {
+        permissions.push(PermissionType::ReadCliPipes);
+    }
+    permissions.extend([PermissionType::Reconfigure, PermissionType::RunCommands]);
+    permissions
+}
+
 #[derive(Default)]
 struct Sidebar {
     rows: Vec<Row>,
@@ -240,6 +256,19 @@ struct GateEvent {
 // in-band errors; the caller drops the event with the reason traced.
 fn parse_agent_event(payload: &str) -> Result<AgentEvent, String> {
     serde_json::from_str(payload).map_err(|error| error.to_string())
+}
+
+fn apply_agent_snapshot(
+    sessions: &mut Vec<SessionEvent>,
+    gates: &mut Vec<GateEvent>,
+    payload: Option<&str>,
+) -> Result<bool, String> {
+    let payload = payload.ok_or_else(|| "missing snapshot payload".to_owned())?;
+    let events: Vec<AgentEvent> =
+        serde_json::from_str(payload).map_err(|error| error.to_string())?;
+    Ok(events.into_iter().fold(false, |changed, event| {
+        apply_agent_event(sessions, gates, event) || changed
+    }))
 }
 
 // Upserts one event into the rail's session/gate lists: sessions keyed by
@@ -488,10 +517,21 @@ impl Sidebar {
         let Some(armed) = self.agent_recipient else {
             return false;
         };
+        let Some(configured_token) = self.config.get("recipient_token").filter(|token| !token.is_empty()) else {
+            return false;
+        };
         !self.own_floating
             && self.own_tab == Some(armed.own_position)
             && armed.manifest_generation == self.agent_manifest_generation
             && Self::recipient_tab_id(args) == Some(armed.stable_tab_id)
+            && args.get("recipient-token") == Some(configured_token)
+    }
+
+    fn private_agent_pipe_name(&self, kind: &str) -> Option<String> {
+        self.config
+            .get("recipient_token")
+            .filter(|token| !token.is_empty())
+            .map(|token| format!("zaphod-agent-v1-{token}-{kind}"))
     }
 }
 
@@ -671,9 +711,33 @@ impl ZellijPlugin for Sidebar {
 
     fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         trace!(self, "pipe recv name={}", pipe_message.name);
-        // CLI pipe callers terminate via the server's auto-unblock once this
-        // returns; an explicit unblock would need the ReadCliPipes grant.
-        if pipe_message.name == "agent-event" {
+        if self.private_agent_pipe_name("ready").as_deref() == Some(pipe_message.name.as_str()) {
+            if self.accepts_agent_event(&pipe_message.args) {
+                if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+                    cli_pipe_output(pipe_id, "ready");
+                }
+            }
+            return false;
+        }
+        if self.private_agent_pipe_name("snapshot").as_deref() == Some(pipe_message.name.as_str()) {
+            if !self.accepts_agent_event(&pipe_message.args) {
+                return false;
+            }
+            let Ok(changed) = apply_agent_snapshot(
+                &mut self.sessions,
+                &mut self.gates,
+                pipe_message.payload.as_deref(),
+            ) else {
+                return false;
+            };
+            if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+                cli_pipe_output(pipe_id, "accepted");
+            }
+            return changed;
+        }
+        // Ordinary event callers need no response; Zellij auto-unblocks them
+        // after this returns. Only the readiness branch above writes output.
+        if self.private_agent_pipe_name("event").as_deref() == Some(pipe_message.name.as_str()) {
             if !self.accepts_agent_event(&pipe_message.args) {
                 trace!(
                     self,
@@ -688,7 +752,13 @@ impl ZellijPlugin for Sidebar {
                 return false;
             };
             return match parse_agent_event(payload) {
-                Ok(event) => apply_agent_event(&mut self.sessions, &mut self.gates, event),
+                Ok(event) => {
+                    let changed = apply_agent_event(&mut self.sessions, &mut self.gates, event);
+                    if let PipeSource::Cli(pipe_id) = &pipe_message.source {
+                        cli_pipe_output(pipe_id, "accepted");
+                    }
+                    changed
+                }
                 Err(reason) => {
                     trace!(self, "agent-event dropped: {}", reason);
                     false
@@ -733,18 +803,7 @@ impl ZellijPlugin for Sidebar {
         self.last_cols = cols;
         if !self.permissions_requested {
             self.permissions_requested = true;
-            request_permission(&[
-                PermissionType::ReadApplicationState,
-                PermissionType::ChangeApplicationState,
-                PermissionType::ReadPaneContents,
-                // The rail installs a current-client-only MessagePluginId
-                // route after it is visibly initialized; it never saves it
-                // to the user's config file.
-                PermissionType::Reconfigure,
-                // OpenCommandPaneFloating — the gate row's subspace-tui
-                // float — sits behind the RunCommands grant.
-                PermissionType::RunCommands,
-            ]);
+            request_permission(&permissions_for_config(&self.config));
         }
         if cols < STATUS_MIN_COLS {
             for line in sliver_lines(&self.rows, &self.sessions, &self.gates) {
@@ -2123,6 +2182,36 @@ extern "C" fn host_run_plugin_command() {}
 mod tests {
     use super::*;
 
+    #[test]
+    fn cli_pipe_permission_is_reserved_for_token_bound_entry() {
+        let installed = BTreeMap::new();
+        let mut empty_token = BTreeMap::new();
+        empty_token.insert("recipient_token".to_owned(), String::new());
+        let mut direct_entry = BTreeMap::new();
+        direct_entry.insert("recipient_token".to_owned(), "entry-token".to_owned());
+        let installed_permissions = vec![
+            PermissionType::ReadApplicationState,
+            PermissionType::ChangeApplicationState,
+            PermissionType::ReadPaneContents,
+            PermissionType::Reconfigure,
+            PermissionType::RunCommands,
+        ];
+
+        assert_eq!(permissions_for_config(&installed), installed_permissions);
+        assert_eq!(permissions_for_config(&empty_token), installed_permissions);
+        assert_eq!(
+            permissions_for_config(&direct_entry),
+            vec![
+                PermissionType::ReadApplicationState,
+                PermissionType::ChangeApplicationState,
+                PermissionType::ReadPaneContents,
+                PermissionType::ReadCliPipes,
+                PermissionType::Reconfigure,
+                PermissionType::RunCommands,
+            ]
+        );
+    }
+
     fn pane(id: u32, is_plugin: bool, title: &str, y: usize, focused: bool) -> PaneInfo {
         PaneInfo {
             id,
@@ -2464,13 +2553,30 @@ mod tests {
 
     fn agent_event_for_tab(payload: &str, recipient_tab_id: &str) -> PipeMessage {
         let mut message = agent_event(Some(payload));
+        message.name = "zaphod-agent-v1-test-token-event".to_owned();
         message
             .args
             .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
         message
+            .args
+            .insert("recipient-token".to_owned(), "test-token".to_owned());
+        message
+    }
+
+    fn agent_snapshot(payload: Option<&str>, recipient_tab_id: &str) -> PipeMessage {
+        let mut message = agent_event(payload);
+        message.name = "zaphod-agent-v1-test-token-snapshot".to_owned();
+        message
+            .args
+            .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
+        message
+            .args
+            .insert("recipient-token".to_owned(), "test-token".to_owned());
+        message
     }
 
     fn arm_agent_recipient(sidebar: &mut Sidebar, own_position: usize, tabs: &[TabInfo]) {
+		sidebar.config.insert("recipient_token".to_owned(), "test-token".to_owned());
         sidebar.own_tab = Some(own_position);
         sidebar.own_floating = false;
         sidebar.observe_agent_manifest();
@@ -2567,6 +2673,58 @@ mod tests {
         floating.own_floating = true;
         assert!(!floating.pipe(agent_event_for_tab(session_line(), "0")));
         assert!(floating.sessions.is_empty());
+    }
+
+    #[test]
+    fn legacy_agent_event_name_is_inert_even_for_exact_recipient() {
+        let mut sidebar = Sidebar::default();
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
+        let mut legacy = agent_event(Some(session_line()));
+        legacy
+            .args
+            .insert("recipient-tab-id".to_owned(), "73".to_owned());
+        legacy
+            .args
+            .insert("recipient-token".to_owned(), "test-token".to_owned());
+
+        assert!(!sidebar.pipe(legacy));
+        assert!(sidebar.sessions.is_empty());
+    }
+
+    #[test]
+    fn agent_snapshot_requires_valid_payload_and_exact_recipient() {
+        let tabs = [
+            tab_info(1, 73, true, None, false),
+            tab_info(2, 81, false, None, false),
+        ];
+        let payload = format!("[{},{}]", session_line(), gate_line());
+        let mut target = Sidebar::default();
+        arm_agent_recipient(&mut target, 1, &tabs);
+        assert!(target.pipe(agent_snapshot(Some(&payload), "73")));
+        assert_eq!(target.sessions.len(), 1);
+        assert_eq!(target.gates.len(), 1);
+
+        for invalid in [None, Some("{not json"), Some(r#"{"kind":"session"}"#)] {
+            let mut rail = Sidebar::default();
+            arm_agent_recipient(&mut rail, 1, &tabs);
+            assert!(!rail.pipe(agent_snapshot(invalid, "73")));
+            assert!(rail.sessions.is_empty());
+            assert!(rail.gates.is_empty());
+        }
+
+        let mut foreign = Sidebar::default();
+        arm_agent_recipient(&mut foreign, 2, &tabs);
+        assert!(!foreign.pipe(agent_snapshot(Some(&payload), "73")));
+        assert!(foreign.sessions.is_empty());
+        assert!(foreign.gates.is_empty());
+
+        let mut same_tab_competitor = Sidebar::default();
+        arm_agent_recipient(&mut same_tab_competitor, 1, &tabs);
+        same_tab_competitor
+            .config
+            .insert("recipient_token".to_owned(), "other-token".to_owned());
+        assert!(!same_tab_competitor.pipe(agent_snapshot(Some(&payload), "73")));
+        assert!(same_tab_competitor.sessions.is_empty());
     }
 
     #[test]

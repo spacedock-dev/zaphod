@@ -26,14 +26,172 @@ zaphod_canonical_file_url() {
     printf 'file:%s/%s\n' "$directory" "$basename"
 }
 
+# Print the one stable tab ID added between two complete native list-tabs JSON
+# inventories. Any malformed record, lost prior ID, or ambiguous addition is
+# rejected so callers never infer identity from action stdout or tab position.
+zaphod_new_tab_id_from_inventories() {
+    local before="$1"
+    local after="$2"
+    jq -er -n --slurpfile before "$before" --slurpfile after "$after" '
+        def stable_ids:
+            if type != "array" then error("tab inventory is not an array")
+            else map(
+                .tab_id |
+                if type == "number" and . >= 0 and floor == . then tostring
+                else error("tab_id is not a nonnegative integer")
+                end
+            ) | unique
+            end;
+        ($before[0] | stable_ids) as $old |
+        ($after[0] | stable_ids) as $new |
+        ($old - $new) as $lost |
+        ($new - $old) as $added |
+        if ($lost | length) == 0 and ($added | length) == 1 then $added[0]
+        else error("expected exactly one added tab and no lost tabs")
+        end
+    '
+}
+
+zaphod_valid_tab_inventory() {
+    local inventory="$1"
+    jq -e '
+        type == "array" and
+        all(.[]; (.tab_id | type) == "number" and .tab_id >= 0 and (.tab_id | floor) == .tab_id) and
+        ((map(.tab_id) | length) == (map(.tab_id) | unique | length))
+    ' "$inventory" >/dev/null
+}
+
+# Format command provenance without retaining an unbounded shell value. Reply
+# bodies stay in owned temporary files; only their byte counts and first 256
+# bytes, JSON-escaped by jq, cross the failure boundary.
+zaphod_bounded_reply_provenance() {
+    local label="$1"
+    local status="$2"
+    local stdout_file="$3"
+    local stderr_file="$4"
+    local stdout_len stderr_len stdout_prefix stderr_prefix
+    stdout_len="$(wc -c < "$stdout_file" | tr -d '[:space:]')"
+    stderr_len="$(wc -c < "$stderr_file" | tr -d '[:space:]')"
+    stdout_prefix="$(head -c 256 "$stdout_file" | jq -Rs .)"
+    stderr_prefix="$(head -c 256 "$stderr_file" | jq -Rs .)"
+    printf '%s status=%s stdout_len=%s stdout_prefix=%s stderr_len=%s stderr_prefix=%s' \
+        "$label" "$status" "$stdout_len" "$stdout_prefix" "$stderr_len" "$stderr_prefix"
+}
+
+zaphod_panes_prove_layout_expectation() {
+    local expected_url="$1"
+    local expectation="$2"
+    local panes_file="$3"
+    case "$expectation" in
+        present)
+            jq -e --arg expected_url "$expected_url" '
+                type == "array" and
+                ([.[] | select(
+                    .is_plugin == true and .plugin_url == $expected_url and
+                    .is_floating == false and .is_suppressed == false
+                )] | length) == 1
+            ' "$panes_file" >/dev/null
+            ;;
+        absent)
+            jq -e '
+                type == "array" and
+                all(.[];
+                    (.is_plugin != true) or
+                    ((.plugin_url // "") | test("(^|/)zellij-sidebar\\.wasm([?#].*)?$") | not)
+                )
+            ' "$panes_file" >/dev/null
+            ;;
+        *) return 2 ;;
+    esac
+}
+
+# Capture one native dump-layout record, validate its entire KDL syntax and
+# Zaphod identity, then atomically publish it. A valid stale identity or a
+# A status-0 empty wrong-action may retry when the authoritative pane inventory
+# proves either requested state. Stale identity and complete JSON wrong-action
+# retries still require the exact candidate. All other failures are final.
+zaphod_capture_validated_layout() {
+    local validator="$1"
+    local expected_url="$2"
+    local expectation="$3"
+    local panes_file="$4"
+    local output_file="$5"
+    shift 5
+    local attempt_file="$output_file.attempt"
+    local stderr_file="$output_file.stderr"
+    local validator_stderr="$output_file.validator.stderr"
+    local empty_file="$output_file.empty"
+    local attempt command_status validator_status retryable provenance
+
+    rm -f "$output_file" "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+    : > "$empty_file"
+    if ! zaphod_panes_prove_layout_expectation "$expected_url" "$expectation" "$panes_file"; then
+        echo "native-layout-unready: authoritative pane inventory does not prove expected $expectation identity" >&2
+        rm -f "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+        return 1
+    fi
+    for attempt in 1 2 3; do
+        command_status=0
+        "$@" > "$attempt_file" 2> "$stderr_file" || command_status=$?
+        if [ "$command_status" -ne 0 ]; then
+            provenance="$(zaphod_bounded_reply_provenance "dump-layout attempt=$attempt/3" \
+                "$command_status" "$attempt_file" "$stderr_file")"
+            echo "native-layout-unready: $provenance" >&2
+            rm -f "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+            return 1
+        fi
+
+        validator_status=0
+        "$validator" "$attempt_file" "$expected_url" "$expectation" 2> "$validator_stderr" || validator_status=$?
+        if [ "$validator_status" -eq 0 ]; then
+            mv "$attempt_file" "$output_file"
+            rm -f "$stderr_file" "$validator_stderr" "$empty_file"
+            return 0
+        fi
+
+        provenance="$(zaphod_bounded_reply_provenance "dump-layout attempt=$attempt/3" \
+            "$command_status" "$attempt_file" "$stderr_file"); \
+$(zaphod_bounded_reply_provenance validator "$validator_status" "$empty_file" "$validator_stderr")"
+        retryable=0
+        if [ "$validator_status" -eq 20 ] && [ ! -s "$attempt_file" ]; then
+            retryable=1
+        elif [ "$expectation" = present ]; then
+            if [ "$validator_status" -eq 21 ]; then
+                retryable=1
+            elif [ "$validator_status" -eq 20 ]; then
+                if jq -e 'type == "array"' "$attempt_file" >/dev/null 2>&1; then
+                    retryable=1
+                fi
+            fi
+        fi
+        if [ "$retryable" -eq 1 ] && [ "$attempt" -lt 3 ]; then
+            echo "transient-native-layout-reply: $provenance" >&2
+            sleep 0.05
+            continue
+        fi
+        echo "native-layout-unready: $provenance" >&2
+        rm -f "$attempt_file" "$stderr_file" "$validator_stderr" "$empty_file"
+        return 1
+    done
+    return 1
+}
+
 zaphod_render_layout() {
     local template="$1"
     local wasm_url="$2"
     local output="$3"
-    local replacement
+    local recipient_token="${4:-}" replacement token_replacement
     replacement="${wasm_url//&/\\&}"
     replacement="${replacement//|/\\|}"
-    sed "s|__ZAPHOD_WASM__|$replacement|g" "$template" > "$output"
+    token_replacement="${recipient_token//&/\\&}"
+    token_replacement="${token_replacement//|/\\|}"
+    if [ -n "$recipient_token" ]; then
+        sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
+            -e "s|__ZAPHOD_RECIPIENT__|$token_replacement|g" "$template" > "$output"
+    else
+        sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
+            -e '/__ZAPHOD_RECIPIENT__/d' "$template" > "$output"
+    fi
 }
 
 zaphod_kdl_escape() {

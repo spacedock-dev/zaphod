@@ -123,28 +123,44 @@ artifact.
 
 ### Create a fresh managed tab
 
-To activate this checkout and create a fresh tab in an existing session, run:
+To build the selected checkout and create a fresh tab in an existing session,
+run:
 
 ```bash
 ./scripts/zellij-new-tab.sh --session WORK
 ```
 
-The command builds this checkout, renders its WASM URL into an inline layout,
-and creates exactly one new tab. It atomically updates only existing Zaphod
-keybind scopes in the selected config root: `Alt Shift z` natively creates
-that root's stored layout by absolute path, and persistent `Alt /` is `NoOp`.
-It never changes an existing tab. The absolute path matters: Zellij resolves
-the named `layout "zaphod"` form from its standing default config root, even
-when the session was launched with an isolated config root.
+The command asks Zellij to validate the selected profile, builds this checkout,
+renders its canonical WASM URL into a disposable inline layout, and creates
+exactly one new tab. It does not parse, rewrite, stage, or restore the standing
+`config.kdl` or `layouts/zaphod.kdl`; failures and interruption leave both
+byte-identical. Persistent key policy, including `Alt /` and `Alt .`, remains
+global profile setup; the direct command neither validates nor retargets those
+routes and adds no runtime keybinding. A global `Alt .` route may therefore
+remain tied to its fixed installed plugin; it is not a selected-checkout entry
+guarantee. The direct command guarantees the fresh tab and private session-row
+subscriber described below. It never changes an existing tab.
 
 This direct command is also the current session-row entry point. After
 `new-tab` returns, it waits for native `list-panes` state to show exactly one
 tiled, non-suppressed Zaphod rail with the returned stable tab ID and this
 checkout's canonical WASM URL. Only then does it start one private
 `target/zaphod subscribe` process with the same Zellij profile and session.
+The inline rail and sidecar also share a fresh per-entry recipient token, so a
+second rail in the same stable tab cannot acknowledge or receive its rows.
 The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
 `--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
-Do not run the sidecar yourself.
+The startup handshake allows 30 seconds for the sidecar to verify the exact
+stable-tab target, establish a correctly typed AgentsView SSE response that
+remains open through a short stability probe, and deliver one acknowledged
+initial snapshot. Changes arriving during that work are fetched and
+acknowledged before readiness; the sidecar reports success only after a short
+quiet window with no pending change.
+Start AgentsView and wait for the sessions endpoint before direct entry because
+the sidecar exits on its first later source failure and does not retry. A
+failed handshake terminates and reaps the unready sidecar. Do not run the
+sidecar yourself. For a live session-row check, follow the
+[chat-guided AgentsView demo](docs/zellij-agentsview-live-demo.md).
 
 If that exact rail never appears, the command reports
 `sidecar-target-unready`, starts no sidecar, and preserves the newly created
@@ -153,12 +169,16 @@ SIGTERM, source EOF, or a source failure ends the sidecar. It does not
 restart, retarget, or clean up AgentsView, Zellij sessions, tabs, panes, or
 plugins.
 
-`Alt Shift z` remains a tab-only shortcut. It cannot safely start the
-subscriber because a native Zellij `Run` keybind materializes a helper pane.
-Named pipes remain session-wide broadcasts, so the rail accepts a session
-event only after a fresh `PaneUpdate` then `TabUpdate` maps its display
-position to the exact stable `recipient-tab-id`. CWD is used only after that
-check to focus a pane in the accepted rail.
+`Alt Shift z` remains a separately configured tab-only shortcut. It opens the
+one fixed layout already named by the operator's global config; it does not
+select an arbitrary checkout and the direct script never repoints it. It also
+cannot safely start the subscriber because a native Zellij `Run` keybind
+materializes a helper pane.
+Zellij named pipes remain session-wide broadcasts. Direct entry therefore
+uses a versioned pipe name derived from its fresh recipient token. The rail
+also requires a fresh `PaneUpdate` followed by `TabUpdate` and the exact
+stable `recipient-tab-id`. CWD is used only after these checks to focus a pane
+in the accepted rail.
 
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail requests a temporary runtime `Alt /` route to its own already-running
@@ -171,19 +191,20 @@ tiled sidebar-shaped unmanaged resident cannot qualify for that route; visual
 shape or a URL substring is not managed ownership.
 
 Use `ZELLIJ_CONFIG_DIR`, `ZELLIJ_CONFIG_FILE`, and `ZELLIJ_DATA_DIR` to run it
-against an isolated profile. The current invocation creates its tab at once;
-restart the Zellij server before relying on a newly written native keybind.
+against an isolated profile. The command creates its inline tab at once and
+does not install or update a native keybind.
 
 Run the real-key boundary with:
 
 ```bash
 ./tests/zellij-tmux-smoke-test.sh
+ZAPHOD_PERMISSION_FIXTURE=upgrade ./tests/zellij-tmux-smoke-test.sh
 ./tests/zellij-two-rail-recipient-smoke-test.sh
 ```
 
 They use the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
-The second test proves that a stable-tab recipient reaches only its target
-rail even when a bystander rail has the same terminal CWD.
+The second test deliberately gives two same-CWD rails one recipient token and
+proves that the stable-tab guard still delivers only to the target rail.
 
 ### Historical worktree profile
 
@@ -194,23 +215,31 @@ real-key candidate check.
 
 ### Permissions
 
-On first normal launch, the pane shows a permission prompt
-(`ReadApplicationState`, `ChangeApplicationState`, `ReadPaneContents`,
-`Reconfigure`, `RunCommands`) — focus it and approve once. Zellij's grant
-cache is keyed by the raw WASM path; the smoke harness redirects `HOME` to a
-temporary root and uses a deliberately pre-granted fixture, so it never
-writes the operator's cache or fakes consent with keystrokes. `Reconfigure`
-changes only runtime keybinds; Zaphod does not save that route to disk.
-`RunCommands` is required only when a gate row floats `subspace-tui`.
+Tokenless installed-layout rails request `ReadApplicationState`,
+`ChangeApplicationState`, `ReadPaneContents`, `Reconfigure`, and `RunCommands`.
+A token-bound direct-entry rail also requests `ReadCliPipes` for its private
+subscriber. On the first request or grant expansion, focus the pane and
+approve its native prompt once.
+Zellij's grant cache is keyed by the raw WASM path. By default, the smoke
+harness redirects `HOME` to a temporary root and uses a pre-granted fixture.
+Its `upgrade` mode seeds an old grant without `ReadCliPipes`, focuses the exact
+candidate pane, sends one literal `y` through the attached tmux client, and
+checks the expanded cache and normal session row. Neither mode writes the
+operator's cache. `ReadCliPipes` is used only for the direct-entry
+subscriber's private recipient, initial-snapshot, and accepted-row
+acknowledgments.
+`Reconfigure` changes only runtime keybinds; Zaphod does not save that route
+to disk. `RunCommands` is required only when a gate row floats `subspace-tui`.
 
 ## Status
 
 Working prototype (zellij 0.44.3): per-tab toggle, click/keyboard switching,
 plugin-local agent awareness, tab-bound session rows from the direct script,
-state/status lines, and docked/sliver toggle. Create a rail with
-`scripts/zellij-new-tab.sh` or the initialized `Alt Shift z` binding; use the
-direct script when session rows are wanted. `Alt /` never creates or
-retrofits a tab.
+state/status lines, and docked/sliver toggle. Use
+`scripts/zellij-new-tab.sh` to create a rail from a selected checkout. A
+separately installed `Alt Shift z` binding opens only its fixed configured
+layout and does not select a checkout or start session rows. `Alt /` never
+creates or retrofits a tab.
 
 [SPEC.md](SPEC.md) records the shipped prototype and its numbered Zellij
 plugin landmines, including the historical rebuild guidance. For the evergreen

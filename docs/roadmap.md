@@ -43,8 +43,9 @@ rail must not inherit `pz`'s rail-issued `approve` action.
 
 ### Operator journey
 
-**Trigger:** In the selected checkout, the operator presses `Alt Shift z` or
-runs the fresh-tab entry command.
+**Trigger:** In the selected checkout, the operator runs the fresh-tab entry
+command. A separately configured `Alt Shift z` shortcut opens only its fixed
+installed layout and is not a worktree selector.
 
 **Visible result:** Zellij opens one fresh managed Zaphod tab built from that
 checkout's WASM. In the ordinary entry-created path, `Alt /` toggles that
@@ -62,12 +63,16 @@ Task `v3` extends that proof to the tiled/sidebar-bearing adversary.
 
 ### Scope
 
-- `Alt Shift z` stays a native `NewTab` action using the selected checkout's
-  absolute rendered layout path.
+- The direct script passes the selected checkout's rendered layout inline and
+  never rewrites standing config or layout files. A global `Alt Shift z` stays
+  a native `NewTab` action for its owner's one fixed configured layout.
 - Persistent `Alt /` stays `NoOp`; the managed tab owns any safe runtime
   behavior. No key path creates, retrofits, or restructures a foreign tab.
-- The entry script and native action must use the invoking checkout's artifact,
-  never a stale global layout.
+- Global navigation routes such as `Alt .` remain fixed profile policy. This
+  hardening task adds no runtime keybinding and does not promise that a global
+  route addresses a selected-worktree resident.
+- The direct entry script must use the invoking checkout's artifact, never a
+  stale global layout.
 
 ### Evidence and deferrals
 
@@ -78,10 +83,11 @@ auto-dispatch.
 
 `fp` passed the isolated smoke packet and the captain's ordinary-consent drill.
 It is the usable entry baseline, not final managed-only authorization closure.
-`v3` tracks route authorization hardening; `fq` tracks replacement of the
-fail-closed-but-fragile AWK activation transformer. The supported upgrade path
-is a fresh tab through `scripts/zellij-new-tab.sh`; an already-running rail is
-not hot-reloaded in place.
+`v3` tracks route authorization hardening. `fq` removed the fragile AWK
+transformer from the selected-checkout path by making standing KDL read-only.
+The supported upgrade path is a fresh tab through
+`scripts/zellij-new-tab.sh`; an already-running rail is not hot-reloaded in
+place.
 
 ## Sprint 2 — one dependable attention loop
 

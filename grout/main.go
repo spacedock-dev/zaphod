@@ -31,9 +31,8 @@ type Config struct {
 }
 
 // startupSignal writes one short confirmation to the direct script's private
-// FIFO after this native process has successfully started. It is deliberately
-// not part of runSubscribe: a source or target failure after exec is terminal
-// sidecar lifecycle, not a failed host exec.
+// FIFO after the SSE response, exact recipient, and one bounded initial
+// snapshot delivery are all acknowledged.
 func startupSignal(fd int) error {
 	if fd == -1 {
 		return nil
@@ -98,7 +97,7 @@ func run(cfg Config, stderr io.Writer) error {
 }
 
 func subscribeUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL")
+	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL --checkout-cwd PATH --recipient-token TOKEN")
 }
 
 func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error) {
@@ -112,7 +111,9 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 	session := flags.String("zellij-session", "", "Zellij session")
 	tabID := flags.String("tab-id", "", "stable Zellij tab ID")
 	railURL := flags.String("rail-url", "", "canonical sidebar WASM URL")
-	startupFD := flags.Int("startup-fd", -1, "private direct-script startup confirmation fd")
+	checkoutCWD := flags.String("checkout-cwd", "", "selected checkout root")
+	recipientToken := flags.String("recipient-token", "", "private direct-entry recipient token")
+	startupFD := flags.Int("startup-fd", -1, "private direct-script stream-ready confirmation fd")
 	if err := flags.Parse(args); err != nil {
 		return SubscribeConfig{}, err
 	}
@@ -132,6 +133,8 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 		{"--zellij-session", *session},
 		{"--tab-id", *tabID},
 		{"--rail-url", *railURL},
+		{"--checkout-cwd", *checkoutCWD},
+		{"--recipient-token", *recipientToken},
 	} {
 		if flag.value == "" {
 			missing = append(missing, flag.name)
@@ -152,6 +155,8 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 		ZellijSession:     *session,
 		TabID:             *tabID,
 		RailURL:           *railURL,
+		CheckoutCWD:       *checkoutCWD,
+		RecipientToken:    *recipientToken,
 		StartupFD:         *startupFD,
 		PipeTimeout:       5 * time.Second,
 		SummaryClampBytes: 512,
@@ -170,10 +175,6 @@ func runMain(args []string, stderr io.Writer) int {
 		}
 		subscribeUsage(stderr)
 		return 2
-	}
-	if err := startupSignal(cfg.StartupFD); err != nil {
-		fmt.Fprintf(stderr, "sidecar startup signal failed: %v\n", err)
-		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

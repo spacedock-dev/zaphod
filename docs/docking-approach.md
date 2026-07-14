@@ -2,11 +2,12 @@
 
 > **Historical prototype record — not an operational contract.** This document
 > records the earlier Zellij WASM dock and current-tab retrofit experiments.
-> They are superseded: create a managed tab with `Alt Shift z` or
-> `scripts/zellij-new-tab.sh`; persistent `Alt /` is `NoOp`, and an active
-> tiled rail may temporarily route it to its own plugin id. `Alt /` never
-> creates or retrofits a tab. The evergreen direction uses one managed tab or
-> window and is defined in
+> They are superseded: create a selected-checkout managed tab with
+> `scripts/zellij-new-tab.sh`. A separately installed `Alt Shift z` shortcut
+> opens only its fixed configured layout. Persistent `Alt /` is `NoOp`, and an
+> active tiled rail may temporarily route it to its own plugin id. `Alt /`
+> never creates or retrofits a tab. The evergreen direction uses one managed
+> tab or window and is defined in
 > [`docs/zaphod-workspace-architecture.md`](zaphod-workspace-architecture.md).
 >
 > Investigation date: 2026-06-20 · shipped prototype validated 2026-07-02
@@ -793,15 +794,17 @@ the identity check. A failed postflight restores the previous bytes or removes
 a new layout. The installer diagnoses keybind mismatches; it never edits them.
 
 Candidate testing uses `./tests/zellij-tmux-smoke-test.sh` from the candidate
-worktree. The command first runs the real fresh-tab entry script against a
-disposable Zellij session, then restarts a Zellij client inside a dedicated
-tmux server with short isolated config, data, and socket roots. Literal tmux
-keys prove that foreign-tab `Alt /` is inert and that `Alt Shift z` creates a
-candidate rail. Native `list-panes` and `dump-layout` verify the candidate URL
-and pane state. Normal exit, TERM, INT, or HUP deletes the session, kills the
-tmux server, and removes the temporary root. Cleanup compares the existence
-and SHA-256 of the standing global config and layout; it reports mutation and
-never overwrites concurrent changes by trying to restore them.
+worktree. It starts one Zellij client inside a dedicated tmux server with short
+isolated config, data, and socket roots, then runs the real direct-entry script
+in that session. Native `list-panes`, `list-tabs`, and `dump-layout` verify one
+candidate rail at the returned stable tab ID. Literal tmux keys prove managed
+`Alt /` behavior and foreign-tab inertness. The isolated profile's fixed
+`Alt Shift z` route remains byte-identical and is not selected-checkout
+evidence. Normal exit, TERM, INT, or HUP deletes the session, kills the tmux
+server, and removes the temporary root. The main journey compares the isolated
+config/layout hashes after direct entry; cleanup rechecks the standing files.
+The harness reports mutation and never overwrites concurrent changes by trying
+to restore them.
 
 Use live Zellij state as the oracle. `action list-panes --json -a -g -t` proves
 pane IDs, counts, kinds, geometry, and cwd. `action dump-layout` proves the URL,

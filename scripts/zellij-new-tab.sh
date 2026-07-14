@@ -1,6 +1,6 @@
 #!/bin/bash
-# ABOUTME: Activates this checkout's Zaphod layout and creates one fresh managed tab.
-# ABOUTME: Repoints only existing Zaphod keybind routes and uses isolated roots when requested.
+# ABOUTME: Creates one fresh managed Zellij tab from the selected checkout.
+# ABOUTME: Leaves the operator's standing config and layout files unchanged.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
@@ -25,6 +25,7 @@ fail() {
 SESSION_NAME="${ZELLIJ_SESSION_NAME:-}"
 TAB_NAME="Zaphod"
 AGENTSVIEW_URL="${ZAPHOD_AGENTSVIEW_URL:-http://127.0.0.1:8080}"
+SIDECAR_START_TIMEOUT="${ZAPHOD_SIDECAR_START_TIMEOUT:-30}"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --session)
@@ -51,8 +52,14 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+# The requested/default session has been resolved. Loaded-pane client identity
+# must not steer version, setup, inventory, creation, or sidecar child calls.
+unset ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID
+
 [ -n "$SESSION_NAME" ] ||
     fail "a Zellij session is required; pass --session NAME or set ZELLIJ_SESSION_NAME"
+[[ "$SIDECAR_START_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
+    fail "ZAPHOD_SIDECAR_START_TIMEOUT must be a positive integer"
 
 ZELLIJ_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 CONFIG_FILE="${ZELLIJ_CONFIG_FILE:-$ZELLIJ_ROOT/config.kdl}"
@@ -68,9 +75,6 @@ default_zellij_data_dir() {
 }
 
 DATA_DIR="${ZELLIJ_DATA_DIR:-$(default_zellij_data_dir)}"
-CONFIG_DIR="$(dirname "$CONFIG_FILE")"
-LAYOUT_DIR="$ZELLIJ_ROOT/layouts"
-TARGET_LAYOUT="$LAYOUT_DIR/zaphod.kdl"
 ZELLIJ_BIN="${ZELLIJ_BIN:-zellij}"
 
 ZELLIJ_ARGS=(--config-dir "$ZELLIJ_ROOT" --config "$CONFIG_FILE")
@@ -80,46 +84,65 @@ zellij_cmd() {
     "$ZELLIJ_BIN" "${ZELLIJ_ARGS[@]}" "$@"
 }
 
-zellij_check_config() {
-    local config_file="$1"
-    local args=(--config-dir "$ZELLIJ_ROOT" --config "$config_file" --data-dir "$DATA_DIR")
-    "$ZELLIJ_BIN" "${args[@]}" setup --check >/dev/null
+capture_initial_tab_inventory() {
+    local output="$1"
+    local stderr_file="$2"
+    local attempt status provenance
+    for attempt in $(seq 1 20); do
+        status=0
+        ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+            action list-tabs --json --all --state --layout > "$output" 2> "$stderr_file" || status=$?
+        if [ "$status" -ne 0 ]; then
+            provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
+                "$status" "$output" "$stderr_file")"
+            printf 'tab-inventory-unready: %s\n' "$provenance" >&2
+            return 1
+        fi
+        if [ -s "$output" ] && ! zaphod_valid_tab_inventory "$output"; then
+            provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
+                "$status" "$output" "$stderr_file")"
+            printf 'tab-inventory-unready: %s\n' "$provenance" >&2
+            return 1
+        fi
+        if [ -s "$output" ] && jq -e 'length > 0' "$output" >/dev/null 2>&1; then
+            return 0
+        fi
+        if [ "$attempt" -lt 20 ]; then
+            sleep 0.05
+            continue
+        fi
+        provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
+            "$status" "$output" "$stderr_file")"
+        printf 'tab-inventory-unready: persistent empty inventory; %s\n' "$provenance" >&2
+        return 1
+    done
+    return 1
 }
 
 TEMP_ROOT=""
-CONFIG_TEMP=""
-LAYOUT_TEMP=""
-CONFIG_BACKUP=""
-LAYOUT_BACKUP=""
-HAD_LAYOUT=0
-ROLLBACK_NEEDED=0
+RECIPIENT_TOKEN=""
+SIDECAR_PID=""
+SIDECAR_HANDED_OFF=0
 SIDECAR_START_FIFO=""
+SIDECAR_TARGET_PANE_ID=""
+
+stop_unready_sidecar() {
+    [ "$SIDECAR_HANDED_OFF" -eq 0 ] || return 0
+    [ -n "$SIDECAR_PID" ] || return 0
+    kill -TERM "$SIDECAR_PID" 2>/dev/null || true
+    wait "$SIDECAR_PID" 2>/dev/null || true
+}
 
 cleanup() {
     local original_status=$?
     local cleanup_status=0
     trap - EXIT INT TERM HUP
     set +e
-    if [ "$ROLLBACK_NEEDED" -eq 1 ]; then
-        if [ -n "$CONFIG_BACKUP" ] && [ -f "$CONFIG_BACKUP" ]; then
-            mv "$CONFIG_BACKUP" "$CONFIG_FILE" || cleanup_status=1
-            CONFIG_BACKUP=""
-        fi
-        if [ "$HAD_LAYOUT" -eq 1 ] && [ -n "$LAYOUT_BACKUP" ] && [ -f "$LAYOUT_BACKUP" ]; then
-            mv "$LAYOUT_BACKUP" "$TARGET_LAYOUT" || cleanup_status=1
-            LAYOUT_BACKUP=""
-        elif [ "$HAD_LAYOUT" -eq 0 ]; then
-            rm -f "$TARGET_LAYOUT" || cleanup_status=1
-        fi
-    fi
-    [ -z "$CONFIG_TEMP" ] || rm -f "$CONFIG_TEMP" || cleanup_status=1
-    [ -z "$LAYOUT_TEMP" ] || rm -f "$LAYOUT_TEMP" || cleanup_status=1
-    [ -z "$CONFIG_BACKUP" ] || rm -f "$CONFIG_BACKUP" || cleanup_status=1
-    [ -z "$LAYOUT_BACKUP" ] || rm -f "$LAYOUT_BACKUP" || cleanup_status=1
+    stop_unready_sidecar
     [ -z "$SIDECAR_START_FIFO" ] || rm -f "$SIDECAR_START_FIFO" || cleanup_status=1
     [ -z "$TEMP_ROOT" ] || rm -rf "$TEMP_ROOT" || cleanup_status=1
     if [ "$cleanup_status" -ne 0 ]; then
-        echo "failed to clean up or roll back Zaphod activation" >&2
+        echo "failed to clean up the temporary Zaphod layout" >&2
         exit 1
     fi
     exit "$original_status"
@@ -141,10 +164,13 @@ if [ "$VERSION" != "zellij 0.44.3" ]; then
 fi
 [ -f "$CONFIG_FILE" ] || fail "Zaphod config not found: $CONFIG_FILE"
 [ -f "$REPO_ROOT/layouts/zaphod.kdl" ] || fail "Zaphod layout template not found: $REPO_ROOT/layouts/zaphod.kdl"
-[ -f "$SCRIPT_DIR/zellij-config-activate.awk" ] || fail "Zaphod config transformer not found"
 
+# Native Zellij validates the profile. Persistent key policy remains global
+# setup; this selected-checkout command does not parse, repair, or retarget it.
 zellij_cmd setup --check >/dev/null
-"$REPO_ROOT/build.sh"
+if [ "${ZAPHOD_TEST_PREBUILT_ARTIFACTS:-}" != 1 ]; then
+    "$REPO_ROOT/build.sh"
+fi
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 [ -f "$WASM_PATH" ] || fail "wasm not found after build: $WASM_PATH"
@@ -152,15 +178,13 @@ SIDECAR_PATH="$REPO_ROOT/target/zaphod"
 [ -x "$SIDECAR_PATH" ] || fail "zaphod sidecar not found after build: $SIDECAR_PATH"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive a canonical URL for $WASM_PATH"
-LAYOUT_PATH_KDL="$(zaphod_kdl_escape "$TARGET_LAYOUT")" ||
-    fail "could not derive a KDL-safe path for $TARGET_LAYOUT"
 
-sidecar_target_ready() {
-    local panes candidate_count
+sidecar_target_pane_id() {
+    local panes candidate_id
     panes="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
         action list-panes --json --all --command --geometry --state --tab 2>/dev/null)" ||
         return 1
-    candidate_count="$(printf '%s' "$panes" | jq -er \
+    candidate_id="$(printf '%s' "$panes" | jq -er \
         --arg tab_id "$TAB_ID" \
         --arg wasm_url "$WASM_URL" \
         '[.[] | select(
@@ -169,17 +193,31 @@ sidecar_target_ready() {
             and .plugin_url == $wasm_url
             and .is_floating == false
             and .is_suppressed == false
-        )] | length' 2>/dev/null)" || return 1
-    [ "$candidate_count" = "1" ]
+        )] | if length == 1 then .[0].id | tostring else error("expected one target") end' \
+        2>/dev/null)" || return 1
+    case "$candidate_id" in
+        plugin_*) printf '%s\n' "$candidate_id" ;;
+        0|[1-9]|[1-9][0-9]*) printf 'plugin_%s\n' "$candidate_id" ;;
+        *) return 1 ;;
+    esac
 }
 
 wait_for_sidecar_target() {
-    local attempt
+    local attempt candidate_id
     for attempt in $(seq 1 80); do
-        sidecar_target_ready && return 0
+        if candidate_id="$(sidecar_target_pane_id)"; then
+            SIDECAR_TARGET_PANE_ID="$candidate_id"
+            return 0
+        fi
         sleep 0.05
     done
     return 1
+}
+
+focus_sidecar_target() {
+    [ -n "$SIDECAR_TARGET_PANE_ID" ] || return 1
+    ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+        action focus-pane-id "$SIDECAR_TARGET_PANE_ID"
 }
 
 start_private_sidecar() {
@@ -203,88 +241,83 @@ start_private_sidecar() {
         --zellij-session "$SESSION_NAME" \
         --tab-id "$TAB_ID" \
         --rail-url "$WASM_URL" \
+        --checkout-cwd "$REPO_ROOT" \
+        --recipient-token "$RECIPIENT_TOKEN" \
         --startup-fd 3 \
         3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
     start_status=$?
+    SIDECAR_PID=$!
     set -e
     if [ "$start_status" -ne 0 ]; then
         fail "sidecar-start-failed: could not launch private zaphod sidecar"
     fi
     set +e
-    IFS= read -r -t 2 startup_message < "$SIDECAR_START_FIFO"
+    IFS= read -r -t "$SIDECAR_START_TIMEOUT" startup_message < "$SIDECAR_START_FIFO"
     startup_status=$?
     set -e
     rm -f "$SIDECAR_START_FIFO"
     SIDECAR_START_FIFO=""
     if [ "$startup_status" -ne 0 ] || [ "$startup_message" != "ready" ]; then
-        fail "sidecar-start-failed: private zaphod sidecar did not exec"
+        sed -n '1,20p' "$SIDECAR_LOG" >&2 || true
+        fail "sidecar-start-failed: private zaphod sidecar did not establish the AgentsView stream"
     fi
 }
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
     fail "could not create a temporary Zaphod layout directory"
 RENDERED_LAYOUT="$TEMP_ROOT/zaphod.kdl"
-CHECK_CONFIG="$TEMP_ROOT/config.kdl"
-CANDIDATE_CONFIG="$TEMP_ROOT/candidate-config.kdl"
-zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT"
+TABS_BEFORE="$TEMP_ROOT/tabs-before.json"
+TABS_BEFORE_STDERR="$TEMP_ROOT/tabs-before.stderr"
+TABS_AFTER="$TEMP_ROOT/tabs-after.json"
+TABS_AFTER_STDERR="$TEMP_ROOT/tabs-after.stderr"
+NEW_TAB_STDOUT="$TEMP_ROOT/new-tab.stdout"
+NEW_TAB_STDERR="$TEMP_ROOT/new-tab.stderr"
+RECIPIENT_TOKEN="zaphod-$$-$RANDOM-$(date +%s)"
+zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT" "$RECIPIENT_TOKEN"
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
-awk -v wasm_url="$WASM_URL" -v layout_path="$LAYOUT_PATH_KDL" \
-    -f "$SCRIPT_DIR/zellij-config-activate.awk" \
-    "$CONFIG_FILE" > "$CANDIDATE_CONFIG"
-zaphod_validate_message_plugin_identity "$CANDIDATE_CONFIG" "$WASM_URL"
-# Zellij resolves a NewTab layout while parsing the config. Validate against
-# the rendered candidate first; the final absolute target is checked again
-# after its atomic layout install below.
-RENDERED_LAYOUT_PATH_KDL="$(zaphod_kdl_escape "$RENDERED_LAYOUT")" ||
-    fail "could not derive a KDL-safe path for $RENDERED_LAYOUT"
-awk -v wasm_url="$WASM_URL" -v layout_path="$RENDERED_LAYOUT_PATH_KDL" \
-    -f "$SCRIPT_DIR/zellij-config-activate.awk" \
-    "$CONFIG_FILE" > "$CHECK_CONFIG"
-zellij_check_config "$CHECK_CONFIG"
 
-mkdir -p "$LAYOUT_DIR"
-CONFIG_TEMP_BASE="$(mktemp "$CONFIG_DIR/.zaphod-config.XXXXXX")" ||
-    fail "could not create an atomic config temporary file"
-CONFIG_TEMP="$CONFIG_TEMP_BASE.kdl"
-mv "$CONFIG_TEMP_BASE" "$CONFIG_TEMP"
-cp -p "$CANDIDATE_CONFIG" "$CONFIG_TEMP"
-LAYOUT_TEMP_BASE="$(mktemp "$LAYOUT_DIR/.zaphod-layout.XXXXXX")" ||
-    fail "could not create an atomic layout temporary file"
-LAYOUT_TEMP="$LAYOUT_TEMP_BASE.kdl"
-mv "$LAYOUT_TEMP_BASE" "$LAYOUT_TEMP"
-cp -p "$RENDERED_LAYOUT" "$LAYOUT_TEMP"
-
-CONFIG_BACKUP="$(mktemp "$CONFIG_DIR/.zaphod-config-backup.XXXXXX")" ||
-    fail "could not create a config rollback file"
-cp -p "$CONFIG_FILE" "$CONFIG_BACKUP"
-if [ -e "$TARGET_LAYOUT" ]; then
-    LAYOUT_BACKUP="$(mktemp "$LAYOUT_DIR/.zaphod-layout-backup.XXXXXX")" ||
-        fail "could not create a layout rollback file"
-    cp -p "$TARGET_LAYOUT" "$LAYOUT_BACKUP"
-    HAD_LAYOUT=1
+capture_initial_tab_inventory "$TABS_BEFORE" "$TABS_BEFORE_STDERR" || exit 1
+set +e
+ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
+    --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")" \
+    > "$NEW_TAB_STDOUT" 2> "$NEW_TAB_STDERR"
+NEW_TAB_STATUS=$?
+set -e
+if [ "$NEW_TAB_STATUS" -ne 0 ]; then
+    printf 'new-tab-failed: %s\n' \
+        "$(zaphod_bounded_reply_provenance new-tab "$NEW_TAB_STATUS" "$NEW_TAB_STDOUT" "$NEW_TAB_STDERR")" >&2
+    exit "$NEW_TAB_STATUS"
 fi
-
-ROLLBACK_NEEDED=1
-mv "$CONFIG_TEMP" "$CONFIG_FILE"
-CONFIG_TEMP=""
-mv "$LAYOUT_TEMP" "$TARGET_LAYOUT"
-LAYOUT_TEMP=""
-zaphod_validate_message_plugin_identity "$CONFIG_FILE" "$WASM_URL"
-zaphod_validate_layout_identity "$TARGET_LAYOUT" "$WASM_URL"
-zellij_cmd setup --check >/dev/null
-
-TAB_ID="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
-    --name "$TAB_NAME" --layout-string "$(cat "$RENDERED_LAYOUT")")"
-
-ROLLBACK_NEEDED=0
-rm -f "$CONFIG_BACKUP" "$LAYOUT_BACKUP"
-CONFIG_BACKUP=""
-LAYOUT_BACKUP=""
-if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || ! wait_for_sidecar_target; then
-    echo "sidecar-target-unready" >&2
+TAB_ID=""
+TABS_AFTER_STATUS=1
+: > "$TABS_AFTER"
+: > "$TABS_AFTER_STDERR"
+for _attempt in $(seq 1 80); do
+    set +e
+    ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+        action list-tabs --json --all --state --layout > "$TABS_AFTER" 2> "$TABS_AFTER_STDERR"
+    TABS_AFTER_STATUS=$?
+    set -e
+    if [ "$TABS_AFTER_STATUS" -eq 0 ] && zaphod_valid_tab_inventory "$TABS_AFTER"; then
+        TAB_ID="$(zaphod_new_tab_id_from_inventories "$TABS_BEFORE" "$TABS_AFTER" 2>/dev/null || true)"
+        [ -z "$TAB_ID" ] || break
+    fi
+    sleep 0.05
+done
+if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    printf 'sidecar-target-unready: %s; %s\n' \
+        "$(zaphod_bounded_reply_provenance new-tab "$NEW_TAB_STATUS" "$NEW_TAB_STDOUT" "$NEW_TAB_STDERR")" \
+        "$(zaphod_bounded_reply_provenance list-tabs-after "$TABS_AFTER_STATUS" "$TABS_AFTER" "$TABS_AFTER_STDERR")" >&2
     exit 1
 fi
+if ! wait_for_sidecar_target; then
+    echo "sidecar-target-unready: stable tab $TAB_ID did not expose exactly one candidate rail" >&2
+    exit 1
+fi
+focus_sidecar_target || fail "sidecar-target-unfocusable: could not expose the target rail permission prompt"
 start_private_sidecar
 printf 'TAB_ID=%s\n' "$TAB_ID"
 printf 'WASM_URL=%s\n' "$WASM_URL"
 printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
+printf 'SIDECAR_PID=%s\n' "$SIDECAR_PID"
+SIDECAR_HANDED_OFF=1

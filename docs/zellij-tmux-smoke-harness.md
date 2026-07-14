@@ -41,27 +41,41 @@ zellij --session "$session" \
   action dump-layout
 ```
 
-The generated persistent config binds `Alt /` to `NoOp`, then binds `Alt Shift z`
-to native `NewTab` with the selected `layouts/zaphod.kdl` **absolute path**.
-Do not use `layout "zaphod"`: Zellij resolves that named form from its standing
-default config directory, not necessarily the selected isolated root. A tiled
-rail requests a runtime-only `MessagePluginId <resident-id>` route after its
-ordinary `Reconfigure` permission. That request has no acknowledgement: a
-received literal keybind pipe at the active tiled resident—not a local
-"installed" boolean—settles that the route is usable. The route is never
-written to persistent config.
+The isolated persistent config contains valid quoted-brace KDL, an existing
+`Alt /` policy, and an unrelated `Alt Shift z` native `NewTab` shortcut for one
+fixed layout. The selected-checkout script validates but never rewrites that
+config or its sentinel `layouts/zaphod.kdl`; it passes its repository-owned
+layout directly through `new-tab --layout-string`. A tiled rail requests a
+runtime-only `MessagePluginId <resident-id>` route after its ordinary
+`Reconfigure` permission. That request has no acknowledgement: a received
+literal keybind pipe at the active tiled resident—not a local "installed"
+boolean—settles that the route is usable. The route is never written to
+persistent config.
 
 The smoke script proves the following with literal tmux keys and native Zellij
 state:
 
-- `Alt Shift z` creates exactly one initialized Zaphod tab with the candidate
-  WASM, confirmed in the live tab inventory and dumped layout.
+- The direct script creates exactly one initialized Zaphod tab with the
+  candidate WASM at its returned stable tab ID, confirmed in the live pane/tab
+  inventory and dumped layout. The fixed global `Alt Shift z` route is left
+  byte-identical and is not used as selected-checkout evidence.
 - One literal `Alt /` in that tab moves the candidate rail from its known
   28-column docked shape to the 1-column sliver, while native pane identity,
   command, focus, and candidate URL remain unchanged.
 - After that observed route, a native tab switch returns the same tmux client
   to a sidebar-less foreign tab. Literal `Alt /` leaves its pane inventory,
   focus, layout, and candidate count byte-identical.
+
+Run the permission-cache upgrade boundary with:
+
+```bash
+ZAPHOD_PERMISSION_FIXTURE=upgrade ./tests/zellij-tmux-smoke-test.sh
+```
+
+This mode seeds the old grant set without `ReadCliPipes`, waits until the
+native prompt is visible in the focused candidate pane, and sends one literal
+`y`. It then requires the persisted `ReadCliPipes` grant and the same session
+row, layout, toggle, and cleanup checks as the pre-granted run.
 
 ## Tab-recipient smoke
 
@@ -72,12 +86,13 @@ Run the companion two-rail check with:
 ```
 
 It creates two rails in one isolated Zellij session with the same terminal
-CWD, obtains their native stable tab IDs, and sends one normal named-pipe
-broadcast addressed to one ID. Only the target rail may render the marker;
-the bystander stays active and remains unchanged. This tests the receiver's
-stable-tab admission rule rather than CWD, pane ID, title, or display
-position. It uses the same tmux-hosted boundary and native Zellij state—no
-custom PTY controller.
+CWD and, as an adversarial fixture, the same recipient token. After obtaining
+their distinct stable tab IDs, it sends one private, versioned named-pipe
+broadcast addressed to the target ID. Both rails receive the broadcast, but
+only the target may render the marker. This tests stable-tab admission rather
+than CWD, pane ID, title, display position, or sender-side channel isolation.
+It uses the same tmux-hosted boundary and native Zellij state—no custom PTY
+controller.
 
 For headless coverage, the script gives Zellij a disposable `HOME` and writes
 a deliberate pre-grant to its temporary permission cache. The cache key is the

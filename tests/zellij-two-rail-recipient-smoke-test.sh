@@ -131,6 +131,7 @@ mkdir -p "$(dirname "$PERMISSION_CACHE")"
         '    ReadApplicationState' \
         '    ChangeApplicationState' \
         '    ReadPaneContents' \
+        '    ReadCliPipes' \
         '    Reconfigure' \
         '    RunCommands'
     printf '%s\n' '}'
@@ -143,6 +144,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
+    '                    recipient_token "target-token"' \
     '                }' \
     '            }' \
     "            pane cwd=\"$ESCAPED_CWD\"" \
@@ -153,6 +155,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
+    '                    recipient_token "target-token"' \
     '                }' \
     '            }' \
     "            pane cwd=\"$ESCAPED_CWD\"" \
@@ -245,13 +248,17 @@ BYSTANDER_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
 [ "$TARGET_TAB_ID" != "$BYSTANDER_TAB_ID" ] ||
     fail "two rails did not receive distinct stable server tab IDs"
 
-# Deliver while the same-CWD bystander is active. A broadcast reaches both
-# plugin instances, so active-tab state and later screens prove the receiver
-# guard, not a sender-side shortcut.
+# Deliver while the same-CWD bystander is active. Both rails deliberately
+# share the private token, so the broadcast reaches both plugin instances.
+# Active-tab state and later screens therefore prove the stable-tab guard.
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-target\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"blocked\",\"summary\":\"BB_RECIPIENT_MARKER\"}"
-zellij_session pipe --name agent-event --args "recipient-tab-id=$TARGET_TAB_ID" -- "$PAYLOAD"
+PIPE_ACK_FILE="$ROOT/pipe-ack"
+zellij_session pipe --name zaphod-agent-v1-target-token-event \
+    --args "recipient-tab-id=$TARGET_TAB_ID,recipient-token=target-token" \
+    -- "$PAYLOAD" > "$PIPE_ACK_FILE"
+[ "$(cat "$PIPE_ACK_FILE")" = accepted ] || fail "target rail did not acknowledge the accepted row"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 
 zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"
@@ -260,7 +267,12 @@ wait_for_screen_marker 'BB_RECIPIENT_MARKER' "$TARGET_SCREEN"
 
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
-tmux_command capture-pane -p -t "$TMUX_PANE" > "$BYSTANDER_SCREEN"
+BARRIER_PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-barrier\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"working\",\"summary\":\"BB_BYSTANDER_BARRIER\"}"
+zellij_session pipe --name zaphod-agent-v1-target-token-event \
+    --args "recipient-tab-id=$BYSTANDER_TAB_ID,recipient-token=target-token" \
+    -- "$BARRIER_PAYLOAD" > "$PIPE_ACK_FILE"
+[ "$(cat "$PIPE_ACK_FILE")" = accepted ] || fail "bystander rail did not acknowledge the barrier row"
+wait_for_screen_marker 'BB_BYSTANDER_BARRIER' "$BYSTANDER_SCREEN"
 if grep -F 'BB_RECIPIENT_MARKER' "$BYSTANDER_SCREEN" >/dev/null; then
     cat "$BYSTANDER_SCREEN" >&2 || true
     fail "same-CWD bystander rendered the target-tab broadcast"
