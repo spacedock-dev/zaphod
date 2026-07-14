@@ -26,6 +26,9 @@ SESSION_NAME="${ZELLIJ_SESSION_NAME:-}"
 TAB_NAME="Zaphod"
 AGENTSVIEW_URL="${ZAPHOD_AGENTSVIEW_URL:-http://127.0.0.1:8080}"
 SIDECAR_START_TIMEOUT="${ZAPHOD_SIDECAR_START_TIMEOUT:-30}"
+PLUGIN_DEBUG="${ZAPHOD_TEST_PLUGIN_DEBUG:-}"
+REFRESH_BARRIER_MILLIS="${ZAPHOD_TEST_REFRESH_BARRIER_MILLIS:-}"
+REFRESH_BARRIER_PANES="${ZAPHOD_TEST_REFRESH_BARRIER_PANES:-}"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --session)
@@ -60,6 +63,16 @@ unset ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID
     fail "a Zellij session is required; pass --session NAME or set ZELLIJ_SESSION_NAME"
 [[ "$SIDECAR_START_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
     fail "ZAPHOD_SIDECAR_START_TIMEOUT must be a positive integer"
+case "$PLUGIN_DEBUG" in
+    ""|1) ;;
+    *) fail "ZAPHOD_TEST_PLUGIN_DEBUG must be empty or 1" ;;
+esac
+if { [ -n "$REFRESH_BARRIER_MILLIS" ] || [ -n "$REFRESH_BARRIER_PANES" ]; } &&
+    { [ "$PLUGIN_DEBUG" != 1 ] ||
+      ! [[ "$REFRESH_BARRIER_MILLIS" =~ ^[1-9][0-9]*$ ]] ||
+      ! [[ "$REFRESH_BARRIER_PANES" =~ ^[1-9][0-9]*$ ]]; }; then
+    fail "test refresh barrier requires debug plus positive millisecond and pane values"
+fi
 
 ZELLIJ_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 CONFIG_FILE="${ZELLIJ_CONFIG_FILE:-$ZELLIJ_ROOT/config.kdl}"
@@ -273,7 +286,9 @@ TABS_AFTER_STDERR="$TEMP_ROOT/tabs-after.stderr"
 NEW_TAB_STDOUT="$TEMP_ROOT/new-tab.stdout"
 NEW_TAB_STDERR="$TEMP_ROOT/new-tab.stderr"
 RECIPIENT_TOKEN="zaphod-$$-$RANDOM-$(date +%s)"
-zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT" "$RECIPIENT_TOKEN"
+zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" \
+    "$RENDERED_LAYOUT" "$RECIPIENT_TOKEN" "$PLUGIN_DEBUG" \
+    "$REFRESH_BARRIER_MILLIS" "$REFRESH_BARRIER_PANES"
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
 
 capture_initial_tab_inventory "$TABS_BEFORE" "$TABS_BEFORE_STDERR" || exit 1

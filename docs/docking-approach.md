@@ -641,6 +641,13 @@ emits. All shipped at HEAD.
   stuck pane forever. A skipped poll shows the pane's previous status, never a
   blank, and heals on the next `TabUpdate`.
 
+- **Retire scrollback from the periodic WASM path.** Zellij 0.44.3 can hold
+  `get_pane_scrollback` for five seconds and congest ordinary pane and tab
+  actions. The shipped refresh therefore uses best-effort command/CWD data
+  and preserves stale status when viewport data is unavailable. Removing the
+  remaining synchronous metadata calls belongs to
+  `nonblocking-pane-metadata-architecture`.
+
 - **Retired debounce and launch behavior (v3.4).** A press for a tab whose
   JIT pipeline is still in flight, or whose steer fired < 600ms ago, is
   swallowed — the pipeline's visible collapse lags the press, so a quick second
