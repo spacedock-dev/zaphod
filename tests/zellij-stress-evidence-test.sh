@@ -33,6 +33,7 @@ LAYOUT_BEFORE="$(file_state "$STANDING_LAYOUT")"
 set +e
 ZAPHOD_LAYOUT_STRESS_EVIDENCE_DIR="$EVIDENCE" \
 ZAPHOD_LAYOUT_STRESS_INJECT_FAILURE_PHASE=tmux-zellij-launched \
+ZAPHOD_SMOKE_INJECT_FAILURE_PAYLOAD_BYTES=131072 \
 ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS=30 \
 ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS=1 \
     "$SCRIPT_DIR/zellij-subscription-layout-stress-test.sh" > "$OUT" 2> "$ERR"
@@ -56,6 +57,12 @@ grep -F "retained failure evidence: $EVIDENCE" "$ERR" >/dev/null ||
 [ -f "$EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" ] ||
     fail "failure bundle omitted smoke cleanup result"
 [ -f "$EVIDENCE/stress-cleanup.txt" ] || fail "failure bundle omitted stress cleanup result"
+[ "$(wc -c < "$EVIDENCE/serial-1/case.stderr" | tr -d '[:space:]')" -le 65536 ] ||
+    fail "failure bundle retained unbounded case stderr"
+grep -E '^case_stderr_len=1[3-9][0-9]{4,}$' "$EVIDENCE/bundle-manifest.txt" >/dev/null ||
+    fail "failure bundle omitted original oversized stderr length"
+grep -F 'case_stderr_truncated=1' "$EVIDENCE/bundle-manifest.txt" >/dev/null ||
+    fail "failure bundle omitted stderr truncation provenance"
 
 grep -F 'phase=tmux-zellij-launched' "$EVIDENCE/serial-1/outside-foreground/phase.log" >/dev/null ||
     fail "smoke phase evidence did not reach the injected failure"
