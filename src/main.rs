@@ -2569,6 +2569,12 @@ mod tests {
             .args
             .insert("recipient-token".to_owned(), "test-token".to_owned());
         message
+            .args
+            .insert("watch-generation".to_owned(), "generation-a".to_owned());
+        message
+            .args
+            .insert("lease-ms".to_owned(), "500".to_owned());
+        message
     }
 
     fn arm_agent_recipient(sidebar: &mut Sidebar, own_position: usize, tabs: &[TabInfo]) {
@@ -2745,6 +2751,43 @@ mod tests {
         let before = sessions.clone();
         assert!(apply_agent_snapshot(&mut sessions, &mut gates, Some(duplicate)).is_err());
         assert_eq!(sessions, before, "invalid snapshot is atomic");
+    }
+
+    #[test]
+    fn watcher_snapshot_lease_expires_atomically_and_blocks_stale_focus() {
+        let mut sidebar = Sidebar::default();
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
+        sidebar.rows = vec![cwd_row(4)];
+        let snapshot = format!("[{}]", session_line());
+        assert!(sidebar.pipe(agent_snapshot(Some(&snapshot), "73")));
+        assert_eq!(sidebar.sessions.len(), 1);
+        assert!(sidebar.session_lease_is_active(Instant::now()));
+
+        let mut competing = agent_snapshot(Some(&snapshot), "73");
+        competing
+            .args
+            .insert("watch-generation".to_owned(), "generation-b".to_owned());
+        assert!(!sidebar.pipe(competing), "a live generation was replaced");
+        assert_eq!(sidebar.sessions.len(), 1);
+
+        let expired = sidebar
+            .session_lease
+            .as_mut()
+            .expect("accepted snapshot has a lease");
+        expired.deadline = Instant::now() - Duration::from_millis(1);
+        assert!(sidebar.expire_session_lease(Instant::now()));
+        assert!(sidebar.sessions.is_empty());
+        assert_eq!(
+            sidebar.decide_actionable_click(5, Instant::now()),
+            ClickAction::None
+        );
+
+        let mut replacement = agent_snapshot(Some(&snapshot), "73");
+        replacement
+            .args
+            .insert("watch-generation".to_owned(), "generation-b".to_owned());
+        assert!(sidebar.pipe(replacement));
+        assert_eq!(sidebar.sessions.len(), 1);
     }
 
     #[test]
