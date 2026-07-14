@@ -4,6 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-stress.XXXXXX")"
 TIMEOUT_SECS="${ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS:-180}"
 SERIAL_ROUNDS="${ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS:-2}"
@@ -21,10 +22,16 @@ fail() {
 [[ "$SERIAL_ROUNDS" =~ ^[1-9][0-9]*$ ]] || fail "serial rounds must be a positive integer"
 command -v perl >/dev/null 2>&1 || fail "perl is required for owned stress process groups"
 
+CARGO_TARGET_DIR="$REPO_ROOT/target" "$REPO_ROOT/build.sh" >/dev/null
+cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
+    --target-dir "$REPO_ROOT/target" \
+    --features host-kdl-validator --bin zaphod-kdl-validate
+
 run_case() {
     local name="$1"
     local child watchdog status
     perl -MPOSIX -e 'defined POSIX::setsid() or die "setsid failed: $!"; exec @ARGV or die "exec failed: $!"' \
+        env ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
         "$SCRIPT_DIR/zellij-subscription-lifecycle-smoke-test.sh" \
         > "$ROOT/$name.out" 2> "$ROOT/$name.err" &
     child=$!

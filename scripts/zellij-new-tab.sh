@@ -162,7 +162,9 @@ fi
 # Native Zellij validates the profile. Persistent key policy remains global
 # setup; this selected-checkout command does not parse, repair, or retarget it.
 zellij_cmd setup --check >/dev/null
-"$REPO_ROOT/build.sh"
+if [ "${ZAPHOD_TEST_PREBUILT_ARTIFACTS:-}" != 1 ]; then
+    "$REPO_ROOT/build.sh"
+fi
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 [ -f "$WASM_PATH" ] || fail "wasm not found after build: $WASM_PATH"

@@ -208,11 +208,15 @@ done
 AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
-CARGO_TARGET_DIR="$REPO_ROOT/target" "$REPO_ROOT/build.sh" >/dev/null
-"$(command -v cargo)" build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
-    --target-dir "$REPO_ROOT/target" \
-    --features host-kdl-validator --bin zaphod-kdl-validate
+if [ "${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" != 1 ]; then
+    CARGO_TARGET_DIR="$REPO_ROOT/target" "$REPO_ROOT/build.sh" >/dev/null
+    "$(command -v cargo)" build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
+        --target-dir "$REPO_ROOT/target" \
+        --features host-kdl-validator --bin zaphod-kdl-validate
+fi
 LAYOUT_VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
+[ -f "$WASM_PATH" ] || fail "prebuilt candidate WASM is missing"
+[ -x "$REPO_ROOT/target/zaphod" ] || fail "prebuilt zaphod sidecar is missing"
 [ -x "$LAYOUT_VALIDATOR" ] || fail "host KDL validator was not built"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive the candidate WASM URL"
@@ -490,6 +494,7 @@ entry_command() {
         ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
         CARGO_TARGET_DIR="$REPO_ROOT/target" \
+        ZAPHOD_TEST_PREBUILT_ARTIFACTS="${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" \
         ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
         --agentsview-url "$AGENTSVIEW_URL"
