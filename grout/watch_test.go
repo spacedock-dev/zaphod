@@ -60,12 +60,12 @@ func TestWatchEnvelopeIsValidatedAtomically(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string][]byte{
-		"wrong session": []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"other","pane_id":7,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`),
-		"wrong pane": []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":8,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`),
-		"child": []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":7,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SubagentStart","source":"startup"}}`),
-		"unknown field": []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":7,"provider":"codex","extra":true,"hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`),
+		"wrong session":   []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"other","pane_id":7,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`),
+		"wrong pane":      []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":8,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`),
+		"child":           []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":7,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SubagentStart","source":"startup"}}`),
+		"unknown field":   []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":7,"provider":"codex","extra":true,"hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`),
 		"duplicate field": []byte(`{"protocol":"zaphod-watch-tab-v1","protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":7,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`),
-		"trailing value": append(validWatchEnvelope(), []byte(` {}`)...),
+		"trailing value":  append(validWatchEnvelope(), []byte(` {}`)...),
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
