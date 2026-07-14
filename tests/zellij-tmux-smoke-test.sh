@@ -55,6 +55,7 @@ INJECT_STARTUP_EXIT="${ZAPHOD_SMOKE_INJECT_STARTUP_EXIT:-}"
 EVIDENCE_DIR="${ZAPHOD_SMOKE_EVIDENCE_DIR:-}"
 INJECT_FAILURE_PHASE="${ZAPHOD_SMOKE_INJECT_FAILURE_PHASE:-}"
 INJECT_FAILURE_PAYLOAD_BYTES="${ZAPHOD_SMOKE_INJECT_FAILURE_PAYLOAD_BYTES:-0}"
+INJECT_CLEANUP_PROBE_HANG="${ZAPHOD_SMOKE_INJECT_CLEANUP_PROBE_HANG:-none}"
 CURRENT_PHASE="boot"
 INJECTED_FAILURE=""
 ENTRY_START_TIMEOUT=30
@@ -268,6 +269,8 @@ cleanup() {
     local status=$?
     local cleanup_status=0
     local session_alive_after=0 tmux_alive_after=0 root_exists_after=0
+    local session_delete_status=125 session_probe_status_after=125 session_absence_confirmed=0
+    local tmux_kill_status=125 tmux_probe_status_after=125 tmux_absence_confirmed=0
     local config_after layout_after
     trap - EXIT INT TERM HUP
     set +e
@@ -275,23 +278,61 @@ cleanup() {
     terminate_owned_pid "$ENTRY_PID" "entry process" || cleanup_status=1
     terminate_owned_pid "$SIDECAR_PID" "private sidecar" || cleanup_status=1
     if [ -n "$TMUX_SERVER" ]; then
-        tmux_with_timeout 2 kill-server >/dev/null 2>&1 || true
-        if tmux_with_timeout 1 has-session -t "$TMUX_SESSION" >/dev/null 2>&1; then
-            echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
-            tmux_alive_after=1
-            cleanup_status=1
+        tmux_with_timeout 2 kill-server > "$ROOT/tmux-kill.stdout" 2> "$ROOT/tmux-kill.stderr"
+        tmux_kill_status=$?
+        if [ "$INJECT_CLEANUP_PROBE_HANG" = tmux ] || [ "$INJECT_CLEANUP_PROBE_HANG" = both ]; then
+            bounded_exec 1 sleep 60 > "$ROOT/tmux-probe.stdout" 2> "$ROOT/tmux-probe.stderr"
+        else
+            tmux_with_timeout 1 has-session -t "$TMUX_SESSION" \
+                > "$ROOT/tmux-probe.stdout" 2> "$ROOT/tmux-probe.stderr"
         fi
+        tmux_probe_status_after=$?
+        case "$tmux_probe_status_after" in
+            0)
+                echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
+                tmux_alive_after=1
+                cleanup_status=1
+                ;;
+            1) tmux_absence_confirmed=1 ;;
+            *)
+                echo "dedicated tmux cleanup probe was inconclusive: status $tmux_probe_status_after" >&2
+                cleanup_status=1
+                ;;
+        esac
     fi
     if [ -n "$SESSION_NAME" ]; then
-        zellij_control_with_timeout 2 delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
-        if zellij_control_with_timeout 1 --session "$SESSION_NAME" action list-panes --json --all \
-            >/dev/null 2>&1; then
-            echo "isolated Zellij session survived cleanup: $SESSION_NAME" >&2
-            session_alive_after=1
-            cleanup_status=1
+        zellij_control_with_timeout 2 delete-session --force "$SESSION_NAME" \
+            > "$ROOT/zellij-delete.stdout" 2> "$ROOT/zellij-delete.stderr"
+        session_delete_status=$?
+        if [ "$INJECT_CLEANUP_PROBE_HANG" = zellij ] || [ "$INJECT_CLEANUP_PROBE_HANG" = both ]; then
+            bounded_exec 1 sleep 60 > "$ROOT/zellij-probe.stdout" 2> "$ROOT/zellij-probe.stderr"
+        else
+            zellij_control_with_timeout 1 --session "$SESSION_NAME" action list-panes --json --all \
+                > "$ROOT/zellij-probe.stdout" 2> "$ROOT/zellij-probe.stderr"
         fi
+        session_probe_status_after=$?
+        case "$session_probe_status_after" in
+            0)
+                echo "isolated Zellij session survived cleanup: $SESSION_NAME" >&2
+                session_alive_after=1
+                cleanup_status=1
+                ;;
+            1)
+                if grep -F 'There is no active session!' "$ROOT/zellij-probe.stderr" >/dev/null; then
+                    session_absence_confirmed=1
+                else
+                    echo "isolated Zellij cleanup probe failed without absence evidence" >&2
+                    cleanup_status=1
+                fi
+                ;;
+            *)
+                echo "isolated Zellij cleanup probe was inconclusive: status $session_probe_status_after" >&2
+                cleanup_status=1
+                ;;
+        esac
     fi
     terminate_owned_pid "$AGENTSVIEW_PID" "AgentsView fixture" || cleanup_status=1
+    copy_bounded_native_evidence
     if [ -n "$ROOT" ] && [ -d "$ROOT" ]; then
         rm -rf "$ROOT" || cleanup_status=1
         if [ -e "$ROOT" ]; then
@@ -314,6 +355,10 @@ cleanup() {
         {
             printf 'original_status=%s\ncleanup_status=%s\n' "$status" "$cleanup_status"
             printf 'session_alive_after=%s\ntmux_alive_after=%s\n' "$session_alive_after" "$tmux_alive_after"
+            printf 'session_delete_status=%s\nsession_probe_status_after=%s\nsession_absence_confirmed=%s\n' \
+                "$session_delete_status" "$session_probe_status_after" "$session_absence_confirmed"
+            printf 'tmux_kill_status=%s\ntmux_probe_status_after=%s\ntmux_absence_confirmed=%s\n' \
+                "$tmux_kill_status" "$tmux_probe_status_after" "$tmux_absence_confirmed"
             printf 'entry_alive_after=%s\n' "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
             printf 'sidecar_alive_after=%s\n' "$(pid_is_alive "$SIDECAR_PID" && echo 1 || echo 0)"
             printf 'agentsview_alive_after=%s\n' "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
@@ -347,6 +392,10 @@ fi
 [[ "$INJECT_FAILURE_PAYLOAD_BYTES" =~ ^(0|[1-9][0-9]*)$ ]] &&
     [ "$INJECT_FAILURE_PAYLOAD_BYTES" -le 1048576 ] ||
     fail "ZAPHOD_SMOKE_INJECT_FAILURE_PAYLOAD_BYTES must be from 0 through 1048576"
+case "$INJECT_CLEANUP_PROBE_HANG" in
+    none|tmux|zellij|both) ;;
+    *) fail "ZAPHOD_SMOKE_INJECT_CLEANUP_PROBE_HANG must be none, tmux, zellij, or both" ;;
+esac
 zaphod_require_zellij_0443
 for inherited_client_var in ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID; do
     if printenv "$inherited_client_var" >/dev/null 2>&1; then
