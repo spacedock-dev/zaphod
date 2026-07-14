@@ -134,10 +134,20 @@ a test plan matching the AC's level of abstraction.
 The design is approved and the deliverable is built in a dedicated worktree —
 strict TDD, one behavior per commit.
 
+RED is a working-tree state, not a commit state. Before implementing a
+behavior, run its focused test and record the exact command, failure, and
+predicted reason in the stage report. Add the minimal implementation, rerun
+the focused test and relevant suite to green, then commit the test and fix
+together as one buildable behavior slice. Every product commit must pass its
+focused check when created, so the automatic post-commit Roborev hook reviews
+only green candidate states. Never disable or skip the hook, manufacture a
+passing test, or omit the red evidence. A red-only commit is bad even when an
+immediate green commit follows: the reviewer cannot see a future commit.
+
 - **Inputs:** the approved ideation body; the repo at the worktree branch.
-- **Outputs:** commits satisfying the AC (each: red test first, red output recorded in the stage report with the failure reason, minimal fix, suite green); a stage report with before/after test counts and the exact red output; for plugin work `cargo test` + `cargo check --tests` are the native verification (`./build.sh` only when a demo needs the wasm; native `cargo build` link-fails by design); for grout work `go test ./...` + `go vet`; passing exact-head Roborev `code_completion` evidence, including the synthesis parent job ID, exact reviewed range and head, panel name, required-member execution outcomes, parent verdict, and finding dispositions.
-- **Good:** the red test fails for the predicted reason before the fix; the smallest reasonable diff; surrounding style matched; new dump fixtures use zellij's real single-line shape.
-- **Bad:** fix-first-test-later; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a pre-commit hook; launching `code_completion` while the exact-tip `quick` review is pending or has an unresolved Medium-or-higher finding; treating `quick` as the implementation-exit verdict; using `roborev fix`, `roborev refine`, or the Roborev agent hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the task has been handed to validation — confirm no pending round-trip before advancing.
+- **Outputs:** green behavior commits satisfying the AC, each containing its focused test and minimal implementation; a stage report with the pre-fix command, exact red output and reason, and before/after test counts; for plugin work `cargo test` + `cargo check --tests` are the native verification (`./build.sh` only when a demo needs the wasm; native `cargo build` link-fails by design); for grout work `go test ./...` + `go vet`; passing exact-head Roborev `code_completion` evidence, including the synthesis parent job ID, exact reviewed range and head, panel name, required-member execution outcomes, parent verdict, and finding dispositions.
+- **Good:** the focused test fails for the predicted reason in the working tree before the fix; the same test and minimal fix land together in a green commit; surrounding style matched; new dump fixtures use zellij's real single-line shape.
+- **Bad:** fix-first-test-later; committing a red-only or non-buildable state; unrelated reformatting (the repo carries pre-existing fmt violations — leave them); skipping or evading a commit hook; launching `code_completion` while the exact-tip `quick` review is pending or has an unresolved Medium-or-higher finding; treating `quick` as the implementation-exit verdict; using `roborev fix`, `roborev refine`, or the Roborev agent hook; bundling two behaviors into one commit; committing without the stage report's red/green evidence; a "one more polish" commit after the task has been handed to validation — confirm no pending round-trip before advancing.
 
 Before requesting review, implementation MUST perform one semantic adversarial
 pass over the changed behavior:
