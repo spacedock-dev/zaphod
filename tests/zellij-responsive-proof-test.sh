@@ -86,4 +86,4 @@ if zaphod_action_deadline_is_live 43000 43000; then
     fail "an action at the absolute deadline was accepted"
 fi
 
-echo "PASS: responsive proof preserves native tuples and uses a pre-send absolute deadline"
+echo "PASS: responsive proof binds full pane state, exact refresh authority, and pre-send deadlines"
