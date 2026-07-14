@@ -38,10 +38,10 @@ type WatchReady struct {
 
 func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result error) {
 	if cfg.Lease <= 0 {
-		cfg.Lease = 500 * time.Millisecond
+		cfg.Lease = 2500 * time.Millisecond
 	}
 	if cfg.Heartbeat <= 0 {
-		cfg.Heartbeat = 200 * time.Millisecond
+		cfg.Heartbeat = time.Second
 	}
 	if cfg.PipeTimeout <= 0 {
 		cfg.PipeTimeout = 5 * time.Second
