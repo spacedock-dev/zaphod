@@ -115,6 +115,7 @@ struct Sidebar {
     agent_manifest_generation: u64,
     agent_manifest_seen: bool,
     agent_recipient: Option<AgentRecipient>,
+    session_lease: Option<SessionLease>,
     // Each terminal pane's cwd as last polled via get_pane_cwd — the data
     // session binding matches against. Keyed by pane id, so it survives the
     // manifest's row rebuilds; pruned to the current rows each poll pass. A
@@ -193,6 +194,12 @@ struct AgentRecipient {
     manifest_generation: u64,
     own_position: usize,
     stable_tab_id: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SessionLease {
+    generation: String,
+    deadline: Instant,
 }
 
 // One sidebar plugin pane somewhere in the session, as seen in the manifest.
@@ -542,6 +549,71 @@ impl Sidebar {
             .filter(|token| !token.is_empty())
             .map(|token| format!("zaphod-agent-v1-{token}-{kind}"))
     }
+
+    fn session_lease_from_args(
+        &self,
+        args: &BTreeMap<String, String>,
+        now: Instant,
+    ) -> Option<SessionLease> {
+        let generation = args.get("watch-generation")?;
+        if generation.is_empty()
+            || generation.len() > 128
+            || !generation
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return None;
+        }
+        let lease = args.get("lease-ms")?;
+        if lease.is_empty()
+            || !lease.bytes().all(|byte| byte.is_ascii_digit())
+            || (lease.len() > 1 && lease.starts_with('0'))
+        {
+            return None;
+        }
+        let lease_ms: u64 = lease.parse().ok()?;
+        if !(100..=2500).contains(&lease_ms) {
+            return None;
+        }
+        if self.session_lease.as_ref().is_some_and(|current| {
+            current.deadline > now && current.generation != *generation
+        }) {
+            return None;
+        }
+        Some(SessionLease {
+            generation: generation.clone(),
+            deadline: now + Duration::from_millis(lease_ms),
+        })
+    }
+
+    fn session_lease_is_active(&self, now: Instant) -> bool {
+        self.session_lease
+            .as_ref()
+            .is_some_and(|lease| lease.deadline > now)
+    }
+
+    fn expire_session_lease(&mut self, now: Instant) -> bool {
+        if self.session_lease.is_some() && !self.session_lease_is_active(now) {
+            self.session_lease = None;
+            if !self.sessions.is_empty() {
+                self.sessions.clear();
+                return true;
+            }
+        }
+        false
+    }
+
+    fn decide_actionable_click(&mut self, line: isize, now: Instant) -> ClickAction {
+        self.expire_session_lease(now);
+        if matches!(
+            section_layout(self.rows.len(), self.sessions.len(), self.gates.len()).target(line),
+            LineTarget::SessionRow(_)
+        ) && (!self.session_lease_is_active(now) || self.agent_recipient.is_none())
+        {
+            return ClickAction::None;
+        }
+        decide_rail_click(line, &self.rows, &self.sessions, &self.gates, &self.pane_cwds)
+    }
 }
 
 impl ZellijPlugin for Sidebar {
@@ -701,14 +773,15 @@ impl ZellijPlugin for Sidebar {
                 self.rows != old || !self.rendered_once
             }
             Event::Timer(_) => {
-                let changed =
+                let lease_changed = self.expire_session_lease(Instant::now());
+                let status_changed =
                     if should_poll_statuses(self.own_tab, self.reported_active_tab, self.last_cols) {
                         self.refresh_statuses()
                     } else {
                         false
                     };
                 set_timeout(STATUS_POLL_SECS);
-                changed
+                lease_changed || status_changed
             }
             Event::Mouse(Mouse::LeftClick(line, _col)) => {
                 self.handle_click(line);
@@ -732,6 +805,10 @@ impl ZellijPlugin for Sidebar {
             if !self.accepts_agent_event(&pipe_message.args) {
                 return false;
             }
+            let now = Instant::now();
+            let Some(lease) = self.session_lease_from_args(&pipe_message.args, now) else {
+                return false;
+            };
             let Ok(changed) = apply_agent_snapshot(
                 &mut self.sessions,
                 &mut self.gates,
@@ -739,6 +816,9 @@ impl ZellijPlugin for Sidebar {
             ) else {
                 return false;
             };
+            let lease_secs = lease.deadline.duration_since(now).as_secs_f64();
+            self.session_lease = Some(lease);
+            set_timeout(lease_secs);
             if let PipeSource::Cli(pipe_id) = &pipe_message.source {
                 cli_pipe_output(pipe_id, "accepted");
             }
@@ -925,7 +1005,7 @@ impl Sidebar {
     }
 
     fn handle_click(&mut self, line: isize) {
-        match decide_rail_click(line, &self.rows, &self.sessions, &self.gates, &self.pane_cwds) {
+        match self.decide_actionable_click(line, Instant::now()) {
             ClickAction::ToggleDock => {
                 // A local click is not a route acknowledgement. It remains a
                 // rail-local convenience after the same visible resident has
@@ -4116,6 +4196,7 @@ mod tests {
         // session row's line reaches FocusPane (observable here through the
         // nav exit it shares with pane-row clicks).
         let mut sidebar = Sidebar::default();
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
         sidebar.nav_mode = true;
         sidebar.rows = vec![cwd_row(4), cwd_row(8)];
         sidebar.pane_cwds = cwd_map(&[(4, "/w")]);
@@ -4124,6 +4205,10 @@ mod tests {
             cwd: "/w".to_owned(),
             ..Default::default()
         }];
+        sidebar.session_lease = Some(SessionLease {
+            generation: "generation-a".to_owned(),
+            deadline: Instant::now() + Duration::from_secs(1),
+        });
         sidebar.handle_click(7); // P=2,S=1: the session row's first line
         assert!(!sidebar.nav_mode, "the session click must reach FocusPane");
     }
