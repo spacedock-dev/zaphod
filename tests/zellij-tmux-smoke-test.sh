@@ -695,7 +695,7 @@ wait_for_complete_new_tab() {
     local before_tabs="$4"
     local panes="$ROOT/responsive-$label-panes.json"
     local tabs="$ROOT/responsive-$label-tabs.json"
-    local deadline now terminal_count tab_count active_id new_count complete_count
+    local deadline now terminal_count tab_count active_id new_id complete_count old_tabs_present
     deadline="$(( $(monotonic_ms) + WEDGE_THRESHOLD_SECS * 1000 ))"
     while :; do
         if ! capture_action_inventory "$label" "$panes" "$tabs"; then
@@ -708,22 +708,44 @@ wait_for_complete_new_tab() {
         terminal_count="$(jq '[.[] | select((.is_plugin | not) and (.exited | not))] | length' "$panes")"
         tab_count="$(jq 'length' "$tabs")"
         active_id="$(jq -er '.[] | select(.active) | .tab_id' "$tabs" 2>/dev/null || true)"
-        new_count="$(jq --slurpfile before "$before_tabs" \
-            '[.[] | select(.tab_id as $id | all($before[0][]; .tab_id != $id))] | length' "$tabs")"
-        complete_count="$(jq --arg active_id "$active_id" \
-            '[.[] | select((.is_plugin | not) and (.exited | not) and (.tab_id | tostring) == $active_id)] | length' "$panes")"
+        new_id="$(jq -er --slurpfile before "$before_tabs" \
+            '($before[0] | map(.tab_id)) as $old | [.[] | select(.tab_id as $id | ($old | index($id) | not)) | .tab_id] | if length == 1 then .[0] | tostring else empty end' \
+            "$tabs" 2>/dev/null || true)"
+        old_tabs_present="$(jq --slurpfile before "$before_tabs" \
+            '($before[0] | map(.tab_id)) as $old | (map(.tab_id)) as $after | all($old[]; . as $id | $after | index($id) != null)' \
+            "$tabs")"
+        complete_count="$(jq --arg new_id "$new_id" \
+            '[.[] | select((.is_plugin | not) and (.exited | not) and (.tab_id | tostring) == $new_id)] | length' "$panes")"
         now="$(monotonic_ms)"
         if [ "$terminal_count" -eq "$expected_terminals" ] &&
             [ "$tab_count" -eq "$expected_tabs" ] &&
-            [ "$new_count" -eq 1 ] && [ "$complete_count" -gt 0 ] &&
+            [ -n "$new_id" ] && [ "$active_id" = "$new_id" ] &&
+            [ "$old_tabs_present" = true ] && [ "$complete_count" -gt 0 ] &&
             [ "$now" -le "$deadline" ]; then
-            RESPONSIVE_NEW_TAB_ID="$active_id"
+            RESPONSIVE_NEW_TAB_ID="$new_id"
             return
         fi
         [ "$now" -lt "$deadline" ] || break
         sleep 0.02
     done
-    fail "$label missed the ${WEDGE_THRESHOLD_SECS}s complete-tab deadline (terminals=$terminal_count tabs=$tab_count new=$new_count active_terminals=$complete_count)"
+    fail "$label missed the ${WEDGE_THRESHOLD_SECS}s complete-tab deadline (terminals=$terminal_count tabs=$tab_count new=${new_id:-missing} active=${active_id:-missing} active_terminals=$complete_count old_tabs_present=$old_tabs_present)"
+}
+
+assert_one_new_terminal_in_tab() {
+    local label="$1"
+    local before="$2"
+    local after="$3"
+    local expected_tab="$4"
+    jq -e --slurpfile before "$before" --arg expected_tab "$expected_tab" '
+        ($before[0] | map(select((.is_plugin | not) and (.exited | not))) | map(.id)) as $old_ids
+        | (map(select((.is_plugin | not) and (.exited | not)))) as $after_terminals
+        | ($after_terminals | map(.id)) as $after_ids
+        | ([$after_terminals[] | select(.id as $id | ($old_ids | index($id) | not))]) as $new
+        | all($old_ids[]; . as $id | $after_ids | index($id) != null)
+          and ($new | length) == 1
+          and (($new[0].tab_id | tostring) == $expected_tab)
+    ' "$after" >/dev/null ||
+        fail "$label did not add exactly one terminal identity to managed tab $expected_tab"
 }
 
 capture_validated_layout() {
@@ -1328,22 +1350,18 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     sleep 2.1
     capture_settled_action_inventory responsive-after-timer \
         "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-after-timer-tabs.json"
-    jq '[.[] | select((.is_plugin | not) and (.exited | not)) | .id] | sort' \
-        "$ROOT/responsive-after-timer-panes.json" > "$ROOT/responsive-terminal-ids-before.json"
+    cp "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-panes-before-key.json"
 
     for RESPONSIVE_PANE_INDEX in 1 2 3; do
         RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
         send_literal "$(printf '\033p')"
         wait_for_exact_action_state "pane-$RESPONSIVE_PANE_INDEX" \
             "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1
-        jq '[.[] | select((.is_plugin | not) and (.exited | not)) | .id] | sort' \
-            "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" \
-            > "$ROOT/responsive-terminal-ids-after.json"
-        jq -e --slurpfile before "$ROOT/responsive-terminal-ids-before.json" \
-            '. as $after | all($before[0][]; . as $id | $after | index($id) != null)' \
-            "$ROOT/responsive-terminal-ids-after.json" >/dev/null ||
-            fail "literal Alt p $RESPONSIVE_PANE_INDEX replaced an existing terminal identity"
-        mv "$ROOT/responsive-terminal-ids-after.json" "$ROOT/responsive-terminal-ids-before.json"
+        assert_one_new_terminal_in_tab "literal Alt p $RESPONSIVE_PANE_INDEX" \
+            "$ROOT/responsive-panes-before-key.json" \
+            "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" "$TAB_ID"
+        cp "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" \
+            "$ROOT/responsive-panes-before-key.json"
     done
 
     cp "$ROOT/responsive-pane-3-tabs.json" "$ROOT/responsive-tabs-before-new.json"
