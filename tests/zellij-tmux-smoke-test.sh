@@ -51,6 +51,7 @@ CALLER_ENV="${ZAPHOD_CALLER_ENV:-unspecified}"
 NATIVE_COMMAND_TIMEOUT="${ZAPHOD_SMOKE_NATIVE_COMMAND_TIMEOUT_SECS:-10}"
 INJECT_NATIVE_HANG="${ZAPHOD_SMOKE_INJECT_NATIVE_HANG:-}"
 NATIVE_HANG_INJECTED=0
+INJECT_STARTUP_EXIT="${ZAPHOD_SMOKE_INJECT_STARTUP_EXIT:-}"
 EVIDENCE_DIR="${ZAPHOD_SMOKE_EVIDENCE_DIR:-}"
 INJECT_FAILURE_PHASE="${ZAPHOD_SMOKE_INJECT_FAILURE_PHASE:-}"
 CURRENT_PHASE="boot"
@@ -334,6 +335,10 @@ for required in tmux jq shasum go cargo perl; do
 done
 [[ "$NATIVE_COMMAND_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
     fail "ZAPHOD_SMOKE_NATIVE_COMMAND_TIMEOUT_SECS must be a positive integer"
+if [ -n "$INJECT_STARTUP_EXIT" ]; then
+    [[ "$INJECT_STARTUP_EXIT" =~ ^([1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$ ]] ||
+        fail "ZAPHOD_SMOKE_INJECT_STARTUP_EXIT must be an exit status from 1 through 255"
+fi
 zaphod_require_zellij_0443
 for inherited_client_var in ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID; do
     if printenv "$inherited_client_var" >/dev/null 2>&1; then
@@ -434,20 +439,38 @@ mkdir -p "$(dirname "$PERMISSION_CACHE")"
 phase profile-ready
 
 start_tmux_zellij() {
-    local command
-    printf -v command 'env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID HOME=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
-        "$HOME_DIR" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
+    local command release="$ROOT/tmux-release"
+    if [ -n "$INJECT_STARTUP_EXIT" ]; then
+        printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; printf %q; exit %q' \
+            "$release" "injected startup exit $INJECT_STARTUP_EXIT\n" "$INJECT_STARTUP_EXIT"
+    else
+        printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; exec env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID HOME=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
+            "$release" "$HOME_DIR" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
+    fi
     tmux_command new-session -d -x 160 -y 45 -s "$TMUX_SESSION" "$command"
+    tmux_command set-option -w -t "$TMUX_SESSION:0" remain-on-exit on
+    touch "$release"
 }
 
 wait_for_nonempty_panes() {
     local output="$1"
-    local attempt
+    local attempt tmux_status pane_dead pane_dead_status
     for attempt in $(seq 1 160); do
         if zellij_session action list-panes --json --all --command --geometry --state --tab \
             > "$output" 2>"$ROOT/list-panes.err" && \
             jq -e 'type == "array" and length > 0' "$output" >/dev/null 2>&1; then
             return
+        fi
+        tmux_status=0
+        tmux_command list-panes -t "$TMUX_PANE" -F '#{pane_dead} #{pane_dead_status}' \
+            > "$ROOT/tmux-ready-status.txt" 2> "$ROOT/tmux-ready-status.err" || tmux_status=$?
+        if [ "$tmux_status" -ne 0 ]; then
+            fail "tmux-host-exited-before-session-ready: server_status=$tmux_status"
+        fi
+        read -r pane_dead pane_dead_status < "$ROOT/tmux-ready-status.txt" || true
+        if [ "$pane_dead" = 1 ]; then
+            tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/tmux-ready-dead.screen" 2>/dev/null || true
+            fail "tmux-host-exited-before-session-ready: pane_dead_status=${pane_dead_status:-unknown}"
         fi
         sleep 0.05
     done

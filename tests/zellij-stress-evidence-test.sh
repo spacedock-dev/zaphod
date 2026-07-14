@@ -127,7 +127,7 @@ grep -F 'tmux-host-exited-before-session-ready: pane_dead_status=42' \
 grep -F 'phase=session-ready-wait' \
     "$STARTUP_EVIDENCE/serial-1/outside-foreground/phase.log" >/dev/null ||
     fail "vanished startup bundle omitted the readiness phase"
-grep -F 'injected startup exit 42' \
+grep -F 'Pane is dead (status 42' \
     "$STARTUP_EVIDENCE/serial-1/outside-foreground/tmux-pane.txt" >/dev/null ||
     fail "vanished startup bundle omitted the dead pane output"
 grep -F 'session_alive_after=0' \
