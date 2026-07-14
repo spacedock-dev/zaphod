@@ -99,6 +99,35 @@ func EmitSnapshotForTab(
 	return emitAcknowledged(ctx, cfg, "snapshot", args, string(payload), stderr)
 }
 
+func EmitLeasedSnapshotForTab(
+	ctx context.Context,
+	cfg Config,
+	rows []SessionRow,
+	recipientTabID string,
+	recipientToken string,
+	generation string,
+	lease time.Duration,
+	stderr io.Writer,
+) error {
+	if generation == "" || strings.ContainsAny(generation, ",=") {
+		return fmt.Errorf("invalid watch generation")
+	}
+	leaseMS := lease.Milliseconds()
+	if leaseMS < 100 || leaseMS > 2500 {
+		return fmt.Errorf("watch lease must be between 100ms and 2500ms")
+	}
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	args := []string{
+		"pipe", "--name", privateAgentPipeName(recipientToken, "snapshot"),
+		"--args", fmt.Sprintf("recipient-tab-id=%s,recipient-token=%s,watch-generation=%s,lease-ms=%d",
+			recipientTabID, recipientToken, generation, leaseMS),
+	}
+	return emitAcknowledged(ctx, cfg, "leased-snapshot", args, string(payload), stderr)
+}
+
 func emitAcknowledged(
 	ctx context.Context,
 	cfg Config,
