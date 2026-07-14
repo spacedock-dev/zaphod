@@ -600,35 +600,98 @@ wait_for_nonempty_panes() {
     fail "isolated Zellij session did not become ready"
 }
 
-wait_for_sidebar_fixture_receipt() {
-    local output="$1"
+wait_for_completed_fixture_refresh() {
+    local panes="$1"
+    local fixture_id="$2"
+    local tab_id="$3"
+    local sidebar_id="$4"
+    local output="$5"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    local records="$ROOT/fixture-refresh-records.jsonl"
     local deadline now
-    deadline="$(( $(monotonic_ms) + 4000 ))"
+    deadline="$(( $(monotonic_ms) + 12000 ))"
     while :; do
-        tmux_command capture-pane -p -t "$TMUX_PANE" > "$output"
-        grep -F 'zaphod-long-running' "$output" >/dev/null && return
+        if [ -f "$plugin_log" ]; then
+            zaphod_refresh_log_records "$plugin_log" "$sidebar_id" complete > "$records"
+            tail -1 "$records" > "$output"
+            if zaphod_fixture_refresh_record_valid "$panes" "$output" \
+                "$fixture_id" "$tab_id" "$WASM_URL" "$sidebar_id"; then
+                return
+            fi
+        fi
         now="$(monotonic_ms)"
         [ "$now" -lt "$deadline" ] ||
-            fail "docked sidebar did not visibly receive the non-shell tail fixture"
+            fail "sidebar did not emit an exact completed refresh record for tail pane $fixture_id"
         sleep 0.05
     done
 }
 
-wait_for_completed_fixture_refresh() {
-    local fixture_id="$1"
-    local output="$2"
+wait_for_next_in_flight_fixture_refresh() {
+    local sidebar_id="$1"
+    local fixture_id="$2"
+    local after_refresh_id="$3"
+    local output="$4"
     local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
-    local deadline now
-    deadline="$(( $(monotonic_ms) + 5000 ))"
+    local records="$ROOT/fixture-refresh-starts.jsonl"
+    local deadline now refresh_id
+    deadline="$(( $(monotonic_ms) + 12000 ))"
     while :; do
-        if [ -f "$plugin_log" ] &&
-            grep -F 'status refresh complete pane_ids=' "$plugin_log" |
-                grep -E "(^|[^0-9])${fixture_id}([^0-9]|$)" > "$output"; then
+        if [ -f "$plugin_log" ]; then
+            zaphod_refresh_log_records "$plugin_log" "$sidebar_id" start > "$records"
+            jq -sc --arg after "$after_refresh_id" --arg fixture "$fixture_id" '
+                [.[] | select(
+                    .refresh_id > ($after | tonumber)
+                    and any(.pane_ids[]; (tostring) == $fixture)
+                )] | last // empty
+            ' "$records" > "$output"
+            if [ -s "$output" ]; then
+                refresh_id="$(jq -er '.refresh_id | tostring' "$output")"
+                if zaphod_refresh_id_is_in_flight \
+                    "$plugin_log" "$sidebar_id" "$refresh_id"; then
+                    return
+                fi
+            fi
+        fi
+        now="$(monotonic_ms)"
+        [ "$now" -lt "$deadline" ] ||
+            fail "sidebar did not hold a fixture refresh in flight"
+        sleep 0.02
+    done
+}
+
+assert_fixture_refresh_in_flight() {
+    local label="$1"
+    local sidebar_id="$2"
+    local refresh_id="$3"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    zaphod_refresh_id_is_in_flight "$plugin_log" "$sidebar_id" "$refresh_id" ||
+        fail "$label completed outside fixture refresh $refresh_id"
+}
+
+wait_for_matching_fixture_refresh_completion() {
+    local panes="$1"
+    local fixture_id="$2"
+    local tab_id="$3"
+    local sidebar_id="$4"
+    local refresh_id="$5"
+    local output="$6"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    local records="$ROOT/matching-refresh-records.jsonl"
+    local deadline now
+    deadline="$(( $(monotonic_ms) + 12000 ))"
+    while :; do
+        zaphod_refresh_log_records "$plugin_log" "$sidebar_id" complete > "$records"
+        jq -sc --arg refresh_id "$refresh_id" \
+            '[.[] | select((.refresh_id | tostring) == $refresh_id)] | if length == 1 then .[0] else empty end' \
+            "$records" > "$output"
+        if [ -s "$output" ] &&
+            zaphod_fixture_refresh_record_valid "$panes" "$output" \
+                "$fixture_id" "$tab_id" "$WASM_URL" "$sidebar_id"; then
             return
         fi
         now="$(monotonic_ms)"
         [ "$now" -lt "$deadline" ] ||
-            fail "sidebar did not complete a periodic refresh containing tail pane $fixture_id"
+            fail "in-flight fixture refresh $refresh_id did not complete exactly once"
         sleep 0.05
     done
 }
@@ -1414,18 +1477,24 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     wait_for_exact_action_state fixture-ready "$RESPONSIVE_TERMINALS" \
         "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
     RESPONSIVE_FIXTURE_NUM="${RESPONSIVE_FIXTURE_ID#terminal_}"
-    jq -e --arg id "$RESPONSIVE_FIXTURE_NUM" --arg tab_id "$TAB_ID" \
-        'any(.[]; (.id | tostring) == $id and (.is_plugin | not) and (.exited | not) and (.tab_id | tostring) == $tab_id and .title == "zaphod-long-running-non-shell" and (.terminal_command | tostring | contains("tail")))' \
-        "$ROOT/responsive-fixture-ready-panes.json" >/dev/null ||
-        fail "non-shell tail fixture was not live in the managed tab with its exact native command identity"
-
-    wait_for_sidebar_fixture_receipt "$ROOT/responsive-fixture-received.screen"
-    wait_for_completed_fixture_refresh "$RESPONSIVE_FIXTURE_NUM" \
-        "$ROOT/responsive-fixture-refresh.log"
+    RESPONSIVE_PLUGIN_ID="$(jq -er --arg wasm_url "$WASM_URL" \
+        '[.[] | select(.is_plugin and .plugin_url == $wasm_url)] | if length == 1 then .[0].id | tostring else error("candidate cardinality") end' \
+        "$ROOT/responsive-fixture-ready-panes.json")"
+    wait_for_completed_fixture_refresh "$ROOT/responsive-fixture-ready-panes.json" \
+        "$RESPONSIVE_FIXTURE_NUM" "$TAB_ID" "$RESPONSIVE_PLUGIN_ID" \
+        "$ROOT/responsive-fixture-refresh.json"
+    RESPONSIVE_BASELINE_REFRESH_ID="$(jq -er '.refresh_id | tostring' \
+        "$ROOT/responsive-fixture-refresh.json")"
     phase responsive-fixture-refresh-complete
     capture_settled_action_inventory responsive-after-timer \
         "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-after-timer-tabs.json"
     cp "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-panes-before-key.json"
+    wait_for_next_in_flight_fixture_refresh "$RESPONSIVE_PLUGIN_ID" \
+        "$RESPONSIVE_FIXTURE_NUM" "$RESPONSIVE_BASELINE_REFRESH_ID" \
+        "$ROOT/responsive-in-flight-refresh.json"
+    RESPONSIVE_IN_FLIGHT_REFRESH_ID="$(jq -er '.refresh_id | tostring' \
+        "$ROOT/responsive-in-flight-refresh.json")"
+    phase responsive-fixture-refresh-in-flight
 
     for RESPONSIVE_PANE_INDEX in 1 2 3; do
         RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
@@ -1435,6 +1504,8 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
         wait_for_exact_action_state "pane-$RESPONSIVE_PANE_INDEX" \
             "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1 \
             "$RESPONSIVE_ACTION_DEADLINE"
+        assert_fixture_refresh_in_flight "literal Alt p $RESPONSIVE_PANE_INDEX" \
+            "$RESPONSIVE_PLUGIN_ID" "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
         assert_one_new_terminal_in_tab "literal Alt p $RESPONSIVE_PANE_INDEX" \
             "$ROOT/responsive-panes-before-key.json" \
             "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" "$TAB_ID"
@@ -1454,6 +1525,8 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     send_literal "$(printf '\033n')"
     wait_for_complete_new_tab new-tab "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" \
         "$ROOT/responsive-tabs-before-new.json" "$RESPONSIVE_ACTION_DEADLINE"
+    assert_fixture_refresh_in_flight "literal Alt n" "$RESPONSIVE_PLUGIN_ID" \
+        "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
     [[ "$RESPONSIVE_NEW_TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] ||
         fail "literal Alt n did not expose one stable active tab identity"
     assert_one_new_terminal_in_tab "literal Alt n" \
@@ -1467,6 +1540,8 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     send_literal "$(printf '\0331')"
     wait_for_exact_action_state tab-1 "$RESPONSIVE_TERMINALS" \
         "$RESPONSIVE_TABS" "$FOREIGN_TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
+    assert_fixture_refresh_in_flight "literal Alt 1" "$RESPONSIVE_PLUGIN_ID" \
+        "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
     assert_pane_tuple_inventory_unchanged "literal Alt 1" \
         "$ROOT/responsive-new-tab-panes.json" "$ROOT/responsive-tab-1-panes.json"
     RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
@@ -1474,12 +1549,14 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     send_literal "$(printf '\0332')"
     wait_for_exact_action_state tab-2 "$RESPONSIVE_TERMINALS" \
         "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
+    assert_fixture_refresh_in_flight "literal Alt 2" "$RESPONSIVE_PLUGIN_ID" \
+        "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
     assert_pane_tuple_inventory_unchanged "literal Alt 2" \
         "$ROOT/responsive-tab-1-panes.json" "$ROOT/responsive-tab-2-panes.json"
 
-    RESPONSIVE_PLUGIN_ID="$(jq -er --arg wasm_url "$WASM_URL" \
-        '[.[] | select(.is_plugin and .plugin_url == $wasm_url)] | if length == 1 then .[0].id else error("candidate cardinality") end' \
-        "$ROOT/responsive-tab-2-panes.json")"
+    wait_for_matching_fixture_refresh_completion "$ROOT/responsive-tab-2-panes.json" \
+        "$RESPONSIVE_FIXTURE_NUM" "$TAB_ID" "$RESPONSIVE_PLUGIN_ID" \
+        "$RESPONSIVE_IN_FLIGHT_REFRESH_ID" "$ROOT/responsive-measured-refresh.json"
     RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
         "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
     zellij_session action close-pane --pane-id "plugin_$RESPONSIVE_PLUGIN_ID"
