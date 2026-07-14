@@ -368,6 +368,25 @@ complete, and the gate is ready for the captain's direct-script-only demo.
   of advertised readiness and must be fixed now; no task reframe or new
   `code_completion` panel is authorized.
 
+- **Cycle 7 — 2026-07-14: REJECTED by independent FO stress, routed to implementation.**
+  At frozen head `082a875`, the FO ran the exact promised
+  `tests/zellij-subscription-layout-stress-test.sh` twice. The first serial
+  round exited early with `There is no active session!` and `FAIL: isolated
+  Zellij session did not become ready`. The isolated rerun emitted no case
+  output, hung until the 180-second owned deadline, was terminated with status
+  143, and ended `FAIL: serial lifecycle stress round 1 failed`. Both failures
+  removed the stress root and child logs, so startup phase, tmux pane output,
+  server exit, and the hung phase are unknowable. Add bounded phase markers and
+  retain a self-contained failure bundle while still terminating every owned
+  process and disposable session. Diagnose both startup disappearance and the
+  deadline hang from preserved evidence; do not extend timeouts or accept a
+  retry-only green. The FO must obtain two consecutive full serial/concurrent
+  stress passes from a clean state, plus a forced-failure run that demonstrates
+  useful retained evidence and complete cleanup, before implementation may
+  claim readiness again. Hangs and false-positive proof are release-blocking,
+  so no follow-up deferral, task reframe, or new `code_completion` panel is
+  authorized.
+
 ## Stage Report: implementation addendum (review-convergence pause)
 
 - DONE: Freeze the revised implementation at
