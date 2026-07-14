@@ -1,7 +1,7 @@
 ---
 id: 91f2dxkn3v7fe1174ayj48j5
 title: Remove synchronous pane metadata calls from the plugin hot path
-status: ideation
+status: implementation
 source: live nautical-cuckoo congestion diagnosis 2026-07-14
 sprint: s1-managed-tab-safety
 group: architecture-hardening
@@ -10,7 +10,7 @@ started: 2026-07-14T11:26:05Z
 completed:
 verdict:
 score: 0.98
-worktree:
+worktree: .worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture
 issue:
 pr:
 mod-block:
