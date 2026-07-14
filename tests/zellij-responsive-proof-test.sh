@@ -61,21 +61,46 @@ if zaphod_pane_tuple_inventories_equal "$ROOT/before.json" "$ROOT/added.json"; t
 fi
 
 cat > "$ROOT/refresh.json" <<'JSON'
-{"plugin_id":9,"pane_ids":[7]}
+{"event":"complete","plugin_id":9,"refresh_id":4,"pane_ids":[7]}
 JSON
 zaphod_fixture_refresh_record_valid "$ROOT/before.json" "$ROOT/refresh.json" \
     7 2 file:/candidate.wasm 9 ||
     fail "the exact terminal/sidebar/refresh record was rejected"
 
-printf '%s\n' '{"plugin_id":7,"pane_ids":[]}' > "$ROOT/wrong-field-refresh.json"
+printf '%s\n' '{"event":"complete","plugin_id":7,"refresh_id":4,"pane_ids":[]}' > "$ROOT/wrong-field-refresh.json"
 if zaphod_fixture_refresh_record_valid "$ROOT/before.json" \
     "$ROOT/wrong-field-refresh.json" 7 2 file:/candidate.wasm 9; then
     fail "fixture ID outside pane_ids incorrectly proved refresh membership"
 fi
-printf '%s\n' '{"plugin_id":9,"pane_ids":[70]}' > "$ROOT/wrong-pane-refresh.json"
+printf '%s\n' '{"event":"complete","plugin_id":9,"refresh_id":4,"pane_ids":[70]}' > "$ROOT/wrong-pane-refresh.json"
 if zaphod_fixture_refresh_record_valid "$ROOT/before.json" \
     "$ROOT/wrong-pane-refresh.json" 7 2 file:/candidate.wasm 9; then
     fail "adjacent wrong pane incorrectly proved refresh membership"
+fi
+
+cat > "$ROOT/refresh.log" <<'LOG'
+2026-07-14 zaphod-trace[9]: zaphod-refresh {"event":"start","plugin_id":9,"refresh_id":4,"pane_ids":[7]}
+2026-07-14 zaphod-trace[8]: zaphod-refresh {"event":"complete","plugin_id":8,"refresh_id":4,"pane_ids":[7]}
+2026-07-14 zaphod-trace[9]: zaphod-refresh {"event":"complete","plugin_id":9,"refresh_id":3,"pane_ids":[7]}
+2026-07-14 zaphod-trace[9]: fixture=7 zaphod-refresh {"event":"complete","plugin_id":9,"refresh_id":4,"pane_ids":[]}
+2026-07-14 zaphod-trace[9]: zaphod-refresh {"event":"complete","plugin_id":9,"refresh_id":4,"pane_ids":[7]}
+LOG
+zaphod_refresh_log_records "$ROOT/refresh.log" 9 complete > "$ROOT/completes.jsonl"
+[ "$(wc -l < "$ROOT/completes.jsonl" | tr -d '[:space:]')" = 2 ] ||
+    fail "structured refresh parser accepted a wrong-plugin or non-record decoy"
+[ "$(tail -1 "$ROOT/completes.jsonl" | jq -r .refresh_id)" = 4 ] ||
+    fail "structured refresh parser lost the exact latest completion"
+
+printf '%s\n' \
+    'zaphod-trace[9]: zaphod-refresh {"event":"start","plugin_id":9,"refresh_id":5,"pane_ids":[7]}' \
+    > "$ROOT/in-flight.log"
+zaphod_refresh_id_is_in_flight "$ROOT/in-flight.log" 9 5 ||
+    fail "a started refresh without a matching completion was not in flight"
+printf '%s\n' \
+    'zaphod-trace[9]: zaphod-refresh {"event":"complete","plugin_id":9,"refresh_id":5,"pane_ids":[7]}' \
+    >> "$ROOT/in-flight.log"
+if zaphod_refresh_id_is_in_flight "$ROOT/in-flight.log" 9 5; then
+    fail "a completed refresh remained in flight"
 fi
 
 [ "$(zaphod_action_deadline_ms 42000 1)" = 43000 ] ||
