@@ -616,3 +616,55 @@ pass in isolated real Zellij/tmux sessions without changing standing KDL.
 Both captain failures have durable regressions. Disposable setup cannot inherit
 client identity; validated inventory owns tab identity; both captain journeys
 deliver the second SSE row alive through the sanitized production boundary.
+
+## Stage Report: implementation (cycle 6)
+
+- DONE: Every lifecycle `dump-layout` read now validates one complete KDL record before publication.
+  The host-only Rust validator parses the whole document, enforces one `layout`
+  root, the exact canonical candidate URL, and exactly one `rail "1"` child.
+- DONE: Native layout capture is atomic and provenance is bounded.
+  Each reply remains in an owned attempt file until validation succeeds; only
+  then is it renamed into place. Failures report status, byte lengths, and
+  JSON-escaped 256-byte stdout/stderr prefixes.
+- DONE: Retry policy is narrow and evidence-backed.
+  Candidate-present pane state permits at most three retries for a stale valid
+  identity, complete JSON wrong-action reply, or status-0 empty reply. Command
+  failure, nonempty malformed KDL, absent-state mismatch, and persistent
+  identity loss remain terminal.
+- DONE: Lifecycle pane/tab snapshots reject both byte-empty and decoded `[]` inventories.
+  Complete nonempty arrays may settle for a bounded interval; command errors,
+  malformed JSON, and persistent empty or identity-mismatched inventories fail.
+- DONE: The original divergence has durable red/green evidence.
+  FO/captain red at `d659c36` was `FAIL: candidate URL did not appear in the
+  native Zellij layout dump`; focused reds included missing validator symbols
+  at `e35e2f1`, `FAIL: stale valid layout did not recover` at `a39d8c2`, and
+  rail identity accepted at `ded720c`.
+- DONE: Real load exposed and closed the adjacent wrong-action variants.
+  Status-0 empty `dump-layout`, empty `list-panes`, empty initial `list-tabs`,
+  and decoded `[]` inventories now have focused bounded recovery coverage.
+- DONE: Repeated and concurrent native stress passes at exact head `082a875`.
+  Two full foreground-to-automatic lifecycle repetitions passed serially; an
+  outside foreground smoke and loaded-client automatic smoke then passed in
+  parallel using one prebuilt, verified artifact set and independent disposable state.
+- DONE: Deadline cleanup is deterministic.
+  A forced one-second deadline terminated the owned process group, exited 1,
+  removed disposable state, and left both standing KDL hashes unchanged.
+- DONE: Exact-head verification is green.
+  Go test/vet passed; Rust passed 138/138 plus 6/6 validator tests and both
+  checks; entry passed 14/14; capture, artifact, permission-upgrade, lifecycle,
+  stable-tab two-rail, and serial/concurrent stress checks passed.
+- DONE: All quick-review findings have dispositions.
+  Jobs `770`, `772`, `774`, `777`, `793`, and `799` drove clean-build, rail,
+  cwd, process-group, and target-dir fixes. Jobs `832` and `839` drove decoded
+  empty-inventory rejection. Exact-tip quick `850` and `852` passed with no findings.
+- DONE: Operator KDL remains untouched and the convergence boundary is honored.
+  Config hash remains `8ce2a42d...a196`; layout hash remains
+  `f1004741...d6e`. No captain test was requested and no `code_completion`
+  panel was launched.
+
+### Summary
+
+Native layout evidence is now complete, identity-bound, atomic, and bounded.
+The lifecycle survives only proven transient wrong-action replies, rejects
+persistent or malformed state, and passes repeated plus concurrent real-Zellij
+verification without changing operator-owned KDL.
