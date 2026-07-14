@@ -1,6 +1,6 @@
 ---
 title: Integrate managed-tab safety with tab-bound session delivery
-status: implementation
+status: ideation
 group: walking-skeleton
 sprint: s1-managed-tab-safety
 sprint-readiness: ready
@@ -292,6 +292,33 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   managed-tab-safety-session-integration --ac-scan` discover AC-O1 through
   AC-O6 and AC-I1 as the task's authoritative acceptance criteria. Remove or
   relocate stale cycle-1 ACs so they cannot drive a later dispatch or gate.
+
+### Cycle 3 — 2026-07-14 — captain chose a manual tab-local watcher
+
+- Replace the persistent shared registry design with the smallest walking
+  skeleton: one manually launched `zaphod watch-tab` daemon in the one agent
+  terminal for a managed tab. The daemon inherits exact Zellij session and
+  pane identity, resolves its tab and original rail pane, and owns the
+  AgentsView subscription, in-memory registration, exact focus, and delivery.
+- The trusted Codex `SessionStart` hook supplies the authoritative agent
+  session ID through a private Unix socket derived from that same Zellij
+  session and terminal pane. Missing daemon, socket, pane, tab, or original
+  rail fails closed and renders no row.
+- Daemon, pane, tab, or rail closure removes authority immediately. Daemon
+  restart may require restarting or re-registering the agent. The walking
+  skeleton supports one watched agent terminal per managed tab; agents in
+  later panes explicitly launch their own watcher.
+- Remove persistent registry, destructive pruning, registry-directory
+  propagation, same-name Zellij incarnation recovery, automatic watcher
+  launch, multi-pane discovery, and restart rehydration from KJ. Those belong
+  to the separately filed automation/recovery follow-up.
+- Preserve reusable exact AgentsView-ID projection, stable-recipient delivery,
+  pane focus, and fail-closed tests from frozen head `2fa8e8424d196465cd00bd091932a65d4ef01107`.
+  Ideation must specify which current changes survive and which registry
+  machinery is deleted; it must not edit product code.
+- This materially changes the operator journey and authority lifecycle, so it
+  resets KJ's review convergence budget only after the canonical contract and
+  acceptance criteria are rewritten and approved at the ideation gate.
 
 ## Problem
 
