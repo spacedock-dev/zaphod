@@ -212,10 +212,18 @@ func (s agentRegistryStore) withLock(zellijSession string, exclusive bool, fn fu
 
 func (s agentRegistryStore) readUnlocked(zellijSession string) (AgentRegistryV1, error) {
 	registry := AgentRegistryV1{Version: agentRegistryVersion, ZellijSession: zellijSession, Registrations: []AgentPaneRegistrationV1{}}
-	file, err := os.Open(s.registryPath(zellijSession))
+	path := s.registryPath(zellijSession)
+	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return registry, nil
 	}
+	if err != nil {
+		return AgentRegistryV1{}, fmt.Errorf("stat registry: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o600 {
+		return AgentRegistryV1{}, fmt.Errorf("registry is not a private regular file")
+	}
+	file, err := os.Open(path)
 	if err != nil {
 		return AgentRegistryV1{}, fmt.Errorf("open registry: %w", err)
 	}
@@ -229,6 +237,7 @@ func (s agentRegistryStore) readUnlocked(zellijSession string) (AgentRegistryV1,
 		return AgentRegistryV1{}, fmt.Errorf("registry exceeds %d bytes", maxRegistryBytes)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&registry); err != nil {
 		return AgentRegistryV1{}, fmt.Errorf("decode registry: %w", err)
 	}
@@ -238,11 +247,21 @@ func (s agentRegistryStore) readUnlocked(zellijSession string) (AgentRegistryV1,
 	if registry.Version != agentRegistryVersion || registry.ZellijSession != zellijSession {
 		return AgentRegistryV1{}, fmt.Errorf("registry identity mismatch")
 	}
-	for _, registration := range registry.Registrations {
+	if registry.Registrations == nil {
+		return AgentRegistryV1{}, fmt.Errorf("registry registrations must be an array")
+	}
+	for index, registration := range registry.Registrations {
 		if registration.ZellijSession != zellijSession || registration.Agent != "codex" ||
 			!codexSessionIDPattern.MatchString(registration.AgentSessionID) ||
-			registration.AgentsViewSessionID != "codex:"+registration.AgentSessionID {
+			registration.AgentsViewSessionID != "codex:"+registration.AgentSessionID || registration.PID <= 0 {
 			return AgentRegistryV1{}, fmt.Errorf("registry contains an invalid registration")
+		}
+		if index > 0 && registry.Registrations[index-1].PaneID >= registration.PaneID {
+			return AgentRegistryV1{}, fmt.Errorf("registry registrations are not strictly ordered by pane id")
+		}
+		updatedAt, err := time.Parse(time.RFC3339Nano, registration.UpdatedAt)
+		if err != nil || updatedAt.UTC().Format(time.RFC3339Nano) != registration.UpdatedAt {
+			return AgentRegistryV1{}, fmt.Errorf("registry contains an invalid registration timestamp")
 		}
 	}
 	return registry, nil
