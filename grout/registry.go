@@ -48,10 +48,11 @@ type AgentRegistryV1 struct {
 }
 
 type agentRegistryStore struct {
-	root         string
-	beforeOpen   func(string)
-	beforeRename func() error
-	lockTimeout  time.Duration
+	root            string
+	beforeLockRetry func()
+	beforeOpen      func(string)
+	beforeRename    func() error
+	lockTimeout     time.Duration
 }
 
 func validateZellijSession(value string) error {
@@ -194,7 +195,15 @@ func (s agentRegistryStore) withLock(zellijSession string, exclusive bool, fn fu
 		lockTimeout = 500 * time.Millisecond
 	}
 	deadline := time.Now().Add(lockTimeout)
-	for {
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			if s.beforeLockRetry != nil {
+				s.beforeLockRetry()
+			}
+			if !time.Now().Before(deadline) {
+				return fmt.Errorf("registry lock timeout after %s", lockTimeout)
+			}
+		}
 		err := syscall.Flock(int(lock.Fd()), operation|syscall.LOCK_NB)
 		if err == nil {
 			break
@@ -202,10 +211,15 @@ func (s agentRegistryStore) withLock(zellijSession string, exclusive bool, fn fu
 		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
 			return fmt.Errorf("lock registry: %w", err)
 		}
-		if !time.Now().Before(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return fmt.Errorf("registry lock timeout after %s", lockTimeout)
 		}
-		time.Sleep(10 * time.Millisecond)
+		delay := 10 * time.Millisecond
+		if remaining < delay {
+			delay = remaining
+		}
+		time.Sleep(delay)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
 	return fn()
@@ -310,7 +324,7 @@ func (s agentRegistryStore) upsert(registration AgentPaneRegistrationV1) error {
 	})
 }
 
-func (s agentRegistryStore) pruneStale(zellijSession string, livePaneTabs map[uint32]uint64) error {
+func (s agentRegistryStore) pruneStale(zellijSession string, livePaneTabs map[uint32]uint64, paneSnapshotStarted time.Time) error {
 	return s.withLock(zellijSession, true, func() error {
 		registry, err := s.readUnlocked(zellijSession)
 		if err != nil {
@@ -318,7 +332,9 @@ func (s agentRegistryStore) pruneStale(zellijSession string, livePaneTabs map[ui
 		}
 		kept := registry.Registrations[:0]
 		for _, registration := range registry.Registrations {
-			if _, live := livePaneTabs[registration.PaneID]; live {
+			updatedAt, _ := time.Parse(time.RFC3339Nano, registration.UpdatedAt)
+			_, live := livePaneTabs[registration.PaneID]
+			if live || !updatedAt.Before(paneSnapshotStarted) {
 				kept = append(kept, registration)
 			}
 		}

@@ -1,5 +1,5 @@
 // ABOUTME: Private per-managed-tab AgentsView subscriber for the Zaphod rail.
-// ABOUTME: Re-lists on SSE data_changed and emits only stable-tab-addressed session rows.
+// ABOUTME: Rebuilds exact registered snapshots on data_changed for one stable tab.
 
 package main
 
@@ -32,6 +32,9 @@ var (
 	// ErrSourceEOF means the one AgentsView stream ended. Reconnect policy is
 	// deliberately out of this walking skeleton.
 	ErrSourceEOF = errors.New("source-eof")
+	// ErrExactSessionNotFound omits one registration from an otherwise
+	// authoritative snapshot. Transport and server failures remain terminal.
+	ErrExactSessionNotFound = errors.New("exact-session-not-found")
 )
 
 // SubscribeConfig is entirely derived by the direct managed-tab entry after
@@ -76,7 +79,8 @@ type zellijPane struct {
 }
 
 type targetSnapshot struct {
-	paneTabs map[uint32]uint64
+	paneTabs            map[uint32]uint64
+	paneSnapshotStarted time.Time
 }
 
 type registeredSession struct {
@@ -196,12 +200,11 @@ func isNativeLayoutReply(output []byte) bool {
 
 // probeTarget checks the only target identity that the sidecar may use: its
 // original stable server tab ID plus the exact canonical rail URL. Native
-// list-panes may omit terminal cwd, so the direct entry's absolute checkout
-// root supplies the row filter after the tab still proves a terminal exists.
 func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (targetSnapshot, error) {
 	if err := ctx.Err(); err != nil {
 		return targetSnapshot{}, err
 	}
+	paneSnapshotStarted := time.Now().UTC()
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--command", "--geometry", "--state", "--tab")
 	var output []byte
 	var panes []zellijPane
@@ -291,7 +294,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	if terminals == 0 {
 		return targetSnapshot{}, fmt.Errorf("%w: stable tab %d has no selectable terminal", ErrTargetLost, stableTabID)
 	}
-	return targetSnapshot{paneTabs: paneTabs}, nil
+	return targetSnapshot{paneTabs: paneTabs, paneSnapshotStarted: paneSnapshotStarted}, nil
 }
 
 func serverEndpoint(serverURL, suffix string) (string, error) {
@@ -320,6 +323,9 @@ func fetchExactSession(ctx context.Context, client *http.Client, serverURL, sess
 		return sessionInfo{}, fmt.Errorf("source exact session %q: %w", sessionID, err)
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return sessionInfo{}, fmt.Errorf("%w: %q", ErrExactSessionNotFound, sessionID)
+	}
 	if response.StatusCode != http.StatusOK {
 		return sessionInfo{}, fmt.Errorf("source exact session %q: unexpected HTTP status %s", sessionID, response.Status)
 	}
@@ -360,7 +366,7 @@ func registeredSessionsForTab(
 		registryDir = defaultAgentRegistryDir()
 	}
 	store := agentRegistryStore{root: registryDir}
-	if err := store.pruneStale(cfg.ZellijSession, target.paneTabs); err != nil {
+	if err := store.pruneStale(cfg.ZellijSession, target.paneTabs, target.paneSnapshotStarted); err != nil {
 		return nil, fmt.Errorf("prune agent registry: %w", err)
 	}
 	registry, err := store.read(cfg.ZellijSession)
@@ -374,6 +380,9 @@ func registeredSessionsForTab(
 			continue
 		}
 		session, err := fetchExactSession(ctx, client, cfg.ServerURL, registration.AgentsViewSessionID, cfg.SourceTimeout)
+		if errors.Is(err, ErrExactSessionNotFound) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
