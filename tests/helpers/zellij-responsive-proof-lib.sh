@@ -106,14 +106,17 @@ zaphod_refresh_id_is_in_flight() {
     local log="$1"
     local plugin_id="$2"
     local refresh_id="$3"
-    local starts completes
+    local starts completes aborts
     starts="$(zaphod_refresh_log_records "$log" "$plugin_id" start |
         jq -sc --arg refresh_id "$refresh_id" \
             '[.[] | select((.refresh_id | tostring) == $refresh_id)] | length')"
     completes="$(zaphod_refresh_log_records "$log" "$plugin_id" complete |
         jq -sc --arg refresh_id "$refresh_id" \
             '[.[] | select((.refresh_id | tostring) == $refresh_id)] | length')"
-    [ "$starts" -eq 1 ] && [ "$completes" -eq 0 ]
+    aborts="$(zaphod_refresh_log_records "$log" "$plugin_id" abort |
+        jq -sc --arg refresh_id "$refresh_id" \
+            '[.[] | select((.refresh_id | tostring) == $refresh_id)] | length')"
+    [ "$starts" -eq 1 ] && [ "$completes" -eq 0 ] && [ "$aborts" -eq 0 ]
 }
 
 zaphod_action_deadline_ms() {
