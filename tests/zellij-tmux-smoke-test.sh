@@ -48,6 +48,9 @@ PERMISSION_CACHE=""
 PERMISSION_FIXTURE="${ZAPHOD_PERMISSION_FIXTURE:-pregranted}"
 SUBSCRIBER_MODE="${ZAPHOD_SUBSCRIBER_MODE:-automatic}"
 CALLER_ENV="${ZAPHOD_CALLER_ENV:-unspecified}"
+NATIVE_COMMAND_TIMEOUT="${ZAPHOD_SMOKE_NATIVE_COMMAND_TIMEOUT_SECS:-10}"
+INJECT_NATIVE_HANG="${ZAPHOD_SMOKE_INJECT_NATIVE_HANG:-}"
+NATIVE_HANG_INJECTED=0
 EVIDENCE_DIR="${ZAPHOD_SMOKE_EVIDENCE_DIR:-}"
 INJECT_FAILURE_PHASE="${ZAPHOD_SMOKE_INJECT_FAILURE_PHASE:-}"
 CURRENT_PHASE="boot"
@@ -71,7 +74,24 @@ LAYOUT_VALIDATOR=""
 bounded_exec() {
     local seconds="$1"
     shift
-    perl -e '$SIG{ALRM} = sub { exit 124 }; alarm shift; exec @ARGV or exit 127' \
+    perl -e '
+        my $seconds = shift;
+        my $pid = fork();
+        exit 127 unless defined $pid;
+        if ($pid == 0) { exec @ARGV or exit 127 }
+        $SIG{ALRM} = sub {
+            kill "TERM", $pid;
+            select undef, undef, undef, 0.1;
+            kill "KILL", $pid;
+            waitpid $pid, 0;
+            exit 124;
+        };
+        alarm $seconds;
+        waitpid $pid, 0;
+        alarm 0;
+        my $status = $?;
+        exit(($status & 127) ? 128 + ($status & 127) : ($status >> 8));
+    ' \
         "$seconds" "$@"
 }
 
@@ -84,8 +104,7 @@ zellij_control_with_timeout() {
 }
 
 zellij_control() {
-    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
-        zellij --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
+    strict_native_command zellij-control zellij_control_with_timeout "$@"
 }
 
 zellij_session_with_timeout() {
@@ -98,9 +117,7 @@ zellij_session_with_timeout() {
 }
 
 zellij_session() {
-    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
-        zellij --session "$SESSION_NAME" \
-        --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
+    strict_native_command zellij-session zellij_session_with_timeout "$@"
 }
 
 tmux_with_timeout() {
@@ -110,7 +127,42 @@ tmux_with_timeout() {
 }
 
 tmux_command() {
-    tmux -L "$TMUX_SERVER" "$@"
+    strict_native_command tmux tmux_with_timeout "$@"
+}
+
+native_hang_matches() {
+    local arg
+    [ -n "$INJECT_NATIVE_HANG" ] && [ "$NATIVE_HANG_INJECTED" -eq 0 ] || return 1
+    for arg in "$@"; do
+        [ "$arg" != "$INJECT_NATIVE_HANG" ] || return 0
+    done
+    return 1
+}
+
+strict_native_command() {
+    local owner="$1"
+    local runner="$2"
+    shift 2
+    local first="${1:-none}"
+    local second="${2:-none}"
+    local status
+    if native_hang_matches "$@"; then
+        NATIVE_HANG_INJECTED=1
+        if bounded_exec "$NATIVE_COMMAND_TIMEOUT" sleep 60; then
+            return 0
+        else
+            status=$?
+        fi
+    elif "$runner" "$NATIVE_COMMAND_TIMEOUT" "$@"; then
+        return 0
+    else
+        status=$?
+    fi
+    if [ "$status" -eq 124 ]; then
+        phase native-command-timeout
+        fail "native-command-timeout: owner=$owner command=$first $second timeout_secs=$NATIVE_COMMAND_TIMEOUT"
+    fi
+    return "$status"
 }
 
 phase() {
@@ -280,6 +332,8 @@ trap 'exit 129' HUP
 for required in tmux jq shasum go cargo perl; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required for the tmux smoke"
 done
+[[ "$NATIVE_COMMAND_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
+    fail "ZAPHOD_SMOKE_NATIVE_COMMAND_TIMEOUT_SECS must be a positive integer"
 zaphod_require_zellij_0443
 for inherited_client_var in ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID; do
     if printenv "$inherited_client_var" >/dev/null 2>&1; then

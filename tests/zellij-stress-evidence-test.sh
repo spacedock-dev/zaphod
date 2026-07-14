@@ -88,9 +88,12 @@ hang_status=$?
 set -e
 
 [ "$hang_status" -ne 0 ] || fail "injected native command hang unexpectedly passed"
-grep -F 'native-command-timeout: owner=zellij-session command=action list-panes' \
-    "$HANG_EVIDENCE/serial-1/case.stderr" >/dev/null ||
+grep -F 'phase=native-command-timeout' \
+    "$HANG_EVIDENCE/serial-1/outside-foreground/phase.log" >/dev/null ||
     fail "native command hang reached the outer watchdog without an inner timeout marker"
+grep -F 'native-command-timeout: owner=zellij-session command=action list-panes' \
+    "$HANG_EVIDENCE/serial-1/outside-foreground/native/list-panes.err" >/dev/null ||
+    fail "native command hang bundle omitted the bounded command identity"
 grep -F 'phase=session-ready-wait' \
     "$HANG_EVIDENCE/serial-1/outside-foreground/phase.log" >/dev/null ||
     fail "native command hang bundle omitted its last entered phase"
