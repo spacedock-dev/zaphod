@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -46,6 +47,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 		"esac\n")
 
 	sessionID := "codex:019f60ff-1111-7222-8333-444455556666"
+	var exactRequests atomic.Int64
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/events":
@@ -53,6 +55,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
 		case "/api/v1/sessions/" + sessionID:
+			exactRequests.Add(1)
 			fmt.Fprintf(w, `{"id":%q,"agent":"codex","first_message":"KJ_WATCH_ROW"}`, sessionID)
 		default:
 			http.NotFound(w, r)
@@ -100,6 +103,10 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 	payload, err := os.ReadFile(snapshotPath)
 	if err != nil || !strings.Contains(string(payload), "KJ_WATCH_ROW") {
 		t.Fatalf("exact session was not projected: %v %s", err, payload)
+	}
+	time.Sleep(350 * time.Millisecond)
+	if got := exactRequests.Load(); got != 1 {
+		t.Fatalf("heartbeat multiplied exact source fetches: got %d, want 1", got)
 	}
 	args, err := os.ReadFile(argvPath)
 	if err != nil {

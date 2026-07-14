@@ -87,12 +87,19 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		return err
 	}
 	var registration *WatchRegistration
-	refresh := func() error {
+	rows := make([]SessionRow, 0, 1)
+	emit := func() error {
 		if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
 			return err
 		}
-		rows := make([]SessionRow, 0, 1)
+		return EmitLeasedSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
+	}
+	refreshSource := func() error {
+		nextRows := make([]SessionRow, 0, 1)
 		if registration != nil {
+			if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
+				return err
+			}
 			session, err := fetchExactSession(ctx, client, cfg.ServerURL, registration.AgentsViewSessionID, cfg.SourceTimeout)
 			if err != nil && !errors.Is(err, ErrExactSessionNotFound) {
 				return err
@@ -101,12 +108,13 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 				if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
 					return err
 				}
-				rows = append(rows, BuildRegisteredSessionRow(session, registration.PaneID, time.Now(), cfg.SummaryClampBytes))
+				nextRows = append(nextRows, BuildRegisteredSessionRow(session, registration.PaneID, time.Now(), cfg.SummaryClampBytes))
 			}
 		}
-		return EmitLeasedSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
+		rows = nextRows
+		return emit()
 	}
-	if err := refresh(); err != nil {
+	if err := emit(); err != nil {
 		return err
 	}
 	if cfg.Ready != nil {
@@ -138,11 +146,11 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		case next := <-registrations:
 			copy := next
 			registration = &copy
-			if err := refresh(); err != nil {
+			if err := refreshSource(); err != nil {
 				return err
 			}
 		case <-streamEvents:
-			if err := refresh(); err != nil {
+			if err := refreshSource(); err != nil {
 				return err
 			}
 		case err := <-streamErrors:
@@ -155,7 +163,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 			if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 {
 				return fmt.Errorf("watch socket lost")
 			}
-			if err := refresh(); err != nil {
+			if err := emit(); err != nil {
 				return err
 			}
 		}
