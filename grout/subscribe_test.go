@@ -668,8 +668,8 @@ func TestProbeTargetRetriesOneTransientEmptyNativeReply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transient empty list-panes reply was terminal: %v", err)
 	}
-	if _, ok := got.cwds["/work/managed"]; !ok {
-		t.Fatalf("target cwd set = %#v, want managed checkout", got.cwds)
+	if got.paneTabs[7] != 73 {
+		t.Fatalf("target pane map = %#v, want pane 7 in tab 73", got.paneTabs)
 	}
 }
 
@@ -694,8 +694,8 @@ func TestProbeTargetRetriesOneTransientNativeEmptyInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("transient native [] list-panes reply was terminal: %v", err)
 	}
-	if _, ok := got.cwds["/work/managed"]; !ok {
-		t.Fatalf("target cwd set = %#v, want managed checkout", got.cwds)
+	if got.paneTabs[7] != 73 {
+		t.Fatalf("target pane map = %#v, want pane 7 in tab 73", got.paneTabs)
 	}
 }
 

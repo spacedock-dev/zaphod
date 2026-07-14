@@ -48,6 +48,7 @@ type SubscribeConfig struct {
 	RailURL           string
 	CheckoutCWD       string
 	RecipientToken    string
+	RegistryDir       string
 	StartupFD         int
 	SourceTimeout     time.Duration
 	PipeTimeout       time.Duration
@@ -75,7 +76,13 @@ type zellijPane struct {
 }
 
 type targetSnapshot struct {
-	cwds map[string]struct{}
+	paneTabs map[uint32]uint64
+	cwds     map[string]struct{}
+}
+
+type registeredSession struct {
+	PaneID  uint32
+	Session sessionInfo
 }
 
 type readinessReader struct {
@@ -256,16 +263,24 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	}
 	resident := 0
 	terminals := 0
+	paneTabs := make(map[uint32]uint64)
 	for _, pane := range panes {
-		if pane.TabID != stableTabID {
-			continue
-		}
-		if pane.IsPlugin && pane.PluginURL != nil && *pane.PluginURL == cfg.RailURL &&
+		if pane.TabID == stableTabID && pane.IsPlugin && pane.PluginURL != nil && *pane.PluginURL == cfg.RailURL &&
 			!pane.IsFloating && !pane.IsSuppressed {
 			resident++
 		}
 		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed {
-			terminals++
+			if pane.ID > uint64(^uint32(0)) {
+				return targetSnapshot{}, fmt.Errorf("%w: terminal pane id %d exceeds protocol range", ErrTargetLost, pane.ID)
+			}
+			paneID := uint32(pane.ID)
+			if _, duplicate := paneTabs[paneID]; duplicate {
+				return targetSnapshot{}, fmt.Errorf("%w: duplicate terminal pane id %d", ErrTargetLost, paneID)
+			}
+			paneTabs[paneID] = pane.TabID
+			if pane.TabID == stableTabID {
+				terminals++
+			}
 		}
 	}
 	if resident != 1 {
@@ -274,7 +289,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	if terminals == 0 {
 		return targetSnapshot{}, fmt.Errorf("%w: stable tab %d has no selectable terminal", ErrTargetLost, stableTabID)
 	}
-	return targetSnapshot{cwds: map[string]struct{}{cfg.CheckoutCWD: {}}}, nil
+	return targetSnapshot{paneTabs: paneTabs, cwds: map[string]struct{}{cfg.CheckoutCWD: {}}}, nil
 }
 
 func serverEndpoint(serverURL, suffix string) (string, error) {
@@ -318,6 +333,73 @@ func fetchSessions(ctx context.Context, client *http.Client, serverURL string, t
 		return nil, fmt.Errorf("source list: decode: %w", err)
 	}
 	return page.Sessions, nil
+}
+
+func fetchExactSession(ctx context.Context, client *http.Client, serverURL, sessionID string, timeout time.Duration) (sessionInfo, error) {
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	endpoint, err := serverEndpoint(serverURL, "/api/v1/sessions/"+url.PathEscape(sessionID))
+	if err != nil {
+		return sessionInfo{}, fmt.Errorf("source endpoint: %w", err)
+	}
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return sessionInfo{}, err
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return sessionInfo{}, fmt.Errorf("source exact session %q: %w", sessionID, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return sessionInfo{}, fmt.Errorf("source exact session %q: unexpected HTTP status %s", sessionID, response.Status)
+	}
+	const maxSessionRecordBytes = 1 << 20
+	decoder := json.NewDecoder(io.LimitReader(response.Body, maxSessionRecordBytes+1))
+	var session sessionInfo
+	if err := decoder.Decode(&session); err != nil {
+		return sessionInfo{}, fmt.Errorf("source exact session %q: decode: %w", sessionID, err)
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return sessionInfo{}, fmt.Errorf("source exact session %q: %w", sessionID, err)
+	}
+	if session.ID != sessionID {
+		return sessionInfo{}, fmt.Errorf("source exact session identity mismatch: requested %q, received %q", sessionID, session.ID)
+	}
+	return session, nil
+}
+
+func registeredSessionsForTab(
+	ctx context.Context,
+	client *http.Client,
+	cfg SubscribeConfig,
+	stableTabID uint64,
+) ([]registeredSession, error) {
+	target, err := probeTarget(ctx, cfg, stableTabID)
+	if err != nil {
+		return nil, err
+	}
+	registryDir := cfg.RegistryDir
+	if registryDir == "" {
+		registryDir = defaultAgentRegistryDir()
+	}
+	registry, err := (agentRegistryStore{root: registryDir}).read(cfg.ZellijSession)
+	if err != nil {
+		return nil, fmt.Errorf("read agent registry: %w", err)
+	}
+	deliverable := deliverableRegistrations(registry.Registrations, target.paneTabs)
+	result := make([]registeredSession, 0, len(deliverable))
+	for _, registration := range deliverable {
+		if target.paneTabs[registration.PaneID] != stableTabID {
+			continue
+		}
+		session, err := fetchExactSession(ctx, client, cfg.ServerURL, registration.AgentsViewSessionID, cfg.SourceTimeout)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, registeredSession{PaneID: registration.PaneID, Session: session})
+	}
+	return result, nil
 }
 
 func snapshotSessions(
