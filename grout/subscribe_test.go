@@ -105,7 +105,7 @@ func TestTrustedRailProbeOmitsExpensivePaneMetadata(t *testing.T) {
 	argsPath := filepath.Join(dir, "args")
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\n"+
 		"cat <<'JSON'\n"+
-		`[{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`+"\nJSON\n")
+		`[{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},{"id":8,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`+"\nJSON\n")
 	railID := uint64(50)
 	snapshot, err := probeTarget(context.Background(), SubscribeConfig{
 		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
@@ -114,6 +114,9 @@ func TestTrustedRailProbeOmitsExpensivePaneMetadata(t *testing.T) {
 	}, 73)
 	if err != nil || snapshot.railPaneID != railID {
 		t.Fatalf("trusted probe = %#v, %v", snapshot, err)
+	}
+	if snapshot.paneTabs[7] != 73 || snapshot.paneTabs[8] != 74 {
+		t.Fatalf("trusted poll lost cross-tab terminal membership: %#v", snapshot.paneTabs)
 	}
 	args, err := os.ReadFile(argsPath)
 	if err != nil {

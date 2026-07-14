@@ -41,6 +41,8 @@ inventory. A two-second bounded refresh also converges registry commits,
 delayed exact-record indexing, and native pane moves without a source event.
 After the first exact rail-URL proof, that hot-path membership query uses the
 trusted native rail pane ID and omits `--all`, command, and geometry metadata.
+Zellij's `--tab` option adds tab IDs to the returned cross-tab terminal
+inventory; it does not restrict the inventory to the active tab.
 It never calls the global session list. Target loss, source EOF,
 a source error, corrupt or conflicting registry state, exact-record mismatch,
 or a pipe error ends the sidecar; it does not reconnect, retry, guess,
