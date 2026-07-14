@@ -14,7 +14,9 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 const watchProtocol = "zaphod-watch-tab-v1"
@@ -33,6 +35,12 @@ type WatchRegistration struct {
 	PaneID              uint32
 	AgentSessionID      string
 	AgentsViewSessionID string
+}
+
+type WatchTarget struct {
+	TabID          uint64
+	TerminalPaneID uint32
+	RailPaneID     uint64
 }
 
 func watchSocketPath(root, zellijSession, paneValue string) (string, error) {
@@ -306,4 +314,86 @@ func validateUniqueJSONValue(decoder *json.Decoder) error {
 		return fmt.Errorf("unexpected JSON delimiter %q", delim)
 	}
 	return nil
+}
+
+func resolveWatchTarget(ctx context.Context, cfg SubscribeConfig, watchedPane uint32) (WatchTarget, error) {
+	panes, err := watchNativePanes(ctx, cfg)
+	if err != nil {
+		return WatchTarget{}, err
+	}
+	terminalCount := 0
+	var tabID uint64
+	for _, pane := range panes {
+		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed && pane.ID == uint64(watchedPane) {
+			terminalCount++
+			tabID = pane.TabID
+		}
+	}
+	if terminalCount != 1 {
+		return WatchTarget{}, fmt.Errorf("%w: watched terminal pane %d count is %d", ErrTargetLost, watchedPane, terminalCount)
+	}
+	railCount := 0
+	var railID uint64
+	for _, pane := range panes {
+		if pane.TabID == tabID && pane.IsPlugin && pane.PluginURL != nil && *pane.PluginURL == cfg.RailURL &&
+			!pane.IsFloating && !pane.IsSuppressed {
+			railCount++
+			railID = pane.ID
+		}
+	}
+	if railCount != 1 {
+		return WatchTarget{}, fmt.Errorf("%w: original rail count in stable tab %d is %d", ErrTargetLost, tabID, railCount)
+	}
+	return WatchTarget{TabID: tabID, TerminalPaneID: watchedPane, RailPaneID: railID}, nil
+}
+
+func probeWatchTarget(ctx context.Context, cfg SubscribeConfig, target WatchTarget) error {
+	panes, err := watchNativePanes(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	terminals := 0
+	rails := 0
+	for _, pane := range panes {
+		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed &&
+			pane.ID == uint64(target.TerminalPaneID) && pane.TabID == target.TabID {
+			terminals++
+		}
+		if pane.IsPlugin && pane.ID == target.RailPaneID && pane.TabID == target.TabID &&
+			pane.PluginURL != nil && *pane.PluginURL == cfg.RailURL && !pane.IsFloating && !pane.IsSuppressed {
+			rails++
+		}
+	}
+	if terminals != 1 || rails != 1 {
+		return fmt.Errorf("%w: expected terminal %d and original rail %d once in stable tab %d, found %d/%d",
+			ErrTargetLost, target.TerminalPaneID, target.RailPaneID, target.TabID, terminals, rails)
+	}
+	return nil
+}
+
+func watchNativePanes(ctx context.Context, cfg SubscribeConfig) ([]zellijPane, error) {
+	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--state", "--tab")
+	command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
+	var stderr strings.Builder
+	command.Stderr = &stderr
+	output, err := command.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("%w: native list-panes: %v: %s", ErrTargetLost, err, strings.TrimSpace(stderr.String()))
+	}
+	const maxPaneReplyBytes = 1 << 20
+	if len(output) > maxPaneReplyBytes {
+		return nil, fmt.Errorf("%w: native pane state exceeds %d bytes", ErrTargetLost, maxPaneReplyBytes)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(output))
+	var panes []zellijPane
+	if err := decoder.Decode(&panes); err != nil {
+		return nil, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return nil, fmt.Errorf("%w: malformed native pane state: %v", ErrTargetLost, err)
+	}
+	return panes, nil
 }
