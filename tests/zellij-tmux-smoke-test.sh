@@ -575,8 +575,37 @@ capture_state() {
 
 capture_tabs() {
     local tabs="$1"
-    zellij_session action list-tabs --json --all --state --layout > "$tabs"
-    jq -S . "$tabs" > "$tabs.sorted"
+    local stderr_file="$ROOT/list-tabs-capture.err"
+    local attempt status provenance
+    for attempt in $(seq 1 20); do
+        status=0
+        zellij_session action list-tabs --json --all --state --layout \
+            > "$tabs" 2> "$stderr_file" || status=$?
+        if [ "$status" -ne 0 ]; then
+            provenance="$(zaphod_bounded_reply_provenance "list-tabs attempt=$attempt/20" \
+                "$status" "$tabs" "$stderr_file")"
+            fail "native-tabs-unready: $provenance"
+        fi
+        if [ -s "$tabs" ] && zaphod_valid_tab_inventory "$tabs"; then
+            if jq -e 'length > 0' "$tabs" >/dev/null 2>&1; then
+                jq -S . "$tabs" > "$tabs.sorted"
+                rm -f "$stderr_file"
+                return 0
+            fi
+        elif [ -s "$tabs" ]; then
+            provenance="$(zaphod_bounded_reply_provenance "list-tabs attempt=$attempt/20" \
+                "$status" "$tabs" "$stderr_file")"
+            fail "native-tabs-unready: malformed inventory; $provenance"
+        fi
+        if [ "$attempt" -lt 20 ]; then
+            sleep 0.05
+            continue
+        fi
+        provenance="$(zaphod_bounded_reply_provenance "list-tabs attempt=$attempt/20" \
+            "$status" "$tabs" "$stderr_file")"
+        fail "native-tabs-unready: persistent empty inventory; $provenance"
+    done
+    return 1
 }
 
 without_geometry() {
