@@ -1,6 +1,6 @@
 ---
 title: Integrate managed-tab safety with tab-bound session delivery
-status: ideation
+status: implementation
 group: walking-skeleton
 sprint: s1-managed-tab-safety
 sprint-readiness: ready
@@ -8,6 +8,7 @@ score: 1.0
 source: captain direction 2026-07-13; V3/BB merge conflict
 id: kjhq0t2h6drse6b32cqybggv
 started: 2026-07-13T06:54:16Z
+worktree: .worktrees/spacedock-ensign-managed-tab-safety-session-integration
 ---
 
 ## Historical cycle-1 contract (superseded)
