@@ -24,6 +24,12 @@ fi
 if grep -F 'blocked/working agent state marker' "$REPO_ROOT/README.md" >/dev/null; then
     fail "README screenshot still advertises unavailable fresh pane state"
 fi
+if grep -E '^│[●✓].*│' "$REPO_ROOT/README.md" >/dev/null; then
+    fail "README screenshot still gives fresh terminal rows state glyphs"
+fi
+if grep -F 'idle . claude' "$REPO_ROOT/README.md" >/dev/null; then
+    fail "README screenshot still gives a fresh terminal row an idle state"
+fi
 grep -F 'Zellij 0.44.3 can synchronously hold that export for five seconds' \
     "$REPO_ROOT/SPEC.md" >/dev/null ||
     fail "SPEC omits the shipped scrollback safety retirement"
