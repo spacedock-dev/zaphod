@@ -46,7 +46,7 @@ SOCKET_DIR=""
 HOME_DIR=""
 PERMISSION_CACHE=""
 PERMISSION_FIXTURE="${ZAPHOD_PERMISSION_FIXTURE:-pregranted}"
-SUBSCRIBER_MODE="${ZAPHOD_SUBSCRIBER_MODE:-automatic}"
+WATCHER_MODE="manual"
 CALLER_ENV="${ZAPHOD_CALLER_ENV:-unspecified}"
 NATIVE_COMMAND_TIMEOUT="${ZAPHOD_SMOKE_NATIVE_COMMAND_TIMEOUT_SECS:-10}"
 INJECT_NATIVE_HANG="${ZAPHOD_SMOKE_INJECT_NATIVE_HANG:-}"
@@ -68,9 +68,6 @@ TMUX_SESSION="zaphod-smoke"
 TMUX_PANE="$TMUX_SESSION:0.0"
 AGENTSVIEW_PID=""
 AGENTSVIEW_URL=""
-SIDECAR_PID=""
-SIDECAR_LOG=""
-SIDECAR_START_FIFO=""
 ENTRY_PID=""
 LAYOUT_VALIDATOR=""
 
@@ -170,7 +167,7 @@ strict_native_command() {
 
 phase() {
     local name="$1"
-    local marker="zaphod-phase: phase=$name pid=$$ caller=$CALLER_ENV mode=$SUBSCRIBER_MODE"
+    local marker="zaphod-phase: phase=$name pid=$$ caller=$CALLER_ENV mode=$WATCHER_MODE"
     CURRENT_PHASE="$name"
     printf '%s\n' "$marker" >&2
     if [ -n "$EVIDENCE_DIR" ]; then
@@ -241,7 +238,6 @@ record_precleanup_evidence() {
         printf 'root=%s\nsession=%s\ntmux_server=%s\ntmux_pane=%s\n' \
             "$ROOT" "$SESSION_NAME" "$TMUX_SERVER" "$TMUX_PANE"
         printf 'entry_pid=%s entry_alive_before=%s\n' "$ENTRY_PID" "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
-        printf 'sidecar_pid=%s sidecar_alive_before=%s\n' "$SIDECAR_PID" "$(pid_is_alive "$SIDECAR_PID" && echo 1 || echo 0)"
         printf 'agentsview_pid=%s agentsview_alive_before=%s\n' "$AGENTSVIEW_PID" "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
     } > "$EVIDENCE_DIR/process-ownership.txt"
     if [ -n "$TMUX_SERVER" ]; then
@@ -280,7 +276,6 @@ cleanup() {
     set +e
     record_precleanup_evidence "$status"
     terminate_owned_pid "$ENTRY_PID" "entry process" || cleanup_status=1
-    terminate_owned_pid "$SIDECAR_PID" "private sidecar" || cleanup_status=1
     if [ -n "$TMUX_SERVER" ]; then
         tmux_with_timeout 1 display-message -p '#{pid} #{socket_path}' \
             > "$ROOT/tmux-socket-path.stdout" 2> "$ROOT/tmux-socket-path.stderr"
@@ -405,14 +400,13 @@ cleanup() {
             printf 'tmux_socket_status=%s\ntmux_socket_path=%s\ntmux_socket_removed_after=%s\ntmux_socket_absent_after=%s\n' \
                 "$tmux_socket_status" "$tmux_socket_path" "$tmux_socket_removed_after" "$tmux_socket_absent_after"
             printf 'entry_alive_after=%s\n' "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
-            printf 'sidecar_alive_after=%s\n' "$(pid_is_alive "$SIDECAR_PID" && echo 1 || echo 0)"
             printf 'agentsview_alive_after=%s\n' "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
             printf 'root_exists_after=%s\n' "$root_exists_after"
             printf 'standing_config_unchanged=%s\n' "$([ "$config_after" = "$STANDING_CONFIG_BEFORE" ] && echo 1 || echo 0)"
             printf 'standing_layout_unchanged=%s\n' "$([ "$layout_after" = "$STANDING_LAYOUT_BEFORE" ] && echo 1 || echo 0)"
         } > "$EVIDENCE_DIR/cleanup-result.txt"
         printf 'zaphod-phase: phase=cleanup-complete pid=%s caller=%s mode=%s\n' \
-            "$$" "$CALLER_ENV" "$SUBSCRIBER_MODE" >> "$EVIDENCE_DIR/phase.log"
+            "$$" "$CALLER_ENV" "$WATCHER_MODE" >> "$EVIDENCE_DIR/phase.log"
     fi
     if [ "$cleanup_status" -ne 0 ]; then
         exit "$cleanup_status"
@@ -451,12 +445,6 @@ case "$PERMISSION_FIXTURE" in
     pregranted|upgrade) ;;
     *) fail "ZAPHOD_PERMISSION_FIXTURE must be pregranted or upgrade" ;;
 esac
-case "$SUBSCRIBER_MODE" in
-    automatic|foreground) ;;
-    *) fail "ZAPHOD_SUBSCRIBER_MODE must be automatic or foreground" ;;
-esac
-[ "$SUBSCRIBER_MODE" != foreground ] || [ "$PERMISSION_FIXTURE" = pregranted ] ||
-    fail "foreground subscriber smoke requires the disposable pregranted fixture"
 if [ "$CALLER_ENV" = inside ]; then
     [ "$INHERITED_ZELLIJ_PRESENT" = x ] &&
         [ "$INHERITED_ZELLIJ_SESSION_NAME_PRESENT" = x ] &&
@@ -471,11 +459,10 @@ ROOT="$(mktemp -d /tmp/zs.XXXXXX)" || fail "could not create a short isolated sm
 CONFIG_DIR="$ROOT/config"
 CONFIG_FILE="$CONFIG_DIR/config.kdl"
 DATA_DIR="$ROOT/data"
-REGISTRY_DIR="$ROOT/registry"
 SOCKET_DIR="$ROOT/socket"
 SESSION_NAME="zs$$"
 TMUX_SERVER="zs$$"
-mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$REGISTRY_DIR" "$SOCKET_DIR" "$ROOT/tmp"
+mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$SOCKET_DIR" "$ROOT/tmp"
 phase root-created
 ISOLATED_LAYOUT="$CONFIG_DIR/layouts/zaphod.kdl"
 sed "s|<FIXED_OPERATOR_LAYOUT>|$ISOLATED_LAYOUT|" \
@@ -510,7 +497,7 @@ if [ "${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" != 1 ]; then
 fi
 LAYOUT_VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
 [ -f "$WASM_PATH" ] || fail "prebuilt candidate WASM is missing"
-[ -x "$REPO_ROOT/target/zaphod" ] || fail "prebuilt zaphod sidecar is missing"
+[ -x "$REPO_ROOT/target/zaphod" ] || fail "prebuilt zaphod watcher is missing"
 [ -x "$LAYOUT_VALIDATOR" ] || fail "host KDL validator was not built"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive the candidate WASM URL"
@@ -852,177 +839,20 @@ entry_command() {
         "${client_env[@]}" \
         ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
-		ZAPHOD_REGISTRY_DIR="$REGISTRY_DIR" \
+		ZAPHOD_WATCH_DIR="$ROOT/w" \
         CARGO_TARGET_DIR="$REPO_ROOT/target" \
         ZAPHOD_TEST_PREBUILT_ARTIFACTS="${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" \
-        ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
         --agentsview-url "$AGENTSVIEW_URL"
 }
 
-foreground_entry() {
-    local rendered_layout="$ROOT/foreground-zaphod.kdl"
-    local recipient_token="zaphod-smoke-$$-$(date +%s)"
-    local target_pane_id=""
-    local startup_message=""
-    local startup_status=0
-    local new_tab_status=0
-    local tabs_after_status=1
-    local target_status=1
-    local attempt
-
-    zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" \
-        "$rendered_layout" "$recipient_token"
-    zaphod_validate_layout_identity "$rendered_layout" "$WASM_URL"
-    set +e
-    zellij_session action new-tab --name 'Zaphod foreground subscriber' \
-        --cwd "$REPO_ROOT" --layout-string "$(cat "$rendered_layout")" \
-        > "$ROOT/foreground-new-tab.stdout" 2> "$ROOT/foreground-new-tab.stderr"
-    new_tab_status=$?
-    set -e
-    if [ "$new_tab_status" -ne 0 ]; then
-        printf 'FAIL: foreground %s\n' \
-            "$(zaphod_bounded_reply_provenance new-tab "$new_tab_status" \
-                "$ROOT/foreground-new-tab.stdout" "$ROOT/foreground-new-tab.stderr")" >&2
-        return 1
-    fi
-    TAB_ID=""
-    : > "$ROOT/foreground-tabs-after.json"
-    : > "$ROOT/foreground-tabs-after.err"
-    for attempt in $(seq 1 80); do
-        set +e
-        zellij_session action list-tabs --json --all --state --layout \
-            > "$ROOT/foreground-tabs-after.json" 2> "$ROOT/foreground-tabs-after.err"
-        tabs_after_status=$?
-        set -e
-        if [ "$tabs_after_status" -eq 0 ] && zaphod_valid_tab_inventory "$ROOT/foreground-tabs-after.json"; then
-            TAB_ID="$(zaphod_new_tab_id_from_inventories "$ROOT/foreign-tabs-before.json" \
-                "$ROOT/foreground-tabs-after.json" 2>/dev/null || true)"
-            [ -z "$TAB_ID" ] || break
-        fi
-        sleep 0.05
-    done
-    if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]]; then
-        printf 'FAIL: foreground stable-ID discovery: %s; %s\n' \
-            "$(zaphod_bounded_reply_provenance new-tab "$new_tab_status" \
-                "$ROOT/foreground-new-tab.stdout" "$ROOT/foreground-new-tab.stderr")" \
-            "$(zaphod_bounded_reply_provenance list-tabs-after "$tabs_after_status" \
-                "$ROOT/foreground-tabs-after.json" "$ROOT/foreground-tabs-after.err")" >&2
-        return 1
-    fi
-    for attempt in $(seq 1 80); do
-        set +e
-        zellij_session action list-panes --json --all --command --geometry --state --tab \
-            > "$ROOT/foreground-target.json" 2>"$ROOT/foreground-target.err"
-        target_status=$?
-        set -e
-        target_pane_id="$(jq -er --arg tab_id "$TAB_ID" --arg wasm_url "$WASM_URL" \
-            '[.[] | select((.tab_id | tostring) == $tab_id and .is_plugin and .plugin_url == $wasm_url and (.is_floating | not) and (.is_suppressed | not))] | if length == 1 then .[0].id | tostring else empty end' \
-            "$ROOT/foreground-target.json" 2>/dev/null || true)"
-        [ -n "$target_pane_id" ] && break
-        sleep 0.05
-    done
-    [ -n "$target_pane_id" ] || {
-        zaphod_bounded_reply_provenance list-panes "$target_status" \
-            "$ROOT/foreground-target.json" "$ROOT/foreground-target.err" >&2
-        printf '\n' >&2
-        fail "foreground entry never exposed its exact target rail"
-    }
-    case "$target_pane_id" in
-        plugin_*) ;;
-        0|[1-9]|[1-9][0-9]*) target_pane_id="plugin_$target_pane_id" ;;
-        *) fail "foreground target returned an invalid pane ID: $target_pane_id" ;;
-    esac
-    zellij_session action focus-pane-id "$target_pane_id"
-
-    SIDECAR_LOG="$ROOT/foreground-subscriber.log"
-    SIDECAR_START_FIFO="$ROOT/foreground-subscriber-start"
-    mkfifo "$SIDECAR_START_FIFO"
-    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
-        ZELLIJ_SOCKET_DIR="$SOCKET_DIR" "$REPO_ROOT/target/zaphod" subscribe \
-        --server "$AGENTSVIEW_URL" \
-        --zellij-bin "$(command -v zellij)" \
-        --zellij-config-dir "$CONFIG_DIR" \
-        --zellij-config "$CONFIG_FILE" \
-        --zellij-data-dir "$DATA_DIR" \
-        --zellij-session "$SESSION_NAME" \
-        --tab-id "$TAB_ID" \
-        --rail-url "$WASM_URL" \
-        --checkout-cwd "$REPO_ROOT" \
-        --recipient-token "$recipient_token" \
-		--registry-dir "$REGISTRY_DIR" \
-        --startup-fd 3 \
-        3>"$SIDECAR_START_FIFO" > >(tee -a "$SIDECAR_LOG") 2>&1 &
-    SIDECAR_PID=$!
-    set +e
-    IFS= read -r -t "$ENTRY_START_TIMEOUT" startup_message < "$SIDECAR_START_FIFO"
-    startup_status=$?
-    set -e
-    rm -f "$SIDECAR_START_FIFO"
-    SIDECAR_START_FIFO=""
-    if [ "$startup_status" -ne 0 ] || [ "$startup_message" != ready ]; then
-        sed -n '1,40p' "$SIDECAR_LOG" >&2 || true
-        fail "foreground target/zaphod subscribe did not become ready"
-    fi
-    {
-        printf 'TAB_ID=%s\n' "$TAB_ID"
-        printf 'WASM_URL=%s\n' "$WASM_URL"
-        printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
-        printf 'SIDECAR_PID=%s\n' "$SIDECAR_PID"
-    } > "$ROOT/entry.out"
-}
-
 phase entry-start
-if [ "$SUBSCRIBER_MODE" = foreground ]; then
-    foreground_entry
-elif [ "$PERMISSION_FIXTURE" = upgrade ]; then
-    entry_command > "$ROOT/entry.out" 2> "$ROOT/entry.err" &
-    ENTRY_PID=$!
-    for _attempt in $(seq 1 160); do
-        tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/permission-prompt.screen"
-        zellij_session action list-panes --json --all --command --geometry --state --tab \
-            > "$ROOT/permission-prompt-panes.json" 2>/dev/null || true
-        if grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null &&
-            jq -e --arg wasm_url "$WASM_URL" \
-                'any(.[]; .is_plugin and .plugin_url == $wasm_url and .is_focused == true)' \
-                "$ROOT/permission-prompt-panes.json" >/dev/null 2>&1; then
-            break
-        fi
-        kill -0 "$ENTRY_PID" 2>/dev/null || break
-        sleep 0.05
-    done
-    if ! grep -F 'Allow? (y/n)' "$ROOT/permission-prompt.screen" >/dev/null ||
-        ! jq -e --arg wasm_url "$WASM_URL" \
-            'any(.[]; .is_plugin and .plugin_url == $wasm_url and .is_focused == true)' \
-            "$ROOT/permission-prompt-panes.json" >/dev/null 2>&1; then
-        cat "$ROOT/entry.err" >&2 || true
-        sed -n '1,80p' "$ROOT/permission-prompt.screen" >&2 || true
-        zellij_session action list-panes --json --all --command --geometry --state --tab >&2 || true
-        fail "old permission cache did not expose an actionable native expanded-permission prompt"
-    fi
-    send_literal y
-    set +e
-    wait "$ENTRY_PID"
-    ENTRY_STATUS=$?
-    set -e
-    ENTRY_PID=""
-    if [ "$ENTRY_STATUS" -ne 0 ]; then
-        cat "$ROOT/entry.err" >&2 || true
-        fail "literal permission approval did not complete direct entry"
-    fi
-    grep -F 'ReadCliPipes' "$PERMISSION_CACHE" >/dev/null ||
-        fail "literal permission approval did not persist the expanded CLI-pipe grant"
-else
-    entry_command > "$ROOT/entry.out"
-fi
+entry_command > "$ROOT/entry.out"
 phase entry-complete
 TAB_ID="$(sed -n 's/^TAB_ID=//p' "$ROOT/entry.out")"
-SIDECAR_PID="$(sed -n 's/^SIDECAR_PID=//p' "$ROOT/entry.out")"
-SIDECAR_LOG="$(sed -n 's/^SIDECAR_LOG=//p' "$ROOT/entry.out")"
+WATCH_DIR="$(sed -n 's/^WATCH_DIR=//p' "$ROOT/entry.out")"
 [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] || fail "entry script did not report a stable tab ID"
-[[ "$SIDECAR_PID" =~ ^[1-9][0-9]*$ ]] || fail "entry script did not report a sidecar PID"
-[ -n "$SIDECAR_LOG" ] && [ -f "$SIDECAR_LOG" ] || fail "subscriber did not report a diagnostic log"
-kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited before smoke assertions"
+[ "$WATCH_DIR" = "$ROOT/w" ] || fail "entry script did not preserve the private watcher root"
 grep -Fx "WASM_URL=$WASM_URL" "$ROOT/entry.out" >/dev/null ||
     fail "entry script did not report the candidate WASM URL"
 wait_for_settled_candidate_resident \
@@ -1035,8 +865,19 @@ zellij_session action list-panes --json --all --command --geometry --state --tab
 REGISTERED_PANE_ID="$(jq -er --arg tab_id "$TAB_ID" \
     '[.[] | select((.tab_id | tostring) == $tab_id and (.is_plugin | not) and .is_selectable and (.is_suppressed | not))] | if length == 1 then .[0].id | tostring else error("expected one terminal") end' \
     "$ROOT/registration-panes.json")" || fail "managed tab did not expose one terminal for SessionStart registration"
+send_literal "$REPO_ROOT/target/zaphod watch-tab"
+send_literal "$(printf '\r')"
+for _attempt in $(seq 1 160); do
+    tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/watcher-ready.screen"
+    grep -F 'watch-tab ready pid=' "$ROOT/watcher-ready.screen" >/dev/null && break
+    sleep 0.05
+done
+grep -F 'watch-tab ready pid=' "$ROOT/watcher-ready.screen" >/dev/null || {
+    sed -n '1,100p' "$ROOT/watcher-ready.screen" >&2 || true
+    fail "manual watch-tab command did not become ready"
+}
 printf '%s\n' '{"session_id":"019f5f94-a596-7d92-9928-398653669161","transcript_path":null,"cwd":"/deliberately/wrong","hook_event_name":"SessionStart","model":"fixture","permission_mode":"default","source":"startup"}' |
-    ZAPHOD_REGISTRY_DIR="$REGISTRY_DIR" \
+    ZAPHOD_WATCH_DIR="$WATCH_DIR" \
     ZELLIJ_SESSION_NAME="$SESSION_NAME" \
     ZELLIJ_PANE_ID="$REGISTERED_PANE_ID" \
     "$REPO_ROOT/target/zaphod" register-agent-session
@@ -1047,15 +888,12 @@ for _attempt in $(seq 1 160); do
     if grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
         break
     fi
-    kill -0 "$SIDECAR_PID" 2>/dev/null || break
     sleep 0.05
 done
 if ! grep -F 'SMOKE_SECOND_ROW' "$ROOT/agents-second-row.screen" >/dev/null; then
-    sed -n '1,40p' "$SIDECAR_LOG" >&2 || true
     sed -n '1,80p' "$ROOT/agents-second-row.screen" >&2 || true
 	fail "post-registration data_changed did not render the exact registered session row"
 fi
-kill -0 "$SIDECAR_PID" 2>/dev/null || fail "subscriber exited after post-readiness data_changed delivery"
 phase second-row-rendered
 TAB_COUNT_AFTER="$(jq -er 'length' "$ROOT/candidate-tabs-before.json")"
 [ "$TAB_COUNT_AFTER" -eq "$((TAB_COUNT_BEFORE + 1))" ] ||
@@ -1082,6 +920,11 @@ jq -e --arg wasm_url "$WASM_URL" \
     fail "direct entry changed the isolated profile layout"
 find "$ROOT/tmp" -mindepth 1 -maxdepth 1 -name 'zaphod-new-tab.*' -print -quit | \
     grep -q . && fail "direct entry left its rendered-layout temporary root"
+
+# The manual watcher command and projected row legitimately advance terminal
+# cursor/content state. Rebase the toggle identity comparison after that work.
+capture_state "$ROOT/candidate-before.json" "$ROOT/candidate-before.kdl" \
+    "$ROOT/candidate-before.screen" present
 
 # A pre-authorized rail requests its runtime MessagePluginId route, but the
 # request's return value is not authorization. One literal key must be
@@ -1154,8 +997,6 @@ jq -e --arg wasm_url "$WASM_URL" \
     fail "standing Zellij config changed during tmux smoke: $STANDING_CONFIG"
 [ "$(file_state "$STANDING_LAYOUT")" = "$STANDING_LAYOUT_BEFORE" ] ||
     fail "standing Zellij layout changed during tmux smoke: $STANDING_LAYOUT"
-kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited during smoke assertions"
-
 phase smoke-complete
-printf 'PASS: %s caller with %s target/zaphod subscribe registered and rendered SMOKE_SECOND_ROW, stayed alive, preserved routing, and cleaned up\n' \
-    "$CALLER_ENV" "$SUBSCRIBER_MODE"
+printf 'PASS: %s caller manually launched watch-tab, rendered SMOKE_SECOND_ROW, preserved routing, and cleaned up\n' \
+    "$CALLER_ENV"
