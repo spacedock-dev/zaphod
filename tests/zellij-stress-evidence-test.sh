@@ -164,3 +164,30 @@ assert_cleanup_proven "$STARTUP_EVIDENCE/serial-1/outside-foreground/cleanup-res
 [ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "startup exit changed standing layout"
 
 echo "PASS: vanished startup reports retained pane exit evidence and cleans up"
+
+INCONCLUSIVE_EVIDENCE="$ROOT/inconclusive-evidence"
+set +e
+ZAPHOD_LAYOUT_STRESS_EVIDENCE_DIR="$INCONCLUSIVE_EVIDENCE" \
+ZAPHOD_LAYOUT_STRESS_INJECT_FAILURE_PHASE=tmux-zellij-launched \
+ZAPHOD_SMOKE_INJECT_CLEANUP_PROBE_HANG=both \
+ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS=30 \
+ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS=1 \
+    "$SCRIPT_DIR/zellij-subscription-layout-stress-test.sh" \
+    > "$ROOT/inconclusive.out" 2> "$ROOT/inconclusive.err"
+inconclusive_status=$?
+set -e
+
+[ "$inconclusive_status" -ne 0 ] || fail "inconclusive cleanup probes unexpectedly passed"
+INCONCLUSIVE_RESULT="$INCONCLUSIVE_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt"
+grep -F 'cleanup_status=1' "$INCONCLUSIVE_RESULT" >/dev/null ||
+    fail "inconclusive cleanup probes did not fail cleanup proof"
+grep -F 'session_probe_status_after=124' "$INCONCLUSIVE_RESULT" >/dev/null ||
+    fail "injected Zellij cleanup timeout was not retained"
+grep -F 'session_absence_confirmed=0' "$INCONCLUSIVE_RESULT" >/dev/null ||
+    fail "Zellij cleanup timeout falsely confirmed absence"
+grep -F 'tmux_probe_status_after=124' "$INCONCLUSIVE_RESULT" >/dev/null ||
+    fail "injected tmux cleanup timeout was not retained"
+grep -F 'tmux_absence_confirmed=0' "$INCONCLUSIVE_RESULT" >/dev/null ||
+    fail "tmux cleanup timeout falsely confirmed absence"
+
+echo "PASS: cleanup probe timeouts remain explicitly inconclusive"
