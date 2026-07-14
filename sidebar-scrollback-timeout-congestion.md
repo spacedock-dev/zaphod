@@ -217,3 +217,36 @@ beyond the pane, tab, switching, and delayed-burst behavior measured above.
 - DONE: Covered stale/unknown/unbound behavior, bounded failure cleanup,
   standing-config preservation, the concrete documentation changes, and the
   captain's exact post-offline live demo. No manual watcher is required.
+
+## Stage Report: implementation
+
+- DONE: Prove red-first that a periodic refresh never invokes pane scrollback, while command/title classification and exact stale/unknown/unbound degradation remain correct.
+  Red `93b681a` failed with `left: 2, right: 0`; green `65923a3` removes the periodic call, and `e8906e5` plus `a1c0389` prove linear command/CWD work, zero viewport calls, and a source boundary against direct bypass.
+- FAILED: Prove in isolated real Zellij that literal pane creation, complete tab creation, tab switching, and the six-second post-close window meet their native-state deadlines without delayed bursts, including failure cleanup.
+  The success and injected-timeout runs pass, but parent `1001` found three remaining false-positive paths in pane identity, fixture/timer attribution, and the end-to-end deadline.
+- FAILED: Ship the scoped documentation and exact-head verification evidence required by the implementation stage, without absorbing command/CWD redesign or managed reload work.
+  README, SPEC, and docking docs are scoped and green; exact-head native checks pass, but all three required `code_completion` parents failed, so implementation exit evidence is incomplete.
+- SKIPPED: Captain AC-I1 live `subspace-tui` demonstration.
+  `subspace-tui` is unavailable on this host, and the offline convergence gate blocks the captain demo before validation.
+- DONE: Frozen candidate and exact green checks recorded.
+  Head `a1c0389ee20eae3df9ae0bbaee1cf4be60d87dad` passes Rust 142/142 plus validator 6/6, `cargo check --tests`, fresh-build responsiveness and injected cleanup, docs, artifact, new-tab, and layout-capture suites.
+- DONE: Before/after native counts and standing-state evidence recorded.
+  Plugin tests rose from 138 to 142; standing config remains `8ce2a42d...a196` and layout remains `f1004741...d6e`.
+- DONE: Parent `958` findings dispositioned; members `955`, `956`, and `957` all failed.
+  Fresh-state redesign was rebutted and explicitly accepted by quick `997`; README promises, tab-local proof, active new-tab identity, and the shell fixture were fixed in `56ea9f4`, `4d8677d`, `5a2aba2`, `525870c`, and `c6f1f82`.
+- DONE: Parent `987` findings dispositioned; members `984`, `985`, and `986` all failed.
+  Commit `525870c` binds the added terminal to the new active tab, and `a1c0389` prevents direct scrollback bypass inside both periodic refresh entry points.
+- FAILED: Parent `1001` remains authoritative FAIL; member `998` passed, while `999` and `1000` failed.
+  Existing pane tuples/sidebar identity, fixture-to-sidebar timer attribution, and pre-send absolute deadlines remain unresolved and are all `MUST FIX NOW`.
+- FAILED: Preserve every existing pane's `(id, is_plugin, tab_id, plugin_url)` and the sidebar identity across each action.
+  Estimated scope: harness-only tuple projections before and after every literal pane/tab action.
+- FAILED: Bind the native `tail` fixture to `TAB_ID` and prove the sidebar received it and completed a periodic refresh before keys.
+  Estimated scope: a small test/debug refresh marker plus exact fixture and sidebar observations.
+- FAILED: Start each one-second deadline before `send_literal` and carry the same absolute deadline through native observation.
+  Estimated scope: harness-only absolute deadline plumbing; tmux delivery time must count.
+- FAILED: Three-round review convergence gate blocks round four.
+  Parents `958`, `987`, and `1001` consumed the stable-contract budget; no fourth panel or post-gate code change was launched.
+
+### Summary
+
+The frozen candidate removes periodic scrollback and passes its offline behavior and cleanup suites without command/CWD redesign or managed reload work. Authoritative review remains blocked on three proof-truth gaps, all classified `MUST FIX NOW`; the convergence gate now requires captain direction before any round four.
