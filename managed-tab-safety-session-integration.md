@@ -320,6 +320,21 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   resets KJ's review convergence budget only after the canonical contract and
   acceptance criteria are rewritten and approved at the ideation gate.
 
+### Cycle 4 — 2026-07-14 — captain approved lease-owned silent-loss cleanup
+
+- Native testing showed that a recurring watcher `list-panes` call can queue
+  behind plugin refresh and delay ordinary Zellij actions even when the call
+  is cancelled after 150 ms. Idle polling therefore contradicts AC-O5.
+- Remove idle native pane polling. The plugin's current exact pane manifest,
+  recipient proof, watcher generation, and 2.5-second lease own prompt row and
+  focus fail-close after silent terminal, tab, rail, watcher, or heartbeat
+  loss.
+- Keep bounded native revalidation at startup, before acknowledged full
+  snapshot delivery on hook/data changes, and during cleanup. A daemon whose
+  pane disappears silently may remain until a later lifecycle check or
+  explicit cleanup; prompt PID/socket teardown moves to the asynchronous pane
+  observation or watcher-automation follow-up.
+
 ## Problem
 
 The frozen implementation at `2fa8e8424d196465cd00bd091932a65d4ef01107`
@@ -408,9 +423,12 @@ do not restore a registry or inference fallback.
    that terminal replaces the in-memory ID; `Stop` remains a turn state, not
    deregistration.
 6. Killing the watcher or removing/moving/suppressing its terminal, tab, or
-   original rail revokes authority. Rows expire within the bounded lease and
-   focus is disabled immediately on the next manifest/action check. Restarting
-   `watch-tab` creates a new empty generation; no old ID is reconstructed.
+   original rail revokes visible authority. The plugin's exact manifest clears
+   an unbound projection atomically; heartbeat loss expires the generation
+   within the bounded lease, and focus is disabled immediately. Restarting
+   `watch-tab` creates a new empty generation; no old ID is reconstructed. A
+   silently orphaned daemon may remain until a lifecycle check or explicit
+   cleanup and never grants row or focus authority by its continued existence.
 
 The documented walking skeleton supports one initial watched terminal per
 managed tab. A later pane is never auto-discovered; an expert may start a
@@ -434,14 +452,20 @@ unknown/duplicate fields and trailing bytes, and accepts only Codex
 `SessionStart` `startup|resume` with a non-empty canonical UUID. The socket is
 an ingress transport, not a store; no registration file is written.
 
-At startup, before each exact fetch/delivery, on a lightweight health cadence,
-and before focus, the watcher requires: its terminal pane exists exactly once;
+At startup and before each exact fetch/acknowledged full-snapshot delivery,
+the watcher requires: its terminal pane exists exactly once;
 the pane still belongs to the captured stable tab; the original plugin pane ID
 exists exactly once in that tab with the canonical URL and managed shape; and
 recipient-token delivery is acknowledged by that original rail. Native probes
 use no `--command`, `--geometry`, CWD, scrollback, or process metadata. Any
 failure stops source work, attempts an empty acknowledged snapshot when the
 original rail remains reachable, unlinks the socket, and exits.
+
+Idle renewal is different: a recipient- and generation-checked heartbeat runs
+every 1.4 seconds without a native pane query. The plugin accepts it only for
+the current exact rail and clears the whole session projection if any bound
+pane is absent from its current tab manifest. A late heartbeat cannot
+resurrect an expired generation.
 
 Each full snapshot carries a random watcher-generation nonce and a short
 lease. The plugin replaces its session projection atomically, accepts
@@ -505,22 +529,25 @@ global list endpoint, and wrong tab.
 
 **AC-O4 — loss of live authority fails closed without recovery state.** Killing
 the watcher or closing/moving/suppressing the watched pane, stable tab, or
-original rail clears the session row within one existing two-second sidebar
-refresh interval plus 500 ms and makes focus a no-op. Closing a same-WASM rail
-in another tab changes nothing. A restarted watcher begins with zero rows until
-a new trusted start arrives.
+original rail clears the session row within the 2.5-second lease and makes
+focus a no-op. Closing a same-WASM rail in another tab changes nothing. A
+restarted watcher begins with zero rows until a new trusted start arrives. A
+daemon left alive by silent pane loss is not authority and may remain only
+until the next lifecycle check or explicit harness cleanup.
 
-Verified by: one native lifecycle matrix with monotonic timestamps, watcher
-PID/socket absence, exact pane/tab/rail inventories, screens, and focus state.
-It includes original-rail removal, bystander-rail removal, PID kill, and
-restart-without-hook, and asserts no registry file can rehydrate the row.
+Verified by: one native lifecycle matrix with monotonic timestamps, exact
+pane/tab/rail inventories, screens, focus state, explicit owned-process
+cleanup, and socket absence after cleanup. It includes original-rail removal,
+bystander-rail removal, PID kill, and restart-without-hook, and asserts no
+registry file can rehydrate the row.
 
 **AC-O5 — managed ownership and bounded host calls survive the simplification.**
 Literal `Alt /` still changes only the V3-proved managed rail; a same-WASM
-lookalike remains byte-identical. While two watchers are idle, each native
-probe omits command, geometry, CWD, scrollback, and process metadata and returns
-within its inner timeout; queued `Alt p`/`Alt n` actions are not delayed beyond
-the no-watcher control by more than 500 ms.
+lookalike remains byte-identical. Idle watchers issue no native pane query;
+their 1.4-second lease heartbeat does not request plugin output. Startup and
+full-snapshot probes omit command, geometry, CWD, scrollback, and process
+metadata and remain bounded. Queued `Alt p`/`Alt n` actions are not delayed
+beyond the no-watcher control by more than 500 ms.
 
 Verified by: retained managed-tab smokes plus an argv-recording fake and the
 disposable Zellij latency control. Pane/tab/layout digests and key-action
@@ -569,8 +596,9 @@ old hook event fails the demo.
    generation/lease matrices and “test passes while row is stale/actionable”
    adversarial assertions.
 5. Rewrite the two-tab native smoke around manual watcher commands and exact
-   `1/1/0`; add watcher/pane/tab/original-rail loss, bystander rail, restart
-   empty, latency control, cleanup, and no-registry assertions.
+   `1/1/0`; add watcher/pane/tab/original-rail visible-authority loss,
+   bystander rail, restart empty, latency control, explicit daemon cleanup,
+   and no-registry assertions. Silent pane loss must not depend on daemon exit.
 6. Delete registry/pruning/rehydration code and tests, then run Rust/Go/build,
    hook, entry, managed-tab, subscription, two-rail, latency, and `diff --check`
    packets. No Zellij case may skip or touch `WORK` or standing KDL.
@@ -706,3 +734,97 @@ Implementation established the native registration and exact pane-membership wal
 ### Summary
 
 Cycle 4 replaces KJ's persistent registry with the captain-approved manual tab-local watcher and records a passed invalidating spike for its exact live authority tuple. The design keeps the already-proved identity/projection/focus seams, adds leased fail-closed rendering, and moves every automatic or durable recovery concern to the filed follow-up without changing product code.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Replace the persistent registry and automatic subscriber with one
+  manually launched watcher whose authority is the inherited Zellij session,
+  terminal pane, stable tab, original rail, private socket, and one in-memory
+  top-level `SessionStart` registration.
+  Commits `5497cdb..838da0c` implement atomic hook admission, the bounded private
+  transport, exact live-tuple resolution, exact AgentsView lookup, acknowledged
+  leased snapshots, readiness handoff, the manual CLI journey, and deletion of
+  the automatic subscriber authority. No registry or rehydration state remains.
+- DONE: Preserve exact tab-local projection and focus with fail-closed lifecycle
+  behavior.
+  The two-rail native packet proves same-CWD cardinality `1/1/0`, exact endpoint
+  selection, exact watched-pane focus, bystander isolation, watcher restart
+  empty, manifest-owned silent-loss clearing, and explicit best-effort daemon
+  and socket cleanup. Rust tests prove atomic generation replacement, expiry,
+  absent-pane clearing, late-heartbeat rejection, and focus denial.
+- DONE: Correct AC-O5 at the exact blocking boundary without adding a second
+  authority or recovery layer.
+  Classification: NARROW FIX — OUTCOME DEFECT; affected value criterion AC-O5.
+  Commit `97c2d5461421af686e47743daa3e97bdc20b620c` removes recurring native
+  inventory probes from idle renewal and reuses the recipient/generation
+  heartbeat plus the plugin's exact manifest and 2.5-second lease. Commit
+  `dec685e8cf6efbc84ef2b26f60a81e4eda9aacf5` sets a 1.4-second heartbeat,
+  retains 1.1 seconds of lease slack, adds a one-second delivery-delay matrix,
+  and makes the responsive-proof refresh selector atomic. Startup,
+  hook/data-change full delivery, and cleanup retain bounded native checks;
+  silent daemon teardown remains non-authoritative and best effort per AC-O4.
+- DONE: Update the operator and proof documentation for the accepted manual
+  journey and lease ownership.
+  README, the live-demo guide, the tmux harness guide, and `grout/README.md`
+  describe watcher-before-Codex ordering, exact hook identity, empty restart,
+  no idle native polling, the 1.4-second heartbeat, 2.5-second expiry, and the
+  filed automation/recovery boundary.
+- SKIPPED: AC-I1 captain-live observation.
+  The implementation stage completed the agent-reproducible AC-O1 through
+  AC-O6 packet. AC-I1 remains explicitly captain-live and does not gate this
+  worker's offline implementation report.
+
+### TDD and verification evidence
+
+- Reds preceded the watcher registrar, socket transport, exact live authority,
+  leased/acknowledged snapshots, manual lifecycle/CLI/readiness, outside-Zellij
+  hook no-op, two-watcher native journey, heartbeat pacing, idle-poll removal,
+  delayed-renewal slack, and atomic in-flight refresh selection.
+- `go test ./...` and `go vet ./...` passed in `grout`.
+- `cargo test -q` passed 145/145 and `cargo check --tests` passed.
+- `tests/build-artifact-test.sh`, `tests/codex-session-hook-test.sh`,
+  `tests/zellij-new-tab-test.sh`, `tests/zellij-responsive-proof-test.sh`, and
+  `tests/sidebar-scrollback-docs-test.sh` passed.
+- `tests/zellij-watcher-lifecycle-smoke-test.sh` passed for outside- and
+  inside-Zellij callers. `tests/zellij-two-rail-recipient-smoke-test.sh` passed
+  exact `1/1/0`, focus, restart-empty, manifest-loss, and cleanup assertions.
+- `tests/zellij-sidebar-congestion-test.sh` passed the literal one-second
+  action deadline and injected timeout cleanup. The four-case
+  `tests/zellij-stress-evidence-test.sh` packet passed lifecycle failure,
+  native-command hang, vanished startup, and inconclusive-cleanup cases.
+- `git diff --check` passed. Repeated back-to-back native harness runs can
+  exhaust disposable Zellij fixture readiness; each affected packet passed in
+  isolation and no product assertion was weakened to mask that fixture-load
+  behavior.
+
+### Review evidence
+
+- Exact-head quick panel parent 1411/member 1410 reviewed
+  `dec685e8cf6efbc84ef2b26f60a81e4eda9aacf5` and returned P: “No issues
+  found.” Its prior exact-head round at `97c2d54` identified insufficient lease
+  slack; `dec685e` is the accepted correction and adds the delayed-delivery
+  regression.
+- The first authoritative `code_completion` launch on the standing Roborev
+  daemon, job 1415, failed before review because the Codex runtime rejected the
+  incompatible combination `features.multi_agent_v2` plus
+  `agents.max_threads`. No product verdict was produced.
+- A clean isolated Roborev v0.62.0 daemon used the same repository panel and a
+  compatible temporary Codex profile without changing standing configuration.
+  Its first panel surfaced two Medium claims that contradicted the approved
+  contract: automatic watcher launch is explicitly deferred, and `Stop` or an
+  idle/completed exact session is explicitly not deregistration. The response
+  also noted that one member had failed to read the repository.
+- Re-evaluation run `ecc48d63-e2cc-4074-9479-33d3122821b1` reviewed
+  `main..dec685e`; correctness job 5, journey job 6, proof job 7, and synthesis
+  parent 8 all returned P. The authoritative synthesis verdict was “No issues
+  found.”
+
+### Summary
+
+Cycle-2 implementation delivers the captain-approved manual tab-local watcher
+without the rejected persistent registry or automatic recovery machinery. The
+exact session-to-pane join, stable recipient delivery, leased rendering, and
+exact focus are green. Idle authority renewal no longer calls synchronous
+native pane inventory, so the watcher does not multiply Zellij's slow pane
+metadata path; plugin manifest loss or heartbeat expiry removes visible and
+actionable authority while daemon cleanup remains explicitly best effort.
