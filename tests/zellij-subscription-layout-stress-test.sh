@@ -27,12 +27,13 @@ cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
     --target-dir "$REPO_ROOT/target" \
     --features host-kdl-validator --bin zaphod-kdl-validate
 
-run_case() {
+run_owned_case() {
     local name="$1"
+    local expected="$2"
+    shift 2
     local child watchdog status
     perl -MPOSIX -e 'defined POSIX::setsid() or die "setsid failed: $!"; exec @ARGV or die "exec failed: $!"' \
-        env ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
-        "$SCRIPT_DIR/zellij-subscription-lifecycle-smoke-test.sh" \
+        "$@" \
         > "$ROOT/$name.out" 2> "$ROOT/$name.err" &
     child=$!
     (
@@ -53,18 +54,31 @@ run_case() {
         sed -n '1,160p' "$ROOT/$name.err" >&2 || true
         return "$status"
     fi
-    grep -F 'PASS: outside foreground diagnosis and inside automatic subscriber handoff both completed' \
-        "$ROOT/$name.out" >/dev/null || return 1
-    printf 'PASS: %s lifecycle stress case\n' "$name"
+    grep -F "$expected" "$ROOT/$name.out" >/dev/null || return 1
+    printf 'PASS: %s native stress case\n' "$name"
 }
 
 for round in $(seq 1 "$SERIAL_ROUNDS"); do
-    run_case "serial-$round" || fail "serial lifecycle stress round $round failed"
+    run_owned_case "serial-$round" \
+        'PASS: outside foreground diagnosis and inside automatic subscriber handoff both completed' \
+        env ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
+        "$SCRIPT_DIR/zellij-subscription-lifecycle-smoke-test.sh" ||
+        fail "serial lifecycle stress round $round failed"
 done
 
-run_case concurrent-a &
+run_owned_case concurrent-foreground \
+    'PASS: outside caller with foreground target/zaphod subscribe' \
+    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+    ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
+    ZAPHOD_CALLER_ENV=outside ZAPHOD_SUBSCRIBER_MODE=foreground \
+    "$SCRIPT_DIR/zellij-tmux-smoke-test.sh" &
 pid_a=$!
-run_case concurrent-b &
+run_owned_case concurrent-automatic \
+    'PASS: inside caller with automatic target/zaphod subscribe' \
+    env ZELLIJ=0 ZELLIJ_SESSION_NAME=ambient-work ZELLIJ_PANE_ID=98765 \
+    ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
+    ZAPHOD_CALLER_ENV=inside ZAPHOD_SUBSCRIBER_MODE=automatic \
+    "$SCRIPT_DIR/zellij-tmux-smoke-test.sh" &
 pid_b=$!
 set +e
 wait "$pid_a"
@@ -72,7 +86,7 @@ status_a=$?
 wait "$pid_b"
 status_b=$?
 set -e
-[ "$status_a" -eq 0 ] || fail "concurrent lifecycle stress A failed"
-[ "$status_b" -eq 0 ] || fail "concurrent lifecycle stress B failed"
+[ "$status_a" -eq 0 ] || fail "concurrent foreground stress failed"
+[ "$status_b" -eq 0 ] || fail "concurrent automatic stress failed"
 
 echo "PASS: repeated serial and concurrent layout lifecycle stress completed"
