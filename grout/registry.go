@@ -134,6 +134,16 @@ func (s agentRegistryStore) registryPath(zellijSession string) string {
 	return filepath.Join(s.root, "session-"+hex.EncodeToString(digest[:])+".json")
 }
 
+func defaultAgentRegistryDir() string {
+	if value := os.Getenv("ZAPHOD_REGISTRY_DIR"); value != "" {
+		return value
+	}
+	if value := os.Getenv("XDG_RUNTIME_DIR"); value != "" {
+		return filepath.Join(value, "zaphod", "agent-sessions-v1")
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("zaphod-agent-sessions-v1-%d", os.Getuid()))
+}
+
 func (s agentRegistryStore) lockPath(zellijSession string) string {
 	return s.registryPath(zellijSession) + ".lock"
 }

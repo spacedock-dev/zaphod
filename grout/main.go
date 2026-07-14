@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -98,6 +99,43 @@ func run(cfg Config, stderr io.Writer) error {
 
 func subscribeUsage(stderr io.Writer) {
 	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL --checkout-cwd PATH --recipient-token TOKEN")
+	fmt.Fprintln(stderr, "       zaphod register-agent-session [--registry-dir DIR]")
+}
+
+func runRegisterAgentSession(args []string, stdin io.Reader, stderr io.Writer) error {
+	flags := flag.NewFlagSet("zaphod register-agent-session", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	registryDir := flags.String("registry-dir", defaultAgentRegistryDir(), "private agent-session registry root")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return fmt.Errorf("register-agent-session accepts flags only")
+	}
+	zellijSession := os.Getenv("ZELLIJ_SESSION_NAME")
+	paneID := os.Getenv("ZELLIJ_PANE_ID")
+	if zellijSession == "" && paneID == "" {
+		return nil
+	}
+	if zellijSession == "" || paneID == "" {
+		return fmt.Errorf("register-agent-session requires both ZELLIJ_SESSION_NAME and ZELLIJ_PANE_ID")
+	}
+	if !filepath.IsAbs(*registryDir) {
+		return fmt.Errorf("register-agent-session registry directory must be absolute")
+	}
+	const maxHookBytes = 1 << 20
+	payload, err := io.ReadAll(io.LimitReader(stdin, maxHookBytes+1))
+	if err != nil {
+		return fmt.Errorf("read Codex hook: %w", err)
+	}
+	if len(payload) > maxHookBytes {
+		return fmt.Errorf("Codex hook exceeds %d bytes", maxHookBytes)
+	}
+	registration, err := decodeCodexRegistration(payload, zellijSession, paneID, os.Getpid(), time.Now())
+	if err != nil {
+		return err
+	}
+	return (agentRegistryStore{root: *registryDir}).upsert(registration)
 }
 
 func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error) {
@@ -164,7 +202,20 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 }
 
 func runMain(args []string, stderr io.Writer) int {
-	if len(args) == 0 || args[0] != "subscribe" {
+	if len(args) == 0 {
+		subscribeUsage(stderr)
+		return 2
+	}
+	if args[0] == "register-agent-session" {
+		if err := runRegisterAgentSession(args[1:], os.Stdin, stderr); err != nil {
+			if !errors.Is(err, flag.ErrHelp) {
+				fmt.Fprintln(stderr, err)
+			}
+			return 1
+		}
+		return 0
+	}
+	if args[0] != "subscribe" {
 		subscribeUsage(stderr)
 		return 2
 	}
