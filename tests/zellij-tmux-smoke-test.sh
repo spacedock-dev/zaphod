@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 # shellcheck source=scripts/zellij-layout-lib.sh
 source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
+# shellcheck source=tests/helpers/zellij-responsive-proof-lib.sh
+source "$SCRIPT_DIR/helpers/zellij-responsive-proof-lib.sh"
 
 # A smoke launched from a loaded Zellij pane must not carry that client's
 # identity into its disposable server or native CLI calls.
@@ -748,6 +750,22 @@ assert_one_new_terminal_in_tab() {
         fail "$label did not add exactly one terminal identity to managed tab $expected_tab"
 }
 
+assert_existing_pane_tuples_preserved() {
+    local label="$1"
+    local before="$2"
+    local after="$3"
+    zaphod_existing_pane_tuples_preserved "$before" "$after" ||
+        fail "$label changed an existing pane ID/plugin/tab/URL tuple"
+}
+
+assert_pane_tuple_inventory_unchanged() {
+    local label="$1"
+    local before="$2"
+    local after="$3"
+    zaphod_pane_tuple_inventories_equal "$before" "$after" ||
+        fail "$label changed the native pane tuple inventory"
+}
+
 capture_validated_layout() {
     local panes="$1"
     local layout="$2"
@@ -1360,6 +1378,9 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
         assert_one_new_terminal_in_tab "literal Alt p $RESPONSIVE_PANE_INDEX" \
             "$ROOT/responsive-panes-before-key.json" \
             "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" "$TAB_ID"
+        assert_existing_pane_tuples_preserved "literal Alt p $RESPONSIVE_PANE_INDEX" \
+            "$ROOT/responsive-panes-before-key.json" \
+            "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json"
         cp "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" \
             "$ROOT/responsive-panes-before-key.json"
     done
@@ -1376,11 +1397,17 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     assert_one_new_terminal_in_tab "literal Alt n" \
         "$ROOT/responsive-pane-3-panes.json" "$ROOT/responsive-new-tab-panes.json" \
         "$RESPONSIVE_NEW_TAB_ID"
+    assert_existing_pane_tuples_preserved "literal Alt n" \
+        "$ROOT/responsive-pane-3-panes.json" "$ROOT/responsive-new-tab-panes.json"
 
     send_literal "$(printf '\0331')"
     wait_for_exact_action_state tab-1 "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$FOREIGN_TAB_ID" 1
+    assert_pane_tuple_inventory_unchanged "literal Alt 1" \
+        "$ROOT/responsive-new-tab-panes.json" "$ROOT/responsive-tab-1-panes.json"
     send_literal "$(printf '\0332')"
     wait_for_exact_action_state tab-2 "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1
+    assert_pane_tuple_inventory_unchanged "literal Alt 2" \
+        "$ROOT/responsive-tab-1-panes.json" "$ROOT/responsive-tab-2-panes.json"
 
     RESPONSIVE_PLUGIN_ID="$(jq -er --arg wasm_url "$WASM_URL" \
         '[.[] | select(.is_plugin and .plugin_url == $wasm_url)] | if length == 1 then .[0].id else error("candidate cardinality") end' \
