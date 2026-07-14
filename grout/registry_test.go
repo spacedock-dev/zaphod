@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -202,5 +203,18 @@ func TestRegistryPruneStaleRemovesOnlyAbsentPanes(t *testing.T) {
 	}
 	if len(snapshot.Registrations) != 1 || snapshot.Registrations[0].PaneID != 7 {
 		t.Fatalf("pruned snapshot = %#v, want only live pane 7", snapshot)
+	}
+}
+
+func TestRegistryReadRejectsOverLimitFile(t *testing.T) {
+	store := agentRegistryStore{root: t.TempDir()}
+	if err := store.prepareRoot(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.registryPath("managed"), bytes.Repeat([]byte(" "), (1<<20)+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.read("managed"); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("over-limit registry error = %v", err)
 	}
 }
