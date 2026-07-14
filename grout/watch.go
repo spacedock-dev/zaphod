@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,7 +110,7 @@ func watchSocketPath(root, zellijSession, paneValue string) (string, error) {
 		return "", err
 	}
 	digest := sha256.Sum256([]byte(zellijSession + "\x00" + paneValue))
-	path := filepath.Join(root, "watch-"+hex.EncodeToString(digest[:])+".sock")
+	path := filepath.Join(root, "w-"+base64.RawURLEncoding.EncodeToString(digest[:])+".sock")
 	// Darwin's sockaddr_un.sun_path is 104 bytes including its terminating NUL.
 	if len(path) > 103 {
 		return "", fmt.Errorf("watch socket path exceeds 103 bytes")

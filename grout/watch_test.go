@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,17 @@ func TestWatchSocketPathIsExactPrivatePaneIdentity(t *testing.T) {
 	}
 	if filepath.Dir(one) != root || !strings.HasSuffix(one, ".sock") || len(one) > 103 {
 		t.Fatalf("socket path is not a short child of its private root: %q", one)
+	}
+}
+
+func TestWatchSocketPathFitsShippedDefaultRoot(t *testing.T) {
+	root := filepath.Join("/tmp", fmt.Sprintf("zaphod-watch-tab-v1-%d", os.Getuid()))
+	path, err := watchSocketPath(root, "kj-live-1784045584", "2")
+	if err != nil {
+		t.Fatalf("shipped default root %q: %v", root, err)
+	}
+	if len(path) > 103 {
+		t.Fatalf("socket path length = %d, want at most 103: %q", len(path), path)
 	}
 }
 
