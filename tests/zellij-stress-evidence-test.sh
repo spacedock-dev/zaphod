@@ -107,3 +107,36 @@ grep -F 'tmux_alive_after=0' \
 [ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "native hang changed standing layout"
 
 echo "PASS: native command hang fails at its inner deadline with retained cleanup evidence"
+
+STARTUP_EVIDENCE="$ROOT/startup-evidence"
+STARTUP_OUT="$ROOT/startup.out"
+STARTUP_ERR="$ROOT/startup.err"
+set +e
+ZAPHOD_LAYOUT_STRESS_EVIDENCE_DIR="$STARTUP_EVIDENCE" \
+ZAPHOD_SMOKE_INJECT_STARTUP_EXIT=42 \
+ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS=30 \
+ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS=1 \
+    "$SCRIPT_DIR/zellij-subscription-layout-stress-test.sh" > "$STARTUP_OUT" 2> "$STARTUP_ERR"
+startup_status=$?
+set -e
+
+[ "$startup_status" -ne 0 ] || fail "injected tmux-hosted startup exit unexpectedly passed"
+grep -F 'tmux-host-exited-before-session-ready: pane_dead_status=42' \
+    "$STARTUP_EVIDENCE/serial-1/case.stderr" >/dev/null ||
+    fail "vanished startup did not report the retained tmux pane exit"
+grep -F 'phase=session-ready-wait' \
+    "$STARTUP_EVIDENCE/serial-1/outside-foreground/phase.log" >/dev/null ||
+    fail "vanished startup bundle omitted the readiness phase"
+grep -F 'injected startup exit 42' \
+    "$STARTUP_EVIDENCE/serial-1/outside-foreground/tmux-pane.txt" >/dev/null ||
+    fail "vanished startup bundle omitted the dead pane output"
+grep -F 'session_alive_after=0' \
+    "$STARTUP_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
+    fail "vanished startup cleanup left a Zellij session alive"
+grep -F 'tmux_alive_after=0' \
+    "$STARTUP_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
+    fail "vanished startup cleanup left the tmux server alive"
+[ "$(file_state "$STANDING_CONFIG")" = "$CONFIG_BEFORE" ] || fail "startup exit changed standing config"
+[ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "startup exit changed standing layout"
+
+echo "PASS: vanished startup reports retained pane exit evidence and cleans up"
