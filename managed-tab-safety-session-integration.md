@@ -828,3 +828,35 @@ exact focus are green. Idle authority renewal no longer calls synchronous
 native pane inventory, so the watcher does not multiply Zellij's slow pane
 metadata path; plugin manifest loss or heartbeat expiry removes visible and
 actionable authority while daemon cleanup remains explicitly best effort.
+
+## Stage Report: validation
+
+- DONE: Independently reproduce AC-O1 through AC-O6 from the frozen
+  implementation head and map each criterion to concrete rerun evidence.
+  At `dec685e8cf6efbc84ef2b26f60a81e4eda9aacf5`, Go, Rust, build, hook,
+  entry, two-rail, lifecycle, congestion, and four stress packets passed;
+  `gates/managed-tab-safety-session-integration-validation.md` maps each AC.
+- DONE: Verify the stored exact-head code_completion packet, then run the
+  required adversarial refutation audit on a throwaway checkout without
+  changing the implementation worktree.
+  Archived raw parent 8 covers `9343129..dec685e`, names `code_completion`,
+  contains correctness 5, journey 6, and proof 7 once each at P/done, and is
+  P; three throwaway mutations went red at exact binding, atomic record
+  validation, and stale-lease boundaries, with three additional named attacks.
+- DONE: Prepare the exact captain-live AC-I1 demo and a Subspace gate record
+  that distinguishes offline proof from the captain's observation.
+  `gates/managed-tab-safety-session-integration.md` validates as a Subspace v0
+  brief and points to the exact fresh-session script; AC-I1 is explicitly
+  PENDING until the captain reports the live result and emits the decision log.
+- SKIPPED: Run or claim the AC-I1 captain-live observation.
+  The workflow makes the captain the validator for this floating-TUI journey;
+  this worker prepared the demo but did not substitute harness evidence for it.
+
+### Summary
+
+All six offline criteria pass independent validation, and the exact-head
+Roborev panel is verified from its immutable raw tool result. The removed
+isolated daemon endpoint is an evidence-retention defect only; validation
+added no controller and reran no green panel. The gate is ready for the
+captain's two-tab manual watcher demo, after which its Subspace decision log
+will record the live outcome.
