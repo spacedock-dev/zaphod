@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -141,6 +142,19 @@ type WatchCommandConfig struct {
 	WatchConfig
 	Foreground bool
 	StartupFD  int
+}
+
+func watchDaemonChildArgs(args []string, startupFD int) ([]string, error) {
+	for _, arg := range args {
+		if arg == "--foreground" || arg == "--startup-fd" || strings.HasPrefix(arg, "--startup-fd=") {
+			return nil, fmt.Errorf("watch-tab daemon caller cannot set internal flag %s", arg)
+		}
+	}
+	child := make([]string, 0, len(args)+4)
+	child = append(child, "watch-tab")
+	child = append(child, args...)
+	child = append(child, "--foreground", "--startup-fd", strconv.Itoa(startupFD))
+	return child, nil
 }
 
 func defaultWatchRoot() string {
