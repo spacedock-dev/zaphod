@@ -183,3 +183,21 @@ func TestWatchDaemonChildArgsAreSingleForegroundGeneration(t *testing.T) {
 		}
 	}
 }
+
+func TestLaunchWatchDaemonReturnsOnlyAfterChildReadiness(t *testing.T) {
+	child := writeScript(t, t.TempDir(), "watch-child", "#!/bin/sh\nprintf 'ready\\n' >&3\n")
+	var stderr bytes.Buffer
+	if err := launchWatchDaemon(child, []string{"--server", "http://127.0.0.1:8080"}, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"watch-tab ready", "pid="} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("daemon report %q missing %q", stderr.String(), want)
+		}
+	}
+
+	unready := writeScript(t, t.TempDir(), "watch-child", "#!/bin/sh\nexit 0\n")
+	if err := launchWatchDaemon(unready, nil, &bytes.Buffer{}); err == nil {
+		t.Fatal("daemon child exit before readiness succeeded")
+	}
+}
