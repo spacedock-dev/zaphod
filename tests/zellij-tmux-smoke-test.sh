@@ -275,7 +275,7 @@ cleanup() {
     local tmux_server_unreachable_after=0
     local tmux_server_pid="" tmux_server_pid_alive_after=0 tmux_socket_removed_after=0
     local tmux_absence_basis="unproven"
-    local config_after layout_after
+    local config_after layout_after _cleanup_attempt
     trap - EXIT INT TERM HUP
     set +e
     record_precleanup_evidence "$status"
@@ -297,9 +297,11 @@ cleanup() {
                 > "$ROOT/tmux-probe.stdout" 2> "$ROOT/tmux-probe.stderr"
         fi
         tmux_probe_status_after=$?
-        if pid_is_alive "$tmux_server_pid"; then
-            tmux_server_pid_alive_after=1
-        fi
+        for _cleanup_attempt in $(seq 1 20); do
+            pid_is_alive "$tmux_server_pid" || break
+            sleep 0.05
+        done
+        pid_is_alive "$tmux_server_pid" && tmux_server_pid_alive_after=1
         case "$tmux_probe_status_after" in
             0)
                 echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
