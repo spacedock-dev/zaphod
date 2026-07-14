@@ -126,7 +126,6 @@ struct Sidebar {
 trait StatusRefreshHost {
     fn running_command(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
     fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String>;
-    fn viewport(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
 }
 
 struct ZellijStatusRefreshHost;
@@ -138,10 +137,6 @@ impl StatusRefreshHost for ZellijStatusRefreshHost {
 
     fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String> {
         get_pane_cwd(pane_id)
-    }
-
-    fn viewport(&mut self, pane_id: PaneId) -> Result<Vec<String>, String> {
-        get_pane_scrollback(pane_id, false).map(|contents| contents.viewport)
     }
 }
 
@@ -1217,7 +1212,7 @@ impl Sidebar {
                     changed = true;
                 }
             }
-            let viewport = host.viewport(pane_id);
+            let viewport = Err("pane scrollback unavailable during periodic refresh".to_owned());
             state.record(command.is_err());
             let enriched = agent::enrich_fields(&row.agent, &row.title, command, viewport);
             if enriched != row.agent {
@@ -2915,10 +2910,6 @@ mod tests {
             Ok(PathBuf::from("/shared"))
         }
 
-        fn viewport(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
-            self.scrollback_calls += 1;
-            Err("scrollback trap invoked".to_owned())
-        }
     }
 
     #[test]
@@ -2968,16 +2959,8 @@ mod tests {
             release: mpsc::Receiver<()>,
         }
 
-        impl StatusRefreshHost for BlockingScrollback {
-            fn running_command(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
-                unreachable!()
-            }
-
-            fn cwd(&mut self, _pane_id: PaneId) -> Result<PathBuf, String> {
-                unreachable!()
-            }
-
-            fn viewport(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+        impl BlockingScrollback {
+            fn invoke(self) -> Result<Vec<String>, String> {
                 self.entered.send(()).unwrap();
                 self.release.recv().unwrap();
                 Err("released trap".to_owned())
@@ -2988,11 +2971,11 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel();
         let (done_tx, done_rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let mut host = BlockingScrollback {
+            let host = BlockingScrollback {
                 entered: entered_tx,
                 release: release_rx,
             };
-            let _ = host.viewport(PaneId::Terminal(1));
+            let _ = host.invoke();
             done_tx.send(()).unwrap();
         });
 
