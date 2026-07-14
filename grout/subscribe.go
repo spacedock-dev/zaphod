@@ -67,6 +67,7 @@ type SubscribeConfig struct {
 	afterTokenPendingClear func()
 	recipientWaitTimeout   time.Duration
 	nativeDiagnostics      io.Writer
+	trustedRailPaneID      *uint64
 }
 
 type zellijPane struct {
@@ -82,6 +83,7 @@ type zellijPane struct {
 type targetSnapshot struct {
 	paneTabs            map[uint32]uint64
 	paneSnapshotStarted time.Time
+	railPaneID          uint64
 }
 
 type registeredSession struct {
@@ -206,7 +208,11 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 		return targetSnapshot{}, err
 	}
 	paneSnapshotStarted := time.Now().UTC()
-	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--state", "--tab")
+	paneArgs := []string{"action", "list-panes", "--json", "--state", "--tab"}
+	if cfg.trustedRailPaneID == nil {
+		paneArgs = append(paneArgs, "--all")
+	}
+	args := cfg.zellijArgs(paneArgs...)
 	var output []byte
 	var panes []zellijPane
 	var stderrOutput string
@@ -268,12 +274,17 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 		}
 	}
 	resident := 0
+	var railPaneID uint64
 	terminals := 0
 	paneTabs := make(map[uint32]uint64)
 	for _, pane := range panes {
-		if pane.TabID == stableTabID && pane.IsPlugin && pane.PluginURL != nil && *pane.PluginURL == cfg.RailURL &&
-			!pane.IsFloating && !pane.IsSuppressed {
+		railMatches := cfg.trustedRailPaneID != nil && pane.ID == *cfg.trustedRailPaneID
+		if cfg.trustedRailPaneID == nil {
+			railMatches = pane.PluginURL != nil && *pane.PluginURL == cfg.RailURL
+		}
+		if pane.TabID == stableTabID && pane.IsPlugin && railMatches && !pane.IsFloating && !pane.IsSuppressed {
 			resident++
+			railPaneID = pane.ID
 		}
 		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed {
 			if pane.ID > uint64(^uint32(0)) {
@@ -295,7 +306,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 	if terminals == 0 {
 		return targetSnapshot{}, fmt.Errorf("%w: stable tab %d has no selectable terminal", ErrTargetLost, stableTabID)
 	}
-	return targetSnapshot{paneTabs: paneTabs, paneSnapshotStarted: paneSnapshotStarted}, nil
+	return targetSnapshot{paneTabs: paneTabs, paneSnapshotStarted: paneSnapshotStarted, railPaneID: railPaneID}, nil
 }
 
 func serverEndpoint(serverURL, suffix string) (string, error) {
@@ -782,9 +793,11 @@ func runSubscribe(ctx context.Context, cfg SubscribeConfig, stderr io.Writer) er
 		cfg.RefreshInterval = 2 * time.Second
 	}
 	cfg.nativeDiagnostics = stderr
-	if _, err := probeTarget(ctx, cfg, stableTabID); err != nil {
+	target, err := probeTarget(ctx, cfg, stableTabID)
+	if err != nil {
 		return err
 	}
+	cfg.trustedRailPaneID = &target.railPaneID
 	client := &http.Client{}
 	err = streamEvents(ctx, client, cfg, stableTabID, stderr)
 	if ctx.Err() != nil {
