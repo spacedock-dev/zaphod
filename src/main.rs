@@ -123,6 +123,28 @@ struct Sidebar {
     pane_cwds: BTreeMap<u32, PathBuf>,
 }
 
+trait StatusRefreshHost {
+    fn running_command(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
+    fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String>;
+    fn viewport(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
+}
+
+struct ZellijStatusRefreshHost;
+
+impl StatusRefreshHost for ZellijStatusRefreshHost {
+    fn running_command(&mut self, pane_id: PaneId) -> Result<Vec<String>, String> {
+        get_pane_running_command(pane_id)
+    }
+
+    fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String> {
+        get_pane_cwd(pane_id)
+    }
+
+    fn viewport(&mut self, pane_id: PaneId) -> Result<Vec<String>, String> {
+        get_pane_scrollback(pane_id, false).map(|contents| contents.viewport)
+    }
+}
+
 // One pane's status-poll backoff. get_pane_running_command's timeout Err is
 // the same shape as not-found, so a naive poll retries a stuck pane every
 // timer forever, each retry blocking the plugin thread on a ps fork. After a
@@ -1134,6 +1156,10 @@ impl Sidebar {
     // Returns whether any row's agent fields or polled cwd changed (i.e. a
     // render is due — a cwd change can flip a session row's binding).
     fn refresh_statuses(&mut self) -> bool {
+        self.refresh_statuses_with(&mut ZellijStatusRefreshHost)
+    }
+
+    fn refresh_statuses_with(&mut self, host: &mut impl StatusRefreshHost) -> bool {
         let mut backoff = std::mem::take(&mut self.poll_backoff);
         let live: std::collections::BTreeSet<u32> = self.rows.iter().map(|r| r.pane_id).collect();
         backoff.retain(|pane_id, _| live.contains(pane_id));
@@ -1152,7 +1178,7 @@ impl Sidebar {
                     std::thread::sleep(Duration::from_secs(secs));
                     Err("wedge drill".to_owned())
                 }
-                None => get_pane_running_command(pane_id),
+                None => host.running_command(pane_id),
             };
             if wedge_aborts_pass(started.elapsed()) {
                 // The wedged pane earned its backoff by stalling the pass,
@@ -1174,7 +1200,7 @@ impl Sidebar {
             // guard, so the guard is not trusted here either. A failed call
             // keeps the previous entry (stale-not-blank).
             let cwd_started = Instant::now();
-            let cwd = get_pane_cwd(pane_id);
+            let cwd = host.cwd(pane_id);
             if wedge_aborts_pass(cwd_started.elapsed()) {
                 state.record(true);
                 trace!(
@@ -1191,7 +1217,7 @@ impl Sidebar {
                     changed = true;
                 }
             }
-            let viewport = get_pane_scrollback(pane_id, false).map(|contents| contents.viewport);
+            let viewport = host.viewport(pane_id);
             state.record(command.is_err());
             let enriched = agent::enrich_fields(&row.agent, &row.title, command, viewport);
             if enriched != row.agent {
@@ -2870,6 +2896,113 @@ mod tests {
         // previous status on screen, never a blank).
         assert!(should_poll_statuses(Some(1), None, DOCKED_COLS));
         assert!(should_poll_statuses(None, None, DOCKED_COLS));
+    }
+
+    struct RecordingRefreshHost {
+        scrollback_calls: usize,
+    }
+
+    impl StatusRefreshHost for RecordingRefreshHost {
+        fn running_command(&mut self, pane_id: PaneId) -> Result<Vec<String>, String> {
+            match pane_id {
+                PaneId::Terminal(1) => Ok(vec!["codex".to_owned()]),
+                PaneId::Terminal(2) => Ok(vec!["bash".to_owned()]),
+                _ => Err("unexpected pane".to_owned()),
+            }
+        }
+
+        fn cwd(&mut self, _pane_id: PaneId) -> Result<PathBuf, String> {
+            Ok(PathBuf::from("/shared"))
+        }
+
+        fn viewport(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+            self.scrollback_calls += 1;
+            Err("scrollback trap invoked".to_owned())
+        }
+    }
+
+    #[test]
+    fn periodic_refresh_never_invokes_scrollback_and_degrades_exactly() {
+        let stale = agent::AgentFields {
+            kind: agent::AgentKind::Claude,
+            state: agent::AgentState::Blocked,
+            status: "allow command?".to_owned(),
+            running_command: Some(vec!["claude".to_owned()]),
+        };
+        let mut sidebar = Sidebar::default();
+        sidebar.rows = vec![
+            Row {
+                pane_id: 1,
+                title: "old title".to_owned(),
+                agent: stale,
+                ..Default::default()
+            },
+            Row {
+                pane_id: 2,
+                title: "plain shell".to_owned(),
+                ..Default::default()
+            },
+        ];
+        let mut host = RecordingRefreshHost { scrollback_calls: 0 };
+
+        assert!(sidebar.refresh_statuses_with(&mut host));
+
+        assert_eq!(host.scrollback_calls, 0, "periodic refresh started pane scrollback");
+        assert_eq!(sidebar.rows[0].agent.kind, agent::AgentKind::Codex);
+        assert_eq!(sidebar.rows[0].agent.state, agent::AgentState::Blocked);
+        assert_eq!(sidebar.rows[0].agent.status, "allow command?");
+        assert_eq!(agent::status_line(&sidebar.rows[1].agent, 80), "unknown . unknown");
+        assert_eq!(
+            bind_session("/shared", &sidebar.rows, &sidebar.pane_cwds),
+            None,
+            "ambiguous CWD must remain unbound"
+        );
+    }
+
+    #[test]
+    fn independent_watchdog_detects_a_bad_scrollback_fixture() {
+        use std::sync::mpsc;
+
+        struct BlockingScrollback {
+            entered: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+        }
+
+        impl StatusRefreshHost for BlockingScrollback {
+            fn running_command(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+                unreachable!()
+            }
+
+            fn cwd(&mut self, _pane_id: PaneId) -> Result<PathBuf, String> {
+                unreachable!()
+            }
+
+            fn viewport(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+                self.entered.send(()).unwrap();
+                self.release.recv().unwrap();
+                Err("released trap".to_owned())
+            }
+        }
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut host = BlockingScrollback {
+                entered: entered_tx,
+                release: release_rx,
+            };
+            let _ = host.viewport(PaneId::Terminal(1));
+            done_tx.send(()).unwrap();
+        });
+
+        entered_rx.recv_timeout(WEDGE_THRESHOLD).unwrap();
+        assert!(
+            done_rx.recv_timeout(WEDGE_THRESHOLD).is_err(),
+            "bad scrollback fixture unexpectedly beat the watchdog"
+        );
+        release_tx.send(()).unwrap();
+        worker.join().unwrap();
     }
 
     #[test]
