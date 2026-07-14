@@ -53,7 +53,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 			w.(http.Flusher).Flush()
 			<-r.Context().Done()
 		case "/api/v1/sessions/" + sessionID:
-			fmt.Fprintf(w, `{"id":%q,"agent":"codex","status":"working","latest_message":"KJ_WATCH_ROW"}`, sessionID)
+			fmt.Fprintf(w, `{"id":%q,"agent":"codex","first_message":"KJ_WATCH_ROW"}`, sessionID)
 		default:
 			http.NotFound(w, r)
 		}

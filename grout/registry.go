@@ -26,9 +26,13 @@ const agentRegistryVersion = 1
 var codexSessionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 type codexSessionStartHook struct {
-	SessionID     string `json:"session_id"`
-	HookEventName string `json:"hook_event_name"`
-	Source        string `json:"source"`
+	SessionID      string          `json:"session_id"`
+	TranscriptPath json.RawMessage `json:"transcript_path"`
+	Cwd            string          `json:"cwd"`
+	HookEventName  string          `json:"hook_event_name"`
+	Model          string          `json:"model"`
+	PermissionMode string          `json:"permission_mode"`
+	Source         string          `json:"source"`
 }
 
 type AgentPaneRegistrationV1 struct {
