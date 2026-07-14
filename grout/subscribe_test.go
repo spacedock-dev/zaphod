@@ -104,6 +104,7 @@ func TestTrustedRailProbeOmitsExpensivePaneMetadata(t *testing.T) {
 	dir := t.TempDir()
 	argsPath := filepath.Join(dir, "args")
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\n"+
+		"case \" $* \" in *' --tab '*) ;; *) exit 64 ;; esac\n"+
 		"cat <<'JSON'\n"+
 		`[{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},{"id":8,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`+"\nJSON\n")
 	railID := uint64(50)
@@ -121,6 +122,13 @@ func TestTrustedRailProbeOmitsExpensivePaneMetadata(t *testing.T) {
 	args, err := os.ReadFile(argsPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	hasTab := false
+	for _, arg := range strings.Fields(string(args)) {
+		hasTab = hasTab || arg == "--tab"
+	}
+	if !hasTab {
+		t.Fatalf("trusted membership poll omitted --tab annotation: %s", args)
 	}
 	for _, forbidden := range []string{"--all", "--command", "--geometry"} {
 		if strings.Contains(string(args), forbidden) {
