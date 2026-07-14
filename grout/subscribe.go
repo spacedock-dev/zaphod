@@ -300,8 +300,15 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 			}
 		}
 	}
-	if resident != 1 {
-		return targetSnapshot{}, fmt.Errorf("%w: expected one resident rail in stable tab %d, found %d", ErrTargetLost, stableTabID, resident)
+	if cfg.trustedRailPaneID == nil && resident != 1 {
+		return targetSnapshot{}, fmt.Errorf("%w: expected one resident rail in stable tab %d, found %d; %s",
+			ErrTargetLost, stableTabID, resident, nativePaneReplyProvenance(lastAttempt, output, stderrOutput))
+	}
+	if cfg.trustedRailPaneID != nil {
+		if resident > 1 {
+			return targetSnapshot{}, fmt.Errorf("%w: duplicate trusted rail pane %d", ErrTargetLost, *cfg.trustedRailPaneID)
+		}
+		railPaneID = *cfg.trustedRailPaneID
 	}
 	if terminals == 0 {
 		return targetSnapshot{}, fmt.Errorf("%w: stable tab %d has no selectable terminal", ErrTargetLost, stableTabID)

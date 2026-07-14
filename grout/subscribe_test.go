@@ -105,7 +105,7 @@ func TestTrustedRailProbeOmitsExpensivePaneMetadata(t *testing.T) {
 	argsPath := filepath.Join(dir, "args")
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\n"+
 		"cat <<'JSON'\n"+
-		`[{"id":50,"tab_id":73,"is_plugin":true,"is_floating":false,"is_suppressed":false},{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`+"\nJSON\n")
+		`[{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`+"\nJSON\n")
 	railID := uint64(50)
 	snapshot, err := probeTarget(context.Background(), SubscribeConfig{
 		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
