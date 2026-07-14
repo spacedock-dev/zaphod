@@ -608,6 +608,20 @@ test_tokenless_layout_render_preserves_installed_identity() {
     echo "PASS: tokenless render preserves fixed installed plugin identity"
 }
 
+test_direct_entry_injects_manual_watcher_route_without_starting_one() {
+    local script="$REPO_ROOT/scripts/zellij-new-tab.sh"
+    ! grep -E 'start_private_sidecar|[[:space:]]subscribe([[:space:]]|$)' "$script" >/dev/null ||
+        fail "direct entry still launches an automatic subscriber"
+    ! grep -F 'ZAPHOD_REGISTRY_DIR' "$script" >/dev/null ||
+        fail "direct entry still advertises persistent registry authority"
+    for name in ZAPHOD_WATCH_DIR ZAPHOD_AGENTSVIEW_URL ZAPHOD_RAIL_URL \
+        ZAPHOD_RECIPIENT_TOKEN ZAPHOD_ZELLIJ_CONFIG_DIR ZAPHOD_ZELLIJ_CONFIG_FILE \
+        ZAPHOD_ZELLIJ_DATA_DIR ZELLIJ_BIN; do
+        grep -F "$name=" "$script" >/dev/null || fail "managed terminal omits $name"
+    done
+    echo "PASS: direct entry injects the manual watcher route and starts no subscriber"
+}
+
 test_selected_checkout_creates_one_inline_tab_without_writes
 test_setup_failure_stops_before_new_tab
 test_new_tab_failure_leaves_standing_kdl_unchanged
@@ -622,3 +636,4 @@ test_empty_array_initial_tab_inventory_retries_before_creation
 test_inside_caller_identity_is_cleared_before_native_entry_calls
 test_ambiguous_tab_discovery_reports_bounded_native_provenance
 test_tokenless_layout_render_preserves_installed_identity
+test_direct_entry_injects_manual_watcher_route_without_starting_one
