@@ -233,6 +233,22 @@ beyond the pane, tab, switching, and delayed-burst behavior measured above.
 - A PASS parent may advance to validation. Another FAIL returns to the captain
   with the frozen head and surviving findings; do not launch a fifth panel.
 
+#### Convergence round 5 proof reframe authorized — 2026-07-14
+
+- Parent `1073` showed that incremental assertion repair is preserving the
+  wrong proof shape: whole-screen text, partial tuple predicates, and broad log
+  greps can all pass without proving the claimed pane or refresh event.
+- Keep the product behavior and operator-visible end value frozen. Reframe the
+  native proof around structured, pane-targeted observations: compare the full
+  relevant pane/sidebar state, parse an exact refresh record whose `pane_ids`
+  contains the fixture, and use a deterministic barrier that holds refresh
+  work in flight while measured keys are sent under the pre-send deadline.
+- The four parent-1073 findings are one proof-authority cluster and must be
+  eliminated atomically, including adjacent wrong-pane/wrong-field variants.
+  Run one final exact-head `code_completion` panel after the reframe. PASS may
+  advance to validation; FAIL returns to the captain and no further panel is
+  authorized.
+
 ## Stage Report: implementation
 
 - DONE: Prove red-first that a periodic refresh never invokes pane scrollback, while command/title classification and exact stale/unknown/unbound degradation remain correct.
