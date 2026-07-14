@@ -281,7 +281,7 @@ func parseWatchTabArgs(args []string, stderr io.Writer) (WatchCommandConfig, err
 				RecipientToken: values["ZAPHOD_RECIPIENT_TOKEN"], PipeTimeout: 5 * time.Second,
 				SourceTimeout: 5 * time.Second, SummaryClampBytes: 512,
 			},
-			PaneID: paneID, SocketRoot: *watchDir, Lease: 2500 * time.Millisecond, Heartbeat: 1800 * time.Millisecond,
+			PaneID: paneID, SocketRoot: *watchDir, Lease: 2500 * time.Millisecond, Heartbeat: 1400 * time.Millisecond,
 		},
 		Foreground: *foreground, StartupFD: *startupFD,
 	}, nil

@@ -173,8 +173,8 @@ func TestWatchTabArgsUseOnlyExplicitRouteContext(t *testing.T) {
 		cfg.RecipientToken != "token" || cfg.SocketRoot != watchDir || !cfg.Foreground {
 		t.Fatalf("watch config = %#v", cfg)
 	}
-	if cfg.Lease != 2500*time.Millisecond || cfg.Heartbeat != 1800*time.Millisecond {
-		t.Fatalf("watch cadence lease=%s heartbeat=%s, want 2.5s/1.8s", cfg.Lease, cfg.Heartbeat)
+	if cfg.Lease != 2500*time.Millisecond || cfg.Heartbeat != 1400*time.Millisecond {
+		t.Fatalf("watch cadence lease=%s heartbeat=%s, want 2.5s/1.4s", cfg.Lease, cfg.Heartbeat)
 	}
 }
 

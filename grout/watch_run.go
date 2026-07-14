@@ -48,7 +48,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		cfg.Lease = 2500 * time.Millisecond
 	}
 	if cfg.Heartbeat <= 0 {
-		cfg.Heartbeat = 1800 * time.Millisecond
+		cfg.Heartbeat = 1400 * time.Millisecond
 	}
 	if cfg.PipeTimeout <= 0 {
 		cfg.PipeTimeout = 5 * time.Second

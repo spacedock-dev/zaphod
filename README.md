@@ -160,7 +160,7 @@ Zellij, the hook exits successfully before it requires a built receiver.
 The watcher keeps one registration in memory. It fetches only
 `/api/v1/sessions/{codex:<SessionStart session_id>}` and sends leased snapshots
 to the exact recipient tab. Recipient- and generation-checked heartbeats renew
-the cached projection every 1.8 seconds without waiting for plugin output;
+the cached projection every 1.4 seconds without waiting for plugin output;
 new hook records and AgentsView data changes trigger exact fetches and
 acknowledged snapshots. A later SessionStart in the same terminal replaces
 the old row. Restart starts empty and requires a new SessionStart.

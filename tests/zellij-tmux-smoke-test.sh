@@ -355,7 +355,7 @@ cleanup() {
         if [ "$INJECT_CLEANUP_PROBE_HANG" = zellij ] || [ "$INJECT_CLEANUP_PROBE_HANG" = both ]; then
             bounded_exec 1 sleep 60 > "$ROOT/zellij-probe.stdout" 2> "$ROOT/zellij-probe.stderr"
         else
-            zellij_control_with_timeout 1 --session "$SESSION_NAME" action list-panes --json --all \
+            zellij_control_with_timeout 2 --session "$SESSION_NAME" action list-panes --json --all \
                 > "$ROOT/zellij-probe.stdout" 2> "$ROOT/zellij-probe.stderr"
         fi
         session_probe_status_after=$?
@@ -634,24 +634,15 @@ wait_for_next_in_flight_fixture_refresh() {
     local after_refresh_id="$3"
     local output="$4"
     local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
-    local records="$ROOT/fixture-refresh-starts.jsonl"
     local deadline now refresh_id
     deadline="$(( $(monotonic_ms) + 12000 ))"
     while :; do
         if [ -f "$plugin_log" ]; then
-            zaphod_refresh_log_records "$plugin_log" "$sidebar_id" start > "$records"
-            jq -sc --arg after "$after_refresh_id" --arg fixture "$fixture_id" '
-                [.[] | select(
-                    .refresh_id > ($after | tonumber)
-                    and any(.pane_ids[]; (tostring) == $fixture)
-                )] | last // empty
-            ' "$records" > "$output"
+            zaphod_next_in_flight_refresh_record "$plugin_log" "$sidebar_id" \
+                "$fixture_id" "$after_refresh_id" > "$output"
             if [ -s "$output" ]; then
                 refresh_id="$(jq -er '.refresh_id | tostring' "$output")"
-                if zaphod_refresh_id_is_in_flight \
-                    "$plugin_log" "$sidebar_id" "$refresh_id"; then
-                    return
-                fi
+                [ -n "$refresh_id" ] && return
             fi
         fi
         now="$(monotonic_ms)"

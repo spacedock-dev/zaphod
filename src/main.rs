@@ -3053,6 +3053,24 @@ mod tests {
     }
 
     #[test]
+    fn watcher_heartbeat_tolerates_one_second_delivery_delay_before_lease_expiry() {
+        let mut sidebar = Sidebar::default();
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
+        sidebar.rows = vec![cwd_row(4)];
+        let snapshot = format!("[{}]", session_line());
+        assert!(sidebar.pipe(agent_snapshot(Some(&snapshot), "73")));
+
+        let started = Instant::now();
+        sidebar.session_lease.as_mut().unwrap().deadline =
+            started + Duration::from_millis(2500);
+        let delayed = started + Duration::from_millis(2400);
+        let heartbeat = agent_heartbeat("73");
+        assert!(!sidebar.renew_session_lease_from_args(&heartbeat.args, delayed));
+        assert_eq!(sidebar.sessions.len(), 1);
+        assert!(sidebar.session_lease.as_ref().unwrap().deadline > delayed);
+    }
+
+    #[test]
     fn agent_event_lines_land_as_session_and_gate_rows() {
         let mut sidebar = Sidebar::default();
         arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);

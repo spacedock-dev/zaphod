@@ -135,6 +135,30 @@ zaphod_refresh_id_is_in_flight() {
         ' >/dev/null
 }
 
+zaphod_next_in_flight_refresh_record() {
+    local log="$1"
+    local plugin_id="$2"
+    local fixture_id="$3"
+    local after_refresh_id="$4"
+    zaphod_refresh_log_records "$log" "$plugin_id" "" |
+        jq -sc --arg after "$after_refresh_id" --arg fixture "$fixture_id" '
+            . as $events
+            | [$events[]
+                | select(
+                    .event == "start"
+                    and .refresh_id > ($after | tonumber)
+                    and any(.pane_ids[]; (tostring) == $fixture)
+                )
+                | . as $start
+                | select(
+                    ([$events[] | select(.refresh_id == $start.refresh_id and .event == "start")] | length) == 1
+                    and ([$events[] | select(.refresh_id == $start.refresh_id and (.event == "complete" or .event == "abort"))] | length) == 0
+                )
+              ]
+            | last // empty
+        '
+}
+
 zaphod_action_deadline_ms() {
     local monotonic_start_ms="$1"
     local threshold_secs="$2"

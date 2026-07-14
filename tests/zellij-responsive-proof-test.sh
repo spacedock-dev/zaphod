@@ -116,6 +116,22 @@ if zaphod_refresh_id_is_in_flight "$ROOT/in-flight.log" 9 6; then
     fail "an aborted refresh remained in flight"
 fi
 
+cat > "$ROOT/next-in-flight.log" <<'LOG'
+zaphod-trace[9]: zaphod-refresh {"event":"start","plugin_id":9,"refresh_id":7,"pane_ids":[7]}
+zaphod-trace[9]: zaphod-refresh {"event":"complete","plugin_id":9,"refresh_id":7,"pane_ids":[7]}
+zaphod-trace[9]: zaphod-refresh {"event":"start","plugin_id":9,"refresh_id":8,"pane_ids":[70]}
+zaphod-trace[9]: zaphod-refresh {"event":"start","plugin_id":9,"refresh_id":9,"pane_ids":[7]}
+LOG
+zaphod_next_in_flight_refresh_record "$ROOT/next-in-flight.log" 9 7 7 \
+    > "$ROOT/next-in-flight.json"
+[ "$(jq -r .refresh_id "$ROOT/next-in-flight.json")" = 9 ] ||
+    fail "atomic refresh selection did not return the exact live generation"
+printf '%s\n' \
+    'zaphod-trace[9]: zaphod-refresh {"event":"complete","plugin_id":9,"refresh_id":9,"pane_ids":[7]}' \
+    >> "$ROOT/next-in-flight.log"
+[ -z "$(zaphod_next_in_flight_refresh_record "$ROOT/next-in-flight.log" 9 7 7)" ] ||
+    fail "atomic refresh selection returned a completed or wrong-fixture generation"
+
 [ "$(zaphod_action_deadline_ms 42000 1)" = 43000 ] ||
     fail "the action deadline was not derived from the pre-send monotonic sample"
 zaphod_action_deadline_is_live 43000 42999 ||
