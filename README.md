@@ -8,10 +8,10 @@ tab and what does it want from me?**
 ```
 ┌ sidebar ──────────────┐
 │▾ PANES             ⇄ │
-│● codex literature   │   ← known agent from command/title
+│  codex literature   │   ← known agent from command/title
 │    unknown . codex  │   ← fresh pane has no viewport status
-│✓ claude planner     │   ← last known status remains stale
-│    idle . claude    │
+│  claude planner     │   ← title classification still works
+│    unknown . claude │
 │  clkao@mac:~/git/x    │
 │    unknown . unknown  │
 └───────────────────────┘
