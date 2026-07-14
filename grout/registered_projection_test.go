@@ -4,10 +4,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sync"
@@ -91,5 +93,40 @@ func TestFetchExactSessionRejectsMismatchedReturnedIdentity(t *testing.T) {
 	defer server.Close()
 	if _, err := fetchExactSession(context.Background(), server.Client(), server.URL, requested, time.Second); err == nil {
 		t.Fatal("mismatched exact response unexpectedly accepted")
+	}
+}
+
+func TestDeliverRegisteredSnapshotRechecksPaneMembershipAfterFetch(t *testing.T) {
+	dir := t.TempDir()
+	panesPath := filepath.Join(dir, "panes.json")
+	panes := `[
+      {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+      {"id":7,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+    ]`
+	if err := os.WriteFile(panesPath, []byte(panes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshotPath := filepath.Join(dir, "snapshot.json")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \"$*\" in\n"+
+		"  *list-panes*) cat "+panesPath+" ;;\n"+
+		"  *zaphod-agent-v1-*-snapshot*) cat > "+snapshotPath+"; echo accepted ;;\n"+
+		"esac\n")
+	const id = "codex:019f5f94-a596-7d92-9928-398653669161"
+	err := deliverRegisteredSnapshot(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d",
+		ZellijSession: "managed", TabID: "73", RailURL: "file:/candidate/zellij-sidebar.wasm",
+		CheckoutCWD: "/same/cwd", RecipientToken: "token", RegistryDir: filepath.Join(dir, "registry"),
+		PipeTimeout: time.Second,
+	}, 73, []registeredSession{{PaneID: 7, Session: sessionInfo{ID: id, Agent: "codex", FirstMessage: "stale"}}}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(payload) != "[]" {
+		t.Fatalf("moved pane produced stale snapshot %s, want []", payload)
 	}
 }
