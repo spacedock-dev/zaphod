@@ -50,6 +50,7 @@ type AgentRegistryV1 struct {
 type agentRegistryStore struct {
 	root         string
 	beforeRename func() error
+	lockTimeout  time.Duration
 }
 
 func validateZellijSession(value string) error {
@@ -187,8 +188,23 @@ func (s agentRegistryStore) withLock(zellijSession string, exclusive bool, fn fu
 	if exclusive {
 		operation = syscall.LOCK_EX
 	}
-	if err := syscall.Flock(int(lock.Fd()), operation); err != nil {
-		return fmt.Errorf("lock registry: %w", err)
+	lockTimeout := s.lockTimeout
+	if lockTimeout <= 0 {
+		lockTimeout = 500 * time.Millisecond
+	}
+	deadline := time.Now().Add(lockTimeout)
+	for {
+		err := syscall.Flock(int(lock.Fd()), operation|syscall.LOCK_NB)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return fmt.Errorf("lock registry: %w", err)
+		}
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("registry lock timeout after %s", lockTimeout)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) //nolint:errcheck
 	return fn()
