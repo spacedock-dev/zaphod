@@ -1321,9 +1321,9 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     wait_for_exact_action_state fixture-ready "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1
     RESPONSIVE_FIXTURE_NUM="${RESPONSIVE_FIXTURE_ID#terminal_}"
     jq -e --arg id "$RESPONSIVE_FIXTURE_NUM" \
-        'any(.[]; (.id | tostring) == $id and (.is_plugin | not) and (.exited | not) and .title == "zaphod-long-running-non-shell" and .terminal_command != null)' \
+        'any(.[]; (.id | tostring) == $id and (.is_plugin | not) and (.exited | not) and .title == "zaphod-long-running-non-shell" and (.terminal_command | tostring | contains("tail")))' \
         "$ROOT/responsive-fixture-ready-panes.json" >/dev/null ||
-        fail "non-shell fixture was not live in the native pane inventory"
+        fail "non-shell tail fixture was not live with its exact native command identity"
 
     sleep 2.1
     capture_settled_action_inventory responsive-after-timer \
