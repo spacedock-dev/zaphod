@@ -133,6 +133,27 @@ func TestRegistryConcurrentWritersRemainAtomicAndPrivate(t *testing.T) {
 	}
 }
 
+func TestRegistryUpsertStampsTheLockedCommit(t *testing.T) {
+	store := agentRegistryStore{root: t.TempDir()}
+	registration := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
+	registration.UpdatedAt = time.Unix(123, 0).UTC().Format(time.RFC3339Nano)
+	started := time.Now().UTC()
+	if err := store.upsert(registration); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.read("managed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, snapshot.Registrations[0].UpdatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedAt.Before(started) {
+		t.Fatalf("registry commit retained pre-lock timestamp %s before %s", updatedAt, started)
+	}
+}
+
 func TestRegistryCrashBeforeRenamePreservesCompletePriorGeneration(t *testing.T) {
 	store := agentRegistryStore{root: t.TempDir()}
 	const firstID = "019f5f94-a596-7d92-9928-398653669161"
