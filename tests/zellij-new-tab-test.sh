@@ -169,6 +169,7 @@ setup_fixture() {
     FAKE_ZELLIJ_SESSION="$root/fake-session"
     FAKE_ZELLIJ_NAME="$root/fake-name"
     FAKE_ZELLIJ_CWD="$root/fake-cwd"
+    FAKE_ZELLIJ_COMMAND="$root/fake-command"
     FAKE_ZELLIJ_LAYOUT="$root/fake-layout.kdl"
     FAKE_ZELLIJ_NEW_TAB_COUNT="$root/fake-new-tab-count"
     FAKE_ZELLIJ_LIST_TABS_COUNT="$root/fake-list-tabs-count"
@@ -202,6 +203,7 @@ run_entry() {
         FAKE_ZELLIJ_SESSION="$FAKE_ZELLIJ_SESSION" \
         FAKE_ZELLIJ_NAME="$FAKE_ZELLIJ_NAME" \
         FAKE_ZELLIJ_CWD="$FAKE_ZELLIJ_CWD" \
+        FAKE_ZELLIJ_COMMAND="$FAKE_ZELLIJ_COMMAND" \
         FAKE_ZELLIJ_LAYOUT="$FAKE_ZELLIJ_LAYOUT" \
         FAKE_ZELLIJ_NEW_TAB_COUNT="$FAKE_ZELLIJ_NEW_TAB_COUNT" \
         FAKE_ZELLIJ_LIST_TABS_COUNT="$FAKE_ZELLIJ_LIST_TABS_COUNT" \
@@ -212,7 +214,8 @@ run_entry() {
         ZELLIJ_CONFIG_DIR="$FIXTURE_CONFIG_DIR" \
         ZELLIJ_CONFIG_FILE="$FIXTURE_CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$FIXTURE_DATA_DIR" \
-		ZAPHOD_REGISTRY_DIR="$FIXTURE_DATA_DIR/agent-sessions-v1" \
+        ZAPHOD_REGISTRY_DIR="$FIXTURE_DATA_DIR/agent-sessions-v1" \
+        SHELL=/bin/sh \
         TMPDIR="$FIXTURE_TMP" \
         "$FIXTURE/scripts/zellij-new-tab.sh" "$@"
 }
@@ -298,6 +301,10 @@ test_selected_checkout_creates_one_inline_tab_without_writes() {
     [ "$(cat "$FAKE_ZELLIJ_SESSION")" = WORK ] || fail "new-tab used the wrong session"
     [ "$(cat "$FAKE_ZELLIJ_NAME")" = 'Zaphod fixture' ] || fail "new-tab used the wrong name"
     [ "$(cat "$FAKE_ZELLIJ_CWD")" = "$FIXTURE_PHYSICAL" ] || fail "new-tab used the wrong cwd"
+    [ -f "$FAKE_ZELLIJ_COMMAND" ] || fail "new-tab did not pass a managed shell command"
+    sed -n '3p' "$FAKE_ZELLIJ_COMMAND" | grep -Fx "ZAPHOD_REGISTRY_DIR=$FIXTURE_DATA_DIR/agent-sessions-v1" >/dev/null ||
+        fail "managed terminal did not inherit the sidecar registry root"
+    [ "$(sed -n '4p' "$FAKE_ZELLIJ_COMMAND")" = /bin/sh ] || fail "managed terminal did not preserve the selected shell"
     grep -Fx $'focus-pane-id\tWORK\tplugin_50' "$FAKE_ZELLIJ_CALLS" >/dev/null ||
         fail "entry point did not expose the exact verified plugin pane"
     grep -F "plugin location=\"$expected_url\"" "$FAKE_ZELLIJ_LAYOUT" >/dev/null ||
