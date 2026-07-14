@@ -1373,6 +1373,9 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
         "$ROOT/responsive-tabs-before-new.json"
     [[ "$RESPONSIVE_NEW_TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] ||
         fail "literal Alt n did not expose one stable active tab identity"
+    assert_one_new_terminal_in_tab "literal Alt n" \
+        "$ROOT/responsive-pane-3-panes.json" "$ROOT/responsive-new-tab-panes.json" \
+        "$RESPONSIVE_NEW_TAB_ID"
 
     send_literal "$(printf '\0331')"
     wait_for_exact_action_state tab-1 "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$FOREIGN_TAB_ID" 1
