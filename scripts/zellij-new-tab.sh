@@ -84,6 +84,35 @@ zellij_cmd() {
     "$ZELLIJ_BIN" "${ZELLIJ_ARGS[@]}" "$@"
 }
 
+capture_initial_tab_inventory() {
+    local output="$1"
+    local stderr_file="$2"
+    local attempt status provenance
+    for attempt in $(seq 1 20); do
+        status=0
+        ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
+            action list-tabs --json --all --state --layout > "$output" 2> "$stderr_file" || status=$?
+        if [ "$status" -ne 0 ] || [ -s "$output" ]; then
+            if [ "$status" -eq 0 ] && zaphod_valid_tab_inventory "$output"; then
+                return 0
+            fi
+            provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
+                "$status" "$output" "$stderr_file")"
+            printf 'tab-inventory-unready: %s\n' "$provenance" >&2
+            return 1
+        fi
+        if [ "$attempt" -lt 20 ]; then
+            sleep 0.05
+            continue
+        fi
+        provenance="$(zaphod_bounded_reply_provenance "list-tabs-before attempt=$attempt/20" \
+            "$status" "$output" "$stderr_file")"
+        printf 'tab-inventory-unready: persistent empty reply; %s\n' "$provenance" >&2
+        return 1
+    done
+    return 1
+}
+
 TEMP_ROOT=""
 RECIPIENT_TOKEN=""
 SIDECAR_PID=""
@@ -239,16 +268,7 @@ RECIPIENT_TOKEN="zaphod-$$-$RANDOM-$(date +%s)"
 zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" "$RENDERED_LAYOUT" "$RECIPIENT_TOKEN"
 zaphod_validate_layout_identity "$RENDERED_LAYOUT" "$WASM_URL"
 
-set +e
-ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
-    action list-tabs --json --all --state --layout > "$TABS_BEFORE" 2> "$TABS_BEFORE_STDERR"
-TABS_BEFORE_STATUS=$?
-set -e
-if [ "$TABS_BEFORE_STATUS" -ne 0 ] || ! zaphod_valid_tab_inventory "$TABS_BEFORE"; then
-    printf 'tab-inventory-unready: %s\n' \
-        "$(zaphod_bounded_reply_provenance list-tabs-before "$TABS_BEFORE_STATUS" "$TABS_BEFORE" "$TABS_BEFORE_STDERR")" >&2
-    exit 1
-fi
+capture_initial_tab_inventory "$TABS_BEFORE" "$TABS_BEFORE_STDERR" || exit 1
 set +e
 ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
     --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")" \

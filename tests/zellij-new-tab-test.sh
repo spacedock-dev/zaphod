@@ -77,7 +77,16 @@ write_fake_zellij() {
         '            [ -n "$session" ] || { printf "missing explicit session\\n" >&2; exit 64; }' \
         '            case "${2:-}" in' \
         '                list-panes) cat "$FAKE_ZELLIJ_PANES"; exit 0 ;;' \
-        '                list-tabs) cat "$FAKE_ZELLIJ_TABS"; exit 0 ;;' \
+        '                list-tabs)' \
+        '                    list_tabs_count_file="${FAKE_ZELLIJ_LIST_TABS_COUNT:-$FAKE_ZELLIJ_TABS.count}"' \
+        '                    count=0' \
+        '                    [ ! -f "$list_tabs_count_file" ] || count="$(cat "$list_tabs_count_file")"' \
+        '                    count=$((count + 1))' \
+        '                    printf "%s\n" "$count" > "$list_tabs_count_file"' \
+        '                    if [ "${FAKE_ZELLIJ_EMPTY_LIST_TABS_ONCE:-}" = 1 ] && [ "$count" -eq 1 ]; then exit 0; fi' \
+        '                    cat "$FAKE_ZELLIJ_TABS"' \
+        '                    exit 0' \
+        '                    ;;' \
         '                focus-pane-id)' \
         '                    [ "${3:-}" = plugin_50 ] && [ "$#" -eq 3 ] || exit 64' \
         '                    printf "focus-pane-id\\t%s\\t%s\\n" "$session" "$3" >> "$FAKE_ZELLIJ_CALLS"' \
@@ -161,6 +170,7 @@ setup_fixture() {
     FAKE_ZELLIJ_CWD="$root/fake-cwd"
     FAKE_ZELLIJ_LAYOUT="$root/fake-layout.kdl"
     FAKE_ZELLIJ_NEW_TAB_COUNT="$root/fake-new-tab-count"
+    FAKE_ZELLIJ_LIST_TABS_COUNT="$root/fake-list-tabs-count"
     FAKE_ZELLIJ_PANES="$root/fake-panes.json"
     FAKE_ZELLIJ_TABS="$root/fake-tabs.json"
     FAKE_SIDECAR_ARGV="$root/fake-sidecar-argv"
@@ -193,6 +203,7 @@ run_entry() {
         FAKE_ZELLIJ_CWD="$FAKE_ZELLIJ_CWD" \
         FAKE_ZELLIJ_LAYOUT="$FAKE_ZELLIJ_LAYOUT" \
         FAKE_ZELLIJ_NEW_TAB_COUNT="$FAKE_ZELLIJ_NEW_TAB_COUNT" \
+        FAKE_ZELLIJ_LIST_TABS_COUNT="$FAKE_ZELLIJ_LIST_TABS_COUNT" \
         FAKE_ZELLIJ_PANES="$FAKE_ZELLIJ_PANES" \
         FAKE_ZELLIJ_TABS="$FAKE_ZELLIJ_TABS" \
         FAKE_SIDECAR_ARGV="$FAKE_SIDECAR_ARGV" \
@@ -464,6 +475,28 @@ test_empty_new_tab_stdout_uses_inventory_stable_id() {
     echo "PASS: empty new-tab stdout uses stable inventory identity"
 }
 
+test_empty_initial_tab_inventory_retries_before_creation() {
+    local root expected_url
+    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
+    TEST_ROOT="$root"
+    setup_fixture "$root"
+    expected_url="file:$FIXTURE_PHYSICAL/target/wasm32-wasip1/release/zellij-sidebar.wasm"
+
+    FAKE_ZELLIJ_EMPTY_LIST_TABS_ONCE=1 run_entry --session WORK \
+        > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR" || {
+        sed -n '1,200p' "$FIXTURE_ERROR" >&2
+        fail "empty successful initial tab inventory did not recover"
+    }
+
+    [ "$(cat "$FAKE_ZELLIJ_LIST_TABS_COUNT")" -ge 3 ] ||
+        fail "empty initial inventory was not retried before post-create discovery"
+    grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "inventory retry lost stable tab identity"
+    assert_private_sidecar_started "$expected_url"
+    assert_standing_kdl_unchanged
+    assert_temporary_files_cleaned
+    echo "PASS: empty initial tab inventory retries before creation"
+}
+
 test_inside_caller_identity_is_cleared_before_native_entry_calls() {
     local root expected_url
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
@@ -549,6 +582,7 @@ test_sidecar_exec_failure_is_visible
 test_sidecar_stream_timeout_reaps_process
 test_failed_tuple_handoff_reaps_ready_sidecar
 test_empty_new_tab_stdout_uses_inventory_stable_id
+test_empty_initial_tab_inventory_retries_before_creation
 test_inside_caller_identity_is_cleared_before_native_entry_calls
 test_ambiguous_tab_discovery_reports_bounded_native_provenance
 test_tokenless_layout_render_preserves_installed_identity
