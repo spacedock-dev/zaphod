@@ -126,24 +126,24 @@ run_owned_case() {
 
 for round in $(seq 1 "$SERIAL_ROUNDS"); do
     run_owned_case "serial-$round" \
-        'PASS: outside foreground diagnosis and inside automatic subscriber handoff both completed' \
+        'PASS: outside and inside callers completed the manual watcher journey' \
         env ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
-        "$SCRIPT_DIR/zellij-subscription-lifecycle-smoke-test.sh" ||
+        "$SCRIPT_DIR/zellij-watcher-lifecycle-smoke-test.sh" ||
         fail "serial lifecycle stress round $round failed"
 done
 
-run_owned_case concurrent-foreground \
-    'PASS: outside caller with foreground target/zaphod subscribe' \
+run_owned_case concurrent-outside \
+    'PASS: outside caller manually launched watch-tab' \
     env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
     ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
-    ZAPHOD_CALLER_ENV=outside ZAPHOD_SUBSCRIBER_MODE=foreground \
+    ZAPHOD_CALLER_ENV=outside \
     "$SCRIPT_DIR/zellij-tmux-smoke-test.sh" &
 pid_a=$!
-run_owned_case concurrent-automatic \
-    'PASS: inside caller with automatic target/zaphod subscribe' \
+run_owned_case concurrent-inside \
+    'PASS: inside caller manually launched watch-tab' \
     env ZELLIJ=0 ZELLIJ_SESSION_NAME=ambient-work ZELLIJ_PANE_ID=98765 \
     ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
-    ZAPHOD_CALLER_ENV=inside ZAPHOD_SUBSCRIBER_MODE=automatic \
+    ZAPHOD_CALLER_ENV=inside \
     "$SCRIPT_DIR/zellij-tmux-smoke-test.sh" &
 pid_b=$!
 set +e
@@ -152,7 +152,7 @@ status_a=$?
 wait "$pid_b"
 status_b=$?
 set -e
-[ "$status_a" -eq 0 ] || fail "concurrent foreground stress failed"
-[ "$status_b" -eq 0 ] || fail "concurrent automatic stress failed"
+[ "$status_a" -eq 0 ] || fail "concurrent outside smoke failed"
+[ "$status_b" -eq 0 ] || fail "concurrent inside smoke failed"
 
 echo "PASS: repeated serial and concurrent layout lifecycle stress completed"

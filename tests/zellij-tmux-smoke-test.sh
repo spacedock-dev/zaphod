@@ -649,7 +649,9 @@ capture_state() {
     local expectation="$4"
     capture_proven_panes "$json" "$expectation" ||
         fail "native pane capture failed for $json"
-    jq -S . "$json" > "$json.sorted"
+    # Zellij may populate these slow metadata fields asynchronously after the
+    # pane itself is already stable; they are not layout or process identity.
+    jq -S 'map(del(.pane_command, .pane_cwd))' "$json" > "$json.sorted"
     capture_validated_layout "$json" "$layout" "$expectation" ||
         fail "native layout capture failed for $layout"
     tmux_command capture-pane -p -t "$TMUX_PANE" > "$screen"
