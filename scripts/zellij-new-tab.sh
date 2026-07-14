@@ -76,6 +76,13 @@ default_zellij_data_dir() {
 
 DATA_DIR="${ZELLIJ_DATA_DIR:-$(default_zellij_data_dir)}"
 ZELLIJ_BIN="${ZELLIJ_BIN:-zellij}"
+if [ -n "${ZAPHOD_REGISTRY_DIR:-}" ]; then
+	REGISTRY_DIR="$ZAPHOD_REGISTRY_DIR"
+elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+	REGISTRY_DIR="$XDG_RUNTIME_DIR/zaphod/agent-sessions-v1"
+else
+	REGISTRY_DIR="${TMPDIR:-/tmp}/zaphod-agent-sessions-v1-$(id -u)"
+fi
 
 ZELLIJ_ARGS=(--config-dir "$ZELLIJ_ROOT" --config "$CONFIG_FILE")
 ZELLIJ_ARGS+=(--data-dir "$DATA_DIR")
@@ -243,6 +250,7 @@ start_private_sidecar() {
         --rail-url "$WASM_URL" \
         --checkout-cwd "$REPO_ROOT" \
         --recipient-token "$RECIPIENT_TOKEN" \
+		--registry-dir "$REGISTRY_DIR" \
         --startup-fd 3 \
         3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
     start_status=$?
