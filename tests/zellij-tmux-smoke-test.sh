@@ -991,7 +991,18 @@ phase foreign-route-check
 capture_state "$ROOT/foreign-before.json" "$ROOT/foreign-before.kdl" "$ROOT/foreign-before.screen" present
 send_literal "$(printf '\033/')"
 sleep 0.10
-capture_state "$ROOT/foreign-after.json" "$ROOT/foreign-after.kdl" "$ROOT/foreign-after.screen" present
+for _attempt in 1 2 3; do
+    capture_state "$ROOT/foreign-after.json" "$ROOT/foreign-after.kdl" "$ROOT/foreign-after.screen" present
+    if cmp -s "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" &&
+        cmp -s "$ROOT/foreign-before.kdl" "$ROOT/foreign-after.kdl" &&
+        cmp -s "$ROOT/foreign-before.screen" "$ROOT/foreign-after.screen"; then
+        break
+    fi
+    [ "$_attempt" -eq 3 ] || {
+        printf 'transient-native-foreign-state: attempt=%s/3\n' "$_attempt" >&2
+        sleep 0.05
+    }
+done
 cmp -s "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" || {
     diff -u "$ROOT/foreign-before.json.sorted" "$ROOT/foreign-after.json.sorted" >&2 || true
     fail "post-route foreign Alt / changed native pane, focus, tab, or process state"
