@@ -38,6 +38,9 @@ SESSION_NAME=""
 TMUX_SERVER=""
 TMUX_SESSION="zaphod-two-rail"
 TMUX_PANE="$TMUX_SESSION:0.0"
+AGENTSVIEW_PID=""
+TARGET_SIDECAR_PID=""
+BYSTANDER_SIDECAR_PID=""
 
 zellij_control() {
     env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
@@ -59,6 +62,12 @@ cleanup() {
     local cleanup_status=0
     trap - EXIT INT TERM HUP
     set +e
+	for owned_pid in "$TARGET_SIDECAR_PID" "$BYSTANDER_SIDECAR_PID" "$AGENTSVIEW_PID"; do
+		[ -z "$owned_pid" ] || kill -TERM "$owned_pid" 2>/dev/null || true
+	done
+	for owned_pid in "$TARGET_SIDECAR_PID" "$BYSTANDER_SIDECAR_PID" "$AGENTSVIEW_PID"; do
+		[ -z "$owned_pid" ] || wait "$owned_pid" 2>/dev/null || true
+	done
     if [ -n "$SESSION_NAME" ]; then
         zellij_control delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
         if zellij_control --session "$SESSION_NAME" action list-panes --json --all \
@@ -74,7 +83,7 @@ cleanup() {
             cleanup_status=1
         fi
     fi
-    if [ -n "$ROOT" ] && [ -d "$ROOT" ]; then
+    if [ "${ZAPHOD_KEEP_TEST_ROOT:-}" != 1 ] && [ -n "$ROOT" ] && [ -d "$ROOT" ]; then
         rm -rf "$ROOT" || cleanup_status=1
     fi
     if [ "$(file_state "$STANDING_CONFIG")" != "$STANDING_CONFIG_BEFORE" ]; then
@@ -111,11 +120,12 @@ ROOT="$(mktemp -d /tmp/zr.XXXXXX)" || fail "could not create short isolated root
 CONFIG_DIR="$ROOT/config"
 CONFIG_FILE="$CONFIG_DIR/config.kdl"
 DATA_DIR="$ROOT/data"
+REGISTRY_DIR="$ROOT/registry"
 SOCKET_DIR="$ROOT/socket"
 HOME_DIR="$ROOT/home"
 SESSION_NAME="zr$$"
 TMUX_SERVER="zr$$"
-mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$SOCKET_DIR"
+mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$REGISTRY_DIR" "$SOCKET_DIR"
 printf '%s\n' \
     'keybinds clear-defaults=true {' \
     '}' \
@@ -155,7 +165,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
-    '                    recipient_token "target-token"' \
+    '                    recipient_token "bystander-token"' \
     '                }' \
     '            }' \
     "            pane cwd=\"$ESCAPED_CWD\"" \
@@ -248,34 +258,106 @@ BYSTANDER_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
 [ "$TARGET_TAB_ID" != "$BYSTANDER_TAB_ID" ] ||
     fail "two rails did not receive distinct stable server tab IDs"
 
-# Deliver while the same-CWD bystander is active. Both rails deliberately
-# share the private token, so the broadcast reaches both plugin instances.
-# Active-tab state and later screens therefore prove the stable-tab guard.
+TARGET_PANE_ID="$(jq -er '
+    [.[] | select((.tab_id | tostring) == "'"$TARGET_TAB_ID"'" and (.is_plugin | not) and .is_selectable and (.is_suppressed | not)) | .id]
+    | if length == 1 then .[0] else error("expected one Target terminal") end
+' "$PANES")"
+BYSTANDER_PANE_ID="$(jq -er '
+    [.[] | select((.tab_id | tostring) == "'"$BYSTANDER_TAB_ID"'" and (.is_plugin | not) and .is_selectable and (.is_suppressed | not)) | .id]
+    | if length == 1 then .[0] else error("expected one Bystander terminal") end
+' "$PANES")"
+
+register_session() {
+	local pane_id="$1" session_id="$2"
+	printf '%s\n' "{\"session_id\":\"$session_id\",\"transcript_path\":null,\"cwd\":\"/same/cwd\",\"hook_event_name\":\"SessionStart\",\"model\":\"fixture\",\"permission_mode\":\"default\",\"source\":\"startup\"}" |
+		ZAPHOD_REGISTRY_DIR="$REGISTRY_DIR" ZELLIJ_SESSION_NAME="$SESSION_NAME" ZELLIJ_PANE_ID="$pane_id" \
+		"$REPO_ROOT/target/zaphod" register-agent-session
+}
+register_session "$TARGET_PANE_ID" 019f5f94-a596-7d92-9928-398653669161
+register_session "$BYSTANDER_PANE_ID" 019f5f95-bbfd-7993-8620-0d698008217f
+
+go build -o "$ROOT/registered-agentsview-fixture" "$SCRIPT_DIR/helpers/registered-agentsview-fixture.go"
+"$ROOT/registered-agentsview-fixture" --ready-file "$ROOT/agentsview-url" --request-log "$ROOT/agentsview-requests.log" &
+AGENTSVIEW_PID=$!
+for _attempt in $(seq 1 100); do
+	[ ! -s "$ROOT/agentsview-url" ] || break
+	kill -0 "$AGENTSVIEW_PID" 2>/dev/null || break
+	sleep 0.05
+done
+[ -s "$ROOT/agentsview-url" ] || fail "registered AgentsView fixture did not become ready"
+AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
+
+start_sidecar() {
+	local tab_id="$1" label="$2" recipient_token="$3" fifo log startup_message startup_status
+	fifo="$ROOT/$label.start"
+	log="$ROOT/$label.log"
+	mkfifo "$fifo"
+	ZELLIJ_SOCKET_DIR="$SOCKET_DIR" "$REPO_ROOT/target/zaphod" subscribe \
+		--server "$AGENTSVIEW_URL" \
+		--zellij-bin "$(command -v zellij)" \
+		--zellij-config-dir "$CONFIG_DIR" \
+		--zellij-config "$CONFIG_FILE" \
+		--zellij-data-dir "$DATA_DIR" \
+		--zellij-session "$SESSION_NAME" \
+		--tab-id "$tab_id" \
+		--rail-url "$WASM_URL" \
+		--checkout-cwd "$SHARED_CWD" \
+		--recipient-token "$recipient_token" \
+		--registry-dir "$REGISTRY_DIR" \
+		--startup-fd 3 \
+		3>"$fifo" >"$log" 2>&1 &
+	STARTED_SIDECAR_PID=$!
+	set +e
+	IFS= read -r -t 10 startup_message < "$fifo"
+	startup_status=$?
+	set -e
+	rm -f "$fifo"
+	[ "$startup_status" -eq 0 ] && [ "$startup_message" = ready ] || {
+		echo "debug root: $ROOT" >&2
+		cat "$log" >&2 || true
+		fail "$label sidecar did not become ready"
+	}
+}
+start_sidecar "$TARGET_TAB_ID" target-sidecar target-token
+TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
-PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-target\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"blocked\",\"summary\":\"BB_RECIPIENT_MARKER\"}"
-PIPE_ACK_FILE="$ROOT/pipe-ack"
-zellij_session pipe --name zaphod-agent-v1-target-token-event \
-    --args "recipient-tab-id=$TARGET_TAB_ID,recipient-token=target-token" \
-    -- "$PAYLOAD" > "$PIPE_ACK_FILE"
-[ "$(cat "$PIPE_ACK_FILE")" = accepted ] || fail "target rail did not acknowledge the accepted row"
-wait_for_active_tab "$BYSTANDER_TAB_ID"
+start_sidecar "$BYSTANDER_TAB_ID" bystander-sidecar bystander-token
+BYSTANDER_SIDECAR_PID="$STARTED_SIDECAR_PID"
 
 zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"
 wait_for_active_tab "$TARGET_TAB_ID"
-wait_for_screen_marker 'BB_RECIPIENT_MARKER' "$TARGET_SCREEN"
+wait_for_screen_marker 'KJ_TAB_A_ROW' "$TARGET_SCREEN"
+grep -F 'KJ_TAB_B_ROW' "$TARGET_SCREEN" >/dev/null && fail "Target rendered Bystander's exact session"
+grep -F 'KJ_CHILD_ROW' "$TARGET_SCREEN" >/dev/null && fail "Target rendered the unregistered child"
 
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
-BARRIER_PAYLOAD="{\"kind\":\"session\",\"id\":\"two-rail-barrier\",\"cwd\":\"$SHARED_CWD\",\"agent\":\"codex\",\"state\":\"working\",\"summary\":\"BB_BYSTANDER_BARRIER\"}"
-zellij_session pipe --name zaphod-agent-v1-target-token-event \
-    --args "recipient-tab-id=$BYSTANDER_TAB_ID,recipient-token=target-token" \
-    -- "$BARRIER_PAYLOAD" > "$PIPE_ACK_FILE"
-[ "$(cat "$PIPE_ACK_FILE")" = accepted ] || fail "bystander rail did not acknowledge the barrier row"
-wait_for_screen_marker 'BB_BYSTANDER_BARRIER' "$BYSTANDER_SCREEN"
-if grep -F 'BB_RECIPIENT_MARKER' "$BYSTANDER_SCREEN" >/dev/null; then
-    cat "$BYSTANDER_SCREEN" >&2 || true
-    fail "same-CWD bystander rendered the target-tab broadcast"
-fi
+wait_for_screen_marker 'KJ_TAB_B_ROW' "$BYSTANDER_SCREEN"
+grep -F 'KJ_TAB_A_ROW' "$BYSTANDER_SCREEN" >/dev/null && fail "Bystander rendered Target's exact session"
+grep -F 'KJ_CHILD_ROW' "$BYSTANDER_SCREEN" >/dev/null && fail "Bystander rendered the unregistered child"
 
-echo "PASS: stable-tab recipient delivers only to the target rail"
+printf '[]' | zellij_session pipe --name zaphod-agent-v1-target-token-snapshot \
+	--args "recipient-tab-id=$TARGET_TAB_ID,recipient-token=target-token" > "$ROOT/clear-ack"
+[ "$(cat "$ROOT/clear-ack")" = accepted ] || fail "Target did not acknowledge the empty snapshot"
+zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"
+wait_for_active_tab "$TARGET_TAB_ID"
+for _attempt in $(seq 1 100); do
+	tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-cleared.screen"
+	grep -F 'KJ_TAB_A_ROW' "$ROOT/target-cleared.screen" >/dev/null || break
+	sleep 0.05
+done
+grep -F 'KJ_TAB_A_ROW' "$ROOT/target-cleared.screen" >/dev/null && fail "empty snapshot left a stale Target row"
+kill -TERM "$TARGET_SIDECAR_PID"
+wait "$TARGET_SIDECAR_PID" 2>/dev/null || true
+TARGET_SIDECAR_PID=""
+start_sidecar "$TARGET_TAB_ID" target-restart target-token
+TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
+wait_for_screen_marker 'KJ_TAB_A_ROW' "$ROOT/target-rehydrated.screen"
+
+grep -Fx '/api/v1/sessions' "$ROOT/agentsview-requests.log" >/dev/null && fail "sidecar used the global session list"
+grep -F '019f5f95-cc22-77d2-9c3a-271b1edaabd8' "$ROOT/agentsview-requests.log" >/dev/null && fail "sidecar fetched the unregistered child"
+[ "$(grep -Fc '/api/v1/sessions/codex:019f5f94-a596-7d92-9928-398653669161' "$ROOT/agentsview-requests.log")" -eq 2 ] || fail "Target exact ID was not fetched once per sidecar generation"
+[ "$(grep -Fc '/api/v1/sessions/codex:019f5f95-bbfd-7993-8620-0d698008217f' "$ROOT/agentsview-requests.log")" -eq 1 ] || fail "Bystander exact ID was not fetched once"
+
+echo "PASS: two same-CWD tabs projected 1/1/0 and sidecar restart rehydrated one exact row"
