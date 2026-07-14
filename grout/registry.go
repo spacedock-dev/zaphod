@@ -302,6 +302,7 @@ func (s agentRegistryStore) read(zellijSession string) (AgentRegistryV1, error) 
 
 func (s agentRegistryStore) upsert(registration AgentPaneRegistrationV1) error {
 	return s.withLock(registration.ZellijSession, true, func() error {
+		registration.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		registry, err := s.readUnlocked(registration.ZellijSession)
 		if err != nil {
 			return err

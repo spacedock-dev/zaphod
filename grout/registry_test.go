@@ -260,11 +260,10 @@ func TestRegistryPrunePreservesRegistrationNewerThanPaneSnapshot(t *testing.T) {
 	store := agentRegistryStore{root: t.TempDir()}
 	old := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
 	newer := registrationForTest(t, "019f5f95-bbfd-7993-8620-0d698008217f", "managed", "8")
-	cutoff := time.Now().UTC()
-	newer.UpdatedAt = cutoff.Add(time.Second).Format(time.RFC3339Nano)
 	if err := store.upsert(old); err != nil {
 		t.Fatal(err)
 	}
+	cutoff := time.Now().UTC()
 	if err := store.upsert(newer); err != nil {
 		t.Fatal(err)
 	}
