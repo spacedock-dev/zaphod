@@ -646,7 +646,7 @@ capture_action_inventory() {
     local label="$1"
     local panes="$2"
     local tabs="$3"
-    local pane_status=0 tab_status=0
+    local pane_status=0 tab_status=0 pane_pid tab_pid
     if [ "$label" = "$INJECT_RESPONSIVE_TIMEOUT" ] &&
         [ "$RESPONSIVE_TIMEOUT_INJECTED" -eq 0 ]; then
         RESPONSIVE_TIMEOUT_INJECTED=1
@@ -655,14 +655,21 @@ capture_action_inventory() {
             > "$panes" 2> "$panes.err" || pane_status=$?
         fail "injected $label native pane observation timed out: status $pane_status"
     fi
+    # Both replies describe one native observation point and are independent.
+    # Launch them together so the pre-send absolute deadline does not acquire
+    # an artificial second CLI round trip.
     zellij_session_with_timeout "$WEDGE_THRESHOLD_SECS" \
         action list-panes --json --all --command --geometry --state --tab \
-        > "$panes" 2> "$panes.err" || pane_status=$?
-    [ "$pane_status" -eq 0 ] ||
-        fail "$label native pane observation failed or timed out: status $pane_status"
+        > "$panes" 2> "$panes.err" &
+    pane_pid=$!
     zellij_session_with_timeout "$WEDGE_THRESHOLD_SECS" \
         action list-tabs --json --all --state --layout \
-        > "$tabs" 2> "$tabs.err" || tab_status=$?
+        > "$tabs" 2> "$tabs.err" &
+    tab_pid=$!
+    wait "$pane_pid" || pane_status=$?
+    wait "$tab_pid" || tab_status=$?
+    [ "$pane_status" -eq 0 ] ||
+        fail "$label native pane observation failed or timed out: status $pane_status"
     [ "$tab_status" -eq 0 ] ||
         fail "$label native tab observation failed or timed out: status $tab_status"
     jq -e 'type == "array" and length > 0' "$panes" >/dev/null || return 1
