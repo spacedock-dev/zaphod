@@ -39,8 +39,8 @@ TMUX_SERVER=""
 TMUX_SESSION="zaphod-two-rail"
 TMUX_PANE="$TMUX_SESSION:0.0"
 AGENTSVIEW_PID=""
-TARGET_SIDECAR_PID=""
-BYSTANDER_SIDECAR_PID=""
+TARGET_WATCHER_PID=""
+BYSTANDER_WATCHER_PID=""
 
 zellij_control() {
     env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
@@ -62,10 +62,10 @@ cleanup() {
     local cleanup_status=0
     trap - EXIT INT TERM HUP
     set +e
-	for owned_pid in "$TARGET_SIDECAR_PID" "$BYSTANDER_SIDECAR_PID" "$AGENTSVIEW_PID"; do
+	for owned_pid in "$TARGET_WATCHER_PID" "$BYSTANDER_WATCHER_PID" "$AGENTSVIEW_PID"; do
 		[ -z "$owned_pid" ] || kill -TERM "$owned_pid" 2>/dev/null || true
 	done
-	for owned_pid in "$TARGET_SIDECAR_PID" "$BYSTANDER_SIDECAR_PID" "$AGENTSVIEW_PID"; do
+	for owned_pid in "$TARGET_WATCHER_PID" "$BYSTANDER_WATCHER_PID" "$AGENTSVIEW_PID"; do
 		[ -z "$owned_pid" ] || wait "$owned_pid" 2>/dev/null || true
 	done
     if [ -n "$SESSION_NAME" ]; then
@@ -120,12 +120,12 @@ ROOT="$(mktemp -d /tmp/zr.XXXXXX)" || fail "could not create short isolated root
 CONFIG_DIR="$ROOT/config"
 CONFIG_FILE="$CONFIG_DIR/config.kdl"
 DATA_DIR="$ROOT/data"
-REGISTRY_DIR="$ROOT/registry"
+WATCH_DIR="$ROOT/w"
 SOCKET_DIR="$ROOT/socket"
 HOME_DIR="$ROOT/home"
 SESSION_NAME="zr$$"
 TMUX_SERVER="zr$$"
-mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$REGISTRY_DIR" "$SOCKET_DIR"
+mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$WATCH_DIR" "$SOCKET_DIR"
 printf '%s\n' \
     'keybinds clear-defaults=true {' \
     '}' \
@@ -279,12 +279,9 @@ BYSTANDER_PANE_ID="$(jq -er '
 register_session() {
 	local pane_id="$1" session_id="$2"
 	printf '%s\n' "{\"session_id\":\"$session_id\",\"transcript_path\":null,\"cwd\":\"/same/cwd\",\"hook_event_name\":\"SessionStart\",\"model\":\"fixture\",\"permission_mode\":\"default\",\"source\":\"startup\"}" |
-		ZAPHOD_REGISTRY_DIR="$REGISTRY_DIR" ZELLIJ_SESSION_NAME="$SESSION_NAME" ZELLIJ_PANE_ID="$pane_id" \
+		ZAPHOD_WATCH_DIR="$WATCH_DIR" ZELLIJ_SESSION_NAME="$SESSION_NAME" ZELLIJ_PANE_ID="$pane_id" \
 		"$REPO_ROOT/target/zaphod" register-agent-session
 }
-register_session "$TARGET_PANE_ID" 019f5f94-a596-7d92-9928-398653669161
-register_session "$BYSTANDER_PANE_ID" 019f5f95-bbfd-7993-8620-0d698008217f
-
 go build -o "$ROOT/registered-agentsview-fixture" "$SCRIPT_DIR/helpers/registered-agentsview-fixture.go"
 "$ROOT/registered-agentsview-fixture" --ready-file "$ROOT/agentsview-url" --request-log "$ROOT/agentsview-requests.log" &
 AGENTSVIEW_PID=$!
@@ -296,26 +293,21 @@ done
 [ -s "$ROOT/agentsview-url" ] || fail "registered AgentsView fixture did not become ready"
 AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
 
-start_sidecar() {
-	local tab_id="$1" label="$2" recipient_token="$3" fifo log startup_message startup_status
+start_watcher() {
+	local pane_id="$1" label="$2" recipient_token="$3" fifo log startup_message startup_status
 	fifo="$ROOT/$label.start"
 	log="$ROOT/$label.log"
 	mkfifo "$fifo"
-	ZELLIJ_SOCKET_DIR="$SOCKET_DIR" "$REPO_ROOT/target/zaphod" subscribe \
-		--server "$AGENTSVIEW_URL" \
-		--zellij-bin "$(command -v zellij)" \
-		--zellij-config-dir "$CONFIG_DIR" \
-		--zellij-config "$CONFIG_FILE" \
-		--zellij-data-dir "$DATA_DIR" \
-		--zellij-session "$SESSION_NAME" \
-		--tab-id "$tab_id" \
-		--rail-url "$WASM_URL" \
-		--checkout-cwd "$SHARED_CWD" \
-		--recipient-token "$recipient_token" \
-		--registry-dir "$REGISTRY_DIR" \
+	ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+		ZELLIJ_SESSION_NAME="$SESSION_NAME" ZELLIJ_PANE_ID="$pane_id" \
+		ZAPHOD_RAIL_URL="$WASM_URL" ZAPHOD_RECIPIENT_TOKEN="$recipient_token" \
+		ZAPHOD_ZELLIJ_CONFIG_DIR="$CONFIG_DIR" ZAPHOD_ZELLIJ_CONFIG_FILE="$CONFIG_FILE" \
+		ZAPHOD_ZELLIJ_DATA_DIR="$DATA_DIR" ZAPHOD_WATCH_DIR="$WATCH_DIR" \
+		ZELLIJ_BIN="$(command -v zellij)" \
+		"$REPO_ROOT/target/zaphod" watch-tab --server "$AGENTSVIEW_URL" --foreground \
 		--startup-fd 3 \
 		3>"$fifo" >"$log" 2>&1 &
-	STARTED_SIDECAR_PID=$!
+	STARTED_WATCHER_PID=$!
 	set +e
 	IFS= read -r -t 10 startup_message < "$fifo"
 	startup_status=$?
@@ -324,15 +316,18 @@ start_sidecar() {
 	[ "$startup_status" -eq 0 ] && [ "$startup_message" = ready ] || {
 		echo "debug root: $ROOT" >&2
 		cat "$log" >&2 || true
-		fail "$label sidecar did not become ready"
+		fail "$label watcher did not become ready"
 	}
 }
-start_sidecar "$TARGET_TAB_ID" target-sidecar shared-token
-TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
+start_watcher "$TARGET_PANE_ID" target-watcher shared-token
+TARGET_WATCHER_PID="$STARTED_WATCHER_PID"
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
-start_sidecar "$BYSTANDER_TAB_ID" bystander-sidecar shared-token
-BYSTANDER_SIDECAR_PID="$STARTED_SIDECAR_PID"
+start_watcher "$BYSTANDER_PANE_ID" bystander-watcher shared-token
+BYSTANDER_WATCHER_PID="$STARTED_WATCHER_PID"
+
+register_session "$TARGET_PANE_ID" 019f5f94-a596-7d92-9928-398653669161
+register_session "$BYSTANDER_PANE_ID" 019f5f95-bbfd-7993-8620-0d698008217f
 
 zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"
 wait_for_active_tab "$TARGET_TAB_ID"
@@ -374,27 +369,28 @@ wait_for_screen_marker 'KJ_TAB_B_ROW' "$BYSTANDER_SCREEN"
 grep -F 'KJ_TAB_A_ROW' "$BYSTANDER_SCREEN" >/dev/null && fail "Bystander rendered Target's exact session"
 grep -F 'KJ_CHILD_ROW' "$BYSTANDER_SCREEN" >/dev/null && fail "Bystander rendered the unregistered child"
 
-printf '[]' | zellij_session pipe --name zaphod-agent-v1-shared-token-snapshot \
-	--args "recipient-tab-id=$TARGET_TAB_ID,recipient-token=shared-token" > "$ROOT/clear-ack"
-[ "$(cat "$ROOT/clear-ack")" = accepted ] || fail "Target did not acknowledge the empty snapshot"
 zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"
 wait_for_active_tab "$TARGET_TAB_ID"
+kill -TERM "$TARGET_WATCHER_PID"
+wait "$TARGET_WATCHER_PID" 2>/dev/null || true
+TARGET_WATCHER_PID=""
 for _attempt in $(seq 1 100); do
-	tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-cleared.screen"
-	grep -F 'KJ_TAB_A_ROW' "$ROOT/target-cleared.screen" >/dev/null || break
+	tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-expired.screen"
+	grep -F 'KJ_TAB_A_ROW' "$ROOT/target-expired.screen" >/dev/null || break
 	sleep 0.05
 done
-grep -F 'KJ_TAB_A_ROW' "$ROOT/target-cleared.screen" >/dev/null && fail "empty snapshot left a stale Target row"
-kill -TERM "$TARGET_SIDECAR_PID"
-wait "$TARGET_SIDECAR_PID" 2>/dev/null || true
-TARGET_SIDECAR_PID=""
-start_sidecar "$TARGET_TAB_ID" target-restart shared-token
-TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
-wait_for_screen_marker 'KJ_TAB_A_ROW' "$ROOT/target-rehydrated.screen"
+grep -F 'KJ_TAB_A_ROW' "$ROOT/target-expired.screen" >/dev/null && fail "stopped watcher left a stale leased row"
+start_watcher "$TARGET_PANE_ID" target-restart shared-token
+TARGET_WATCHER_PID="$STARTED_WATCHER_PID"
+sleep 0.75
+tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-restart-empty.screen"
+grep -F 'KJ_TAB_A_ROW' "$ROOT/target-restart-empty.screen" >/dev/null &&
+	fail "fresh watcher rehydrated authority without a new SessionStart"
+register_session "$TARGET_PANE_ID" 019f5f94-a596-7d92-9928-398653669161
+wait_for_screen_marker 'KJ_TAB_A_ROW' "$ROOT/target-reregistered.screen"
 
-# Closing the exact registered terminal leaves a spare pane and the resident
-# rail alive. A fresh sidecar generation must prune the stale claim and send
-# an empty snapshot without fetching the old exact record again.
+# Closing the exact watched terminal leaves a spare pane and resident rail.
+# The watcher must lose authority, exit, and let its leased row disappear.
 zellij_session action close-pane --pane-id "$TARGET_PANE_ID"
 for _attempt in $(seq 1 100); do
 	capture_panes
@@ -403,11 +399,13 @@ for _attempt in $(seq 1 100); do
 done
 jq -e --arg id "$TARGET_PANE_ID" 'all(.[]; .is_plugin or ((.id | tostring) != $id))' "$PANES" >/dev/null ||
 	fail "registered Target terminal survived native close"
-kill -TERM "$TARGET_SIDECAR_PID"
-wait "$TARGET_SIDECAR_PID" 2>/dev/null || true
-TARGET_SIDECAR_PID=""
-start_sidecar "$TARGET_TAB_ID" target-after-close shared-token
-TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
+for _attempt in $(seq 1 100); do
+	kill -0 "$TARGET_WATCHER_PID" 2>/dev/null || break
+	sleep 0.05
+done
+! kill -0 "$TARGET_WATCHER_PID" 2>/dev/null || fail "watcher survived exact terminal loss"
+wait "$TARGET_WATCHER_PID" 2>/dev/null || true
+TARGET_WATCHER_PID=""
 for _attempt in $(seq 1 100); do
 	tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-after-close.screen"
 	grep -F 'KJ_TAB_A_ROW' "$ROOT/target-after-close.screen" >/dev/null || break
@@ -415,12 +413,12 @@ for _attempt in $(seq 1 100); do
 done
 grep -F 'KJ_TAB_A_ROW' "$ROOT/target-after-close.screen" >/dev/null &&
 	fail "closed Target pane left a stale registered row"
-jq -e --arg id "$TARGET_PANE_ID" 'all(.registrations[]; (.pane_id | tostring) != $id)' \
-	"$REGISTRY_DIR"/session-*.json >/dev/null || fail "closed Target pane registration was not pruned"
+[ "$(find "$WATCH_DIR" -type f -print | wc -l | tr -d '[:space:]')" -eq 0 ] ||
+	fail "watcher persisted authority outside its private sockets"
 
-grep -Fx '/api/v1/sessions' "$ROOT/agentsview-requests.log" >/dev/null && fail "sidecar used the global session list"
-grep -F '019f5f95-cc22-77d2-9c3a-271b1edaabd8' "$ROOT/agentsview-requests.log" >/dev/null && fail "sidecar fetched the unregistered child"
-[ "$(grep -Fc '/api/v1/sessions/codex:019f5f94-a596-7d92-9928-398653669161' "$ROOT/agentsview-requests.log")" -eq 2 ] || fail "Target exact ID was not fetched once per sidecar generation"
+grep -Fx '/api/v1/sessions' "$ROOT/agentsview-requests.log" >/dev/null && fail "watcher used the global session list"
+grep -F '019f5f95-cc22-77d2-9c3a-271b1edaabd8' "$ROOT/agentsview-requests.log" >/dev/null && fail "watcher fetched the unregistered child"
+[ "$(grep -Fc '/api/v1/sessions/codex:019f5f94-a596-7d92-9928-398653669161' "$ROOT/agentsview-requests.log")" -eq 2 ] || fail "Target exact ID was not fetched once per watcher generation"
 [ "$(grep -Fc '/api/v1/sessions/codex:019f5f95-bbfd-7993-8620-0d698008217f' "$ROOT/agentsview-requests.log")" -eq 1 ] || fail "Bystander exact ID was not fetched once"
 
-echo "PASS: shared-token same-CWD tabs projected 1/1/0, clicked the exact pane, rehydrated on restart, and pruned native close"
+echo "PASS: shared-token same-CWD tabs projected 1/1/0, clicked the exact pane, restarted empty, and failed closed on native loss"
