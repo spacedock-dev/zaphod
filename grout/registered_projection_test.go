@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -93,6 +94,18 @@ func TestFetchExactSessionRejectsMismatchedReturnedIdentity(t *testing.T) {
 	defer server.Close()
 	if _, err := fetchExactSession(context.Background(), server.Client(), server.URL, requested, time.Second); err == nil {
 		t.Fatal("mismatched exact response unexpectedly accepted")
+	}
+}
+
+func TestFetchExactSessionRejectsOverLimitCompleteRecord(t *testing.T) {
+	const requested = "codex:019f5f94-a596-7d92-9928-398653669161"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"id":"%s","agent":"codex"}`, requested)
+		fmt.Fprint(w, strings.Repeat(" ", (1<<20)+1))
+	}))
+	defer server.Close()
+	if _, err := fetchExactSession(context.Background(), server.Client(), server.URL, requested, time.Second); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("over-limit exact response error = %v", err)
 	}
 }
 
