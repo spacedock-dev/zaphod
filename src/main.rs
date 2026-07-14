@@ -2882,6 +2882,22 @@ mod tests {
     }
 
     #[test]
+    fn refresh_barrier_requires_debug_and_complete_positive_test_config() {
+        let mut config = BTreeMap::new();
+        config.insert("test_refresh_barrier_millis".to_owned(), "7000".to_owned());
+        config.insert("test_refresh_barrier_panes".to_owned(), "3".to_owned());
+        assert_eq!(test_refresh_barrier(&config), None, "debug gate absent");
+
+        config.insert("debug".to_owned(), "1".to_owned());
+        assert_eq!(test_refresh_barrier(&config), Some((7000, 3)));
+        config.insert("test_refresh_barrier_panes".to_owned(), "0".to_owned());
+        assert_eq!(test_refresh_barrier(&config), None, "zero threshold");
+        config.insert("test_refresh_barrier_panes".to_owned(), "3".to_owned());
+        config.remove("test_refresh_barrier_millis");
+        assert_eq!(test_refresh_barrier(&config), None, "partial config");
+    }
+
+    #[test]
     fn steer_is_armed_only_for_the_actors_own_tab() {
         assert!(
             steer_completes_locally(Some(2), 2),
