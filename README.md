@@ -22,11 +22,9 @@ tab and what does it want from me?**
 - Lists the current tab's terminal panes; **click a row to focus that pane**
 - The sidebar is unfocusable (tab-bar mechanism): clicks are delivered
   without focusing it, so it never steals your keyboard
-- Per-pane status line: detected state, agent kind, and latest prompt/status,
-  refreshed every 2s
-- Plugin-only agent awareness for Claude, Codex, and Pi panes using zellij's
-  running-command and scrollback APIs; shell panes remain visible as
-  `unknown . unknown`
+- The periodic refresh uses best-effort command/CWD metadata and preserves the last known status when live viewport data is unavailable.
+- Plugin-only command/title classification identifies Claude, Codex, and Pi;
+  a new unresolved shell pane appears as `unknown . unknown`.
 - Blocked prompts outrank working prompts, with state markers in the first
   line and details in the dimmed second line
 - **Keyboard navigation mode**: `j/k`/arrows move a highlight, `Enter` jumps,

@@ -31,6 +31,9 @@ in the plugin via `get_pane_cwd`, unbound rendered as unbound, never guessed.
     Code/codex set this)
   - dim second line: the pane's last non-empty terminal line (what the agent
     is asking/doing), polled every 2s via `get_pane_scrollback`
+
+  This prototype record remains historical. The shipped periodic path retired
+  the scrollback call because Zellij 0.44.3 can synchronously hold that export for five seconds. The sidebar now preserves stale status or shows a fresh unresolved pane as unknown.
 - **Click a row → focus that pane.** The sidebar itself is unfocusable
   (`set_selectable(false)`, the tab-bar mechanism) so it never steals focus
   and clicks work without focus-then-click.
