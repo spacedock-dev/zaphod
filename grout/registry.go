@@ -212,12 +212,21 @@ func (s agentRegistryStore) withLock(zellijSession string, exclusive bool, fn fu
 
 func (s agentRegistryStore) readUnlocked(zellijSession string) (AgentRegistryV1, error) {
 	registry := AgentRegistryV1{Version: agentRegistryVersion, ZellijSession: zellijSession, Registrations: []AgentPaneRegistrationV1{}}
-	payload, err := os.ReadFile(s.registryPath(zellijSession))
+	file, err := os.Open(s.registryPath(zellijSession))
 	if errors.Is(err, os.ErrNotExist) {
 		return registry, nil
 	}
 	if err != nil {
+		return AgentRegistryV1{}, fmt.Errorf("open registry: %w", err)
+	}
+	defer file.Close()
+	const maxRegistryBytes = 1 << 20
+	payload, err := io.ReadAll(io.LimitReader(file, maxRegistryBytes+1))
+	if err != nil {
 		return AgentRegistryV1{}, fmt.Errorf("read registry: %w", err)
+	}
+	if len(payload) > maxRegistryBytes {
+		return AgentRegistryV1{}, fmt.Errorf("registry exceeds %d bytes", maxRegistryBytes)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	if err := decoder.Decode(&registry); err != nil {
