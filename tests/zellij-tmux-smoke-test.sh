@@ -600,6 +600,39 @@ wait_for_nonempty_panes() {
     fail "isolated Zellij session did not become ready"
 }
 
+wait_for_sidebar_fixture_receipt() {
+    local output="$1"
+    local deadline now
+    deadline="$(( $(monotonic_ms) + 4000 ))"
+    while :; do
+        tmux_command capture-pane -p -t "$TMUX_PANE" > "$output"
+        grep -F 'zaphod-long-running' "$output" >/dev/null && return
+        now="$(monotonic_ms)"
+        [ "$now" -lt "$deadline" ] ||
+            fail "docked sidebar did not visibly receive the non-shell tail fixture"
+        sleep 0.05
+    done
+}
+
+wait_for_completed_fixture_refresh() {
+    local fixture_id="$1"
+    local output="$2"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    local deadline now
+    deadline="$(( $(monotonic_ms) + 5000 ))"
+    while :; do
+        if [ -f "$plugin_log" ] &&
+            grep -F 'status refresh complete pane_ids=' "$plugin_log" |
+                grep -E "(^|[^0-9])${fixture_id}([^0-9]|$)" > "$output"; then
+            return
+        fi
+        now="$(monotonic_ms)"
+        [ "$now" -lt "$deadline" ] ||
+            fail "sidebar did not complete a periodic refresh containing tail pane $fixture_id"
+        sleep 0.05
+    done
+}
+
 send_literal() {
     tmux_command send-keys -l -t "$TMUX_PANE" -- "$1"
 }
@@ -1373,12 +1406,15 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     wait_for_exact_action_state fixture-ready "$RESPONSIVE_TERMINALS" \
         "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
     RESPONSIVE_FIXTURE_NUM="${RESPONSIVE_FIXTURE_ID#terminal_}"
-    jq -e --arg id "$RESPONSIVE_FIXTURE_NUM" \
-        'any(.[]; (.id | tostring) == $id and (.is_plugin | not) and (.exited | not) and .title == "zaphod-long-running-non-shell" and (.terminal_command | tostring | contains("tail")))' \
+    jq -e --arg id "$RESPONSIVE_FIXTURE_NUM" --arg tab_id "$TAB_ID" \
+        'any(.[]; (.id | tostring) == $id and (.is_plugin | not) and (.exited | not) and (.tab_id | tostring) == $tab_id and .title == "zaphod-long-running-non-shell" and (.terminal_command | tostring | contains("tail")))' \
         "$ROOT/responsive-fixture-ready-panes.json" >/dev/null ||
-        fail "non-shell tail fixture was not live with its exact native command identity"
+        fail "non-shell tail fixture was not live in the managed tab with its exact native command identity"
 
-    sleep 2.1
+    wait_for_sidebar_fixture_receipt "$ROOT/responsive-fixture-received.screen"
+    wait_for_completed_fixture_refresh "$RESPONSIVE_FIXTURE_NUM" \
+        "$ROOT/responsive-fixture-refresh.log"
+    phase responsive-fixture-refresh-complete
     capture_settled_action_inventory responsive-after-timer \
         "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-after-timer-tabs.json"
     cp "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-panes-before-key.json"
