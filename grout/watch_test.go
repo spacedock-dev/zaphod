@@ -4,11 +4,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func validWatchEnvelope() []byte {
@@ -73,5 +75,78 @@ func TestWatchEnvelopeIsValidatedAtomically(t *testing.T) {
 				t.Fatalf("accepted %#v", got)
 			}
 		})
+	}
+}
+
+func TestWatchSocketCarriesOneBoundedInMemoryRegistration(t *testing.T) {
+	root, err := os.MkdirTemp("/tmp", "zwt.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	listener, socket, err := listenWatchSocket(root, "managed", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socketInfo, err := os.Lstat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rootInfo.Mode().Perm() != 0o700 || socketInfo.Mode().Perm() != 0o600 || socketInfo.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("private modes root=%#o socket=%v", rootInfo.Mode().Perm(), socketInfo.Mode())
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	accepted := make(chan WatchRegistration, 1)
+	errs := make(chan error, 1)
+	go func() {
+		registration, err := acceptWatchRegistration(ctx, listener, "managed", "7")
+		if err != nil {
+			errs <- err
+			return
+		}
+		accepted <- registration
+	}()
+	hook := []byte(`{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}`)
+	if err := sendWatchHook(ctx, root, "managed", "7", hook); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case registration := <-accepted:
+		if registration.AgentsViewSessionID != "codex:019f60ff-1111-7222-8333-444455556666" {
+			t.Fatalf("registration = %#v", registration)
+		}
+	case err := <-errs:
+		t.Fatal(err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != filepath.Base(socket) {
+		t.Fatalf("watcher wrote durable authority files: %v", entries)
+	}
+
+	missingRoot, err := os.MkdirTemp("/tmp", "zwt.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(missingRoot) })
+	missingCtx, missingCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer missingCancel()
+	if err := sendWatchHook(missingCtx, missingRoot, "managed", "7", hook); err == nil {
+		t.Fatal("missing watcher accepted a hook")
+	}
+	tooLarge := append(hook, make([]byte, maxWatchHookBytes-len(hook)+1)...)
+	if err := sendWatchHook(ctx, root, "managed", "7", tooLarge); err == nil {
+		t.Fatal("over-limit hook reached the watcher")
 	}
 }
