@@ -21,7 +21,6 @@ macro_rules! trace {
         }
     };
 }
-
 const STATUS_POLL_SECS: f64 = 2.0;
 // A pane-status call that stalls this long is wedge-classified and aborts
 // the rest of the poll pass. Healthy calls return well inside the 2s poll
@@ -229,6 +228,8 @@ struct SessionEvent {
     #[serde(default)]
     id: String,
     #[serde(default)]
+    pane_id: Option<u32>,
+    #[serde(default)]
     cwd: String,
     #[serde(default)]
     agent: String,
@@ -306,30 +307,14 @@ fn upsert<T: PartialEq>(list: &mut Vec<T>, keyed: impl Fn(&T) -> bool, item: T) 
     }
 }
 
-// The cwd comparison rule for session→pane binding. get_pane_cwd answers
-// with the OS-resolved physical path (sysinfo resolves symlinks — /tmp →
-// /private/tmp on macOS) while agentsview records whatever the session
-// reported; the cwd-shape probe (entity test plan item 1) settles whether
-// the two shapes diverge. Exact textual match until it does — a
-// probe-pinned rule slots in here without touching bind_session's callers.
-fn normalize_cwd(cwd: &str) -> String {
-    cwd.to_owned()
-}
-
-// The pane a session's cwd binds to: exactly one listed pane whose polled
-// cwd matches → that pane id; zero or two-plus matches → None. Unbound
-// renders as unbound and its click is dead — never guessed.
-fn bind_session(session_cwd: &str, rows: &[Row], cwds: &BTreeMap<u32, PathBuf>) -> Option<u32> {
-    if session_cwd.is_empty() {
-        return None;
-    }
-    let target = normalize_cwd(session_cwd);
-    let mut matches = rows.iter().filter(|row| {
-        cwds.get(&row.pane_id)
-            .is_some_and(|cwd| normalize_cwd(&cwd.to_string_lossy()) == target)
-    });
-    let bound = matches.next()?;
-    matches.next().is_none().then_some(bound.pane_id)
+// Registration supplies the only binding authority. The row remains bound
+// only while that exact terminal id is present in this rail's current tab
+// manifest. CWD, title, prompt, time, and row order never enter the join.
+fn registered_session_pane(session: &SessionEvent, rows: &[Row]) -> Option<u32> {
+    let pane_id = session.pane_id?;
+    rows.iter()
+        .any(|row| row.pane_id == pane_id)
+        .then_some(pane_id)
 }
 
 // The gate's reviewable artifact, inverted from its decision-log path the
@@ -836,7 +821,7 @@ impl ZellijPlugin for Sidebar {
                 " ".repeat(cols.saturating_sub(9))
             );
             for session in &self.sessions {
-                let bound = bind_session(&session.cwd, &self.rows, &self.pane_cwds).is_some();
+                let bound = registered_session_pane(session, &self.rows).is_some();
                 println!("{}", session_row_line(session, bound, cols));
                 let summary: String =
                     session.summary.chars().take(cols.saturating_sub(4)).collect();
@@ -1502,13 +1487,13 @@ fn decide_rail_click(
     rows: &[Row],
     sessions: &[SessionEvent],
     gates: &[GateEvent],
-    cwds: &BTreeMap<u32, PathBuf>,
+    _cwds: &BTreeMap<u32, PathBuf>,
 ) -> ClickAction {
     match section_layout(rows.len(), sessions.len(), gates.len()).target(line) {
         LineTarget::Header | LineTarget::Row(_) => decide_click(line, rows),
         LineTarget::SessionRow(idx) => sessions
             .get(idx)
-            .and_then(|session| bind_session(&session.cwd, rows, cwds))
+            .and_then(|session| registered_session_pane(session, rows))
             .map(ClickAction::FocusPane)
             .unwrap_or(ClickAction::None),
         LineTarget::GateRow(idx) => gates
@@ -2388,7 +2373,6 @@ mod tests {
     #[test]
     fn registered_pane_binds_despite_same_cwd_lookalikes() {
         let rows = [cwd_row(4), cwd_row(8)];
-        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp/elsewhere")]);
         assert_eq!(
 			registered_session_pane(&SessionEvent {
 				pane_id: Some(4),
@@ -2465,6 +2449,7 @@ mod tests {
         let rows = vec![cwd_row(4), cwd_row(8)];
         let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp")]);
         let sessions = vec![SessionEvent {
+            pane_id: Some(4),
             cwd: "/Users/clkao/git/zaphod".to_owned(),
             ..Default::default()
         }];
@@ -2767,7 +2752,7 @@ mod tests {
         // The session row's marker reflects the line's state; bound rows
         // carry no unbound tag and click through to the cwd-bound pane.
         let session = &sidebar.sessions[0];
-        let bound = bind_session(&session.cwd, &sidebar.rows, &sidebar.pane_cwds);
+        let bound = registered_session_pane(session, &sidebar.rows);
         assert_eq!(bound, Some(4));
         let line = session_row_line(session, bound.is_some(), 28);
         assert!(line.starts_with(state_glyph(agent::AgentState::Working)));
@@ -4044,6 +4029,7 @@ mod tests {
         sidebar.rows = vec![cwd_row(4), cwd_row(8)];
         sidebar.pane_cwds = cwd_map(&[(4, "/w")]);
         sidebar.sessions = vec![SessionEvent {
+            pane_id: Some(4),
             cwd: "/w".to_owned(),
             ..Default::default()
         }];
