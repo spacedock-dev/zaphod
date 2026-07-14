@@ -1,14 +1,14 @@
 ---
 id: 441wyy3208egsxq5az3yfzy1
 title: Five-second scrollback lookup must not congest Zellij
-status: implementation
+status: done
 source: live nautical-cuckoo diagnosis 2026-07-14
 sprint: s1-managed-tab-safety
 group: release-blocking-hotfix
 sprint-readiness: ready
 started: 2026-07-14T05:54:11Z
-completed:
-verdict:
+completed: 2026-07-14T11:26:05Z
+verdict: approved
 score: 1.0
 worktree: .worktrees/spacedock-ensign-sidebar-scrollback-timeout-congestion
 issue:
@@ -248,6 +248,19 @@ beyond the pane, tab, switching, and delayed-burst behavior measured above.
   Run one final exact-head `code_completion` panel after the reframe. PASS may
   advance to validation; FAIL returns to the captain and no further panel is
   authorized.
+
+#### Captain merge override — 2026-07-14
+
+- The captain accepted the bounded proof risk and approved direct merge of
+  frozen head `79245ebc16d891640a6885a9770e63c39bb0b33f` as the tactical
+  five-second scrollback hotfix. This explicitly overrides the normal
+  validation requirement; it does not claim that parent `1152` passed.
+- The product boundary remains narrow: periodic refresh no longer invokes
+  pane scrollback. Eliminating every remaining synchronous pane metadata call
+  belongs to `nonblocking-pane-metadata-architecture` (`91`).
+- Parent `1152`'s two residual proof requirements transfer to task `91`: full
+  terminal lifecycle state in action-preservation observations, and a
+  deterministic refresh barrier held through native post-action observation.
 
 ## Stage Report: implementation
 
