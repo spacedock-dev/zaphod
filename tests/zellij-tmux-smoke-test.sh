@@ -659,14 +659,17 @@ wait_for_exact_action_state() {
     local expected_tabs="$3"
     local expected_active="$4"
     local expected_candidate="$5"
+    local deadline="$6"
     local panes="$ROOT/responsive-$label-panes.json"
     local tabs="$ROOT/responsive-$label-tabs.json"
-    local deadline now terminal_count tab_count active_id candidate_count
-    deadline="$(( $(monotonic_ms) + WEDGE_THRESHOLD_SECS * 1000 ))"
+    local now terminal_count="unobserved" tab_count="unobserved"
+    local active_id="unobserved" candidate_count="unobserved"
     while :; do
+        now="$(monotonic_ms)"
+        zaphod_action_deadline_is_live "$deadline" "$now" || break
         if ! capture_action_inventory "$label" "$panes" "$tabs"; then
             now="$(monotonic_ms)"
-            [ "$now" -lt "$deadline" ] ||
+            zaphod_action_deadline_is_live "$deadline" "$now" ||
                 fail "$label returned incomplete native inventories for ${WEDGE_THRESHOLD_SECS}s"
             sleep 0.02
             continue
@@ -681,7 +684,7 @@ wait_for_exact_action_state() {
             [ "$tab_count" -eq "$expected_tabs" ] &&
             [ "$active_id" = "$expected_active" ] &&
             { [ "$expected_candidate" -lt 0 ] || [ "$candidate_count" -eq "$expected_candidate" ]; } &&
-            [ "$now" -le "$deadline" ]; then
+            zaphod_action_deadline_is_live "$deadline" "$now"; then
             return
         fi
         [ "$now" -lt "$deadline" ] || break
@@ -695,14 +698,18 @@ wait_for_complete_new_tab() {
     local expected_terminals="$2"
     local expected_tabs="$3"
     local before_tabs="$4"
+    local deadline="$5"
     local panes="$ROOT/responsive-$label-panes.json"
     local tabs="$ROOT/responsive-$label-tabs.json"
-    local deadline now terminal_count tab_count active_id new_id complete_count old_tabs_present
-    deadline="$(( $(monotonic_ms) + WEDGE_THRESHOLD_SECS * 1000 ))"
+    local now terminal_count="unobserved" tab_count="unobserved"
+    local active_id="unobserved" new_id="unobserved" complete_count="unobserved"
+    local old_tabs_present="unobserved"
     while :; do
+        now="$(monotonic_ms)"
+        zaphod_action_deadline_is_live "$deadline" "$now" || break
         if ! capture_action_inventory "$label" "$panes" "$tabs"; then
             now="$(monotonic_ms)"
-            [ "$now" -lt "$deadline" ] ||
+            zaphod_action_deadline_is_live "$deadline" "$now" ||
                 fail "$label returned incomplete native inventories for ${WEDGE_THRESHOLD_SECS}s"
             sleep 0.02
             continue
@@ -723,7 +730,7 @@ wait_for_complete_new_tab() {
             [ "$tab_count" -eq "$expected_tabs" ] &&
             [ -n "$new_id" ] && [ "$active_id" = "$new_id" ] &&
             [ "$old_tabs_present" = true ] && [ "$complete_count" -gt 0 ] &&
-            [ "$now" -le "$deadline" ]; then
+            zaphod_action_deadline_is_live "$deadline" "$now"; then
             RESPONSIVE_NEW_TAB_ID="$new_id"
             return
         fi
@@ -1339,8 +1346,11 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     RESPONSIVE_TERMINALS="$(jq '[.[] | select((.is_plugin | not) and (.exited | not))] | length' \
         "$ROOT/responsive-start-panes.json")"
     RESPONSIVE_TABS="$(jq 'length' "$ROOT/responsive-start-tabs.json")"
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
     zellij_session action go-to-tab 2
-    wait_for_exact_action_state managed-return "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1
+    wait_for_exact_action_state managed-return "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
 
     # The earlier routing proof leaves the sidebar in its one-column shape.
     # Restore the same resident to 28 columns so a two-second timer tick runs
@@ -1351,6 +1361,8 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
 
     cp "$ROOT/responsive-managed-return-panes.json" "$ROOT/responsive-before-fixture-panes.json"
     RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
     zellij_session action new-pane --tab-id "$TAB_ID" --name zaphod-long-running-non-shell \
         -- tail -f /dev/null > "$ROOT/responsive-fixture-pane-id.txt"
     RESPONSIVE_FIXTURE_ID="$(tr -d '[:space:]' < "$ROOT/responsive-fixture-pane-id.txt")"
@@ -1358,7 +1370,8 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
         terminal_[0-9]*) ;;
         *) fail "non-shell fixture did not return a terminal pane identity: $RESPONSIVE_FIXTURE_ID" ;;
     esac
-    wait_for_exact_action_state fixture-ready "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1
+    wait_for_exact_action_state fixture-ready "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
     RESPONSIVE_FIXTURE_NUM="${RESPONSIVE_FIXTURE_ID#terminal_}"
     jq -e --arg id "$RESPONSIVE_FIXTURE_NUM" \
         'any(.[]; (.id | tostring) == $id and (.is_plugin | not) and (.exited | not) and .title == "zaphod-long-running-non-shell" and (.terminal_command | tostring | contains("tail")))' \
@@ -1372,9 +1385,12 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
 
     for RESPONSIVE_PANE_INDEX in 1 2 3; do
         RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
+        RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+            "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
         send_literal "$(printf '\033p')"
         wait_for_exact_action_state "pane-$RESPONSIVE_PANE_INDEX" \
-            "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1
+            "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1 \
+            "$RESPONSIVE_ACTION_DEADLINE"
         assert_one_new_terminal_in_tab "literal Alt p $RESPONSIVE_PANE_INDEX" \
             "$ROOT/responsive-panes-before-key.json" \
             "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" "$TAB_ID"
@@ -1389,9 +1405,11 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
     RESPONSIVE_TABS="$((RESPONSIVE_TABS + 1))"
     RESPONSIVE_NEW_TAB_ID=""
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
     send_literal "$(printf '\033n')"
     wait_for_complete_new_tab new-tab "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" \
-        "$ROOT/responsive-tabs-before-new.json"
+        "$ROOT/responsive-tabs-before-new.json" "$RESPONSIVE_ACTION_DEADLINE"
     [[ "$RESPONSIVE_NEW_TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] ||
         fail "literal Alt n did not expose one stable active tab identity"
     assert_one_new_terminal_in_tab "literal Alt n" \
@@ -1400,20 +1418,29 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     assert_existing_pane_tuples_preserved "literal Alt n" \
         "$ROOT/responsive-pane-3-panes.json" "$ROOT/responsive-new-tab-panes.json"
 
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
     send_literal "$(printf '\0331')"
-    wait_for_exact_action_state tab-1 "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$FOREIGN_TAB_ID" 1
+    wait_for_exact_action_state tab-1 "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$FOREIGN_TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
     assert_pane_tuple_inventory_unchanged "literal Alt 1" \
         "$ROOT/responsive-new-tab-panes.json" "$ROOT/responsive-tab-1-panes.json"
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
     send_literal "$(printf '\0332')"
-    wait_for_exact_action_state tab-2 "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1
+    wait_for_exact_action_state tab-2 "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
     assert_pane_tuple_inventory_unchanged "literal Alt 2" \
         "$ROOT/responsive-tab-1-panes.json" "$ROOT/responsive-tab-2-panes.json"
 
     RESPONSIVE_PLUGIN_ID="$(jq -er --arg wasm_url "$WASM_URL" \
         '[.[] | select(.is_plugin and .plugin_url == $wasm_url)] | if length == 1 then .[0].id else error("candidate cardinality") end' \
         "$ROOT/responsive-tab-2-panes.json")"
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
     zellij_session action close-pane --pane-id "plugin_$RESPONSIVE_PLUGIN_ID"
-    wait_for_exact_action_state sidebar-closed "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 0
+    wait_for_exact_action_state sidebar-closed "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 0 "$RESPONSIVE_ACTION_DEADLINE"
     jq -S 'map({id, is_plugin, plugin_url, tab_id, exited}) | sort_by(.is_plugin, .id)' \
         "$ROOT/responsive-sidebar-closed-panes.json" > "$ROOT/responsive-quiet-panes-before.json"
     jq -S 'map({tab_id, active}) | sort_by(.tab_id)' \
