@@ -7,6 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 # shellcheck source=scripts/zellij-layout-lib.sh
 source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
+# shellcheck source=tests/helpers/zellij-responsive-proof-lib.sh
+source "$SCRIPT_DIR/helpers/zellij-responsive-proof-lib.sh"
 
 # A smoke launched from a loaded Zellij pane must not carry that client's
 # identity into its disposable server or native CLI calls.
@@ -56,6 +58,11 @@ EVIDENCE_DIR="${ZAPHOD_SMOKE_EVIDENCE_DIR:-}"
 INJECT_FAILURE_PHASE="${ZAPHOD_SMOKE_INJECT_FAILURE_PHASE:-}"
 INJECT_FAILURE_PAYLOAD_BYTES="${ZAPHOD_SMOKE_INJECT_FAILURE_PAYLOAD_BYTES:-0}"
 INJECT_CLEANUP_PROBE_HANG="${ZAPHOD_SMOKE_INJECT_CLEANUP_PROBE_HANG:-none}"
+RESPONSIVENESS_CHECK="${ZAPHOD_SMOKE_RESPONSIVENESS_CHECK:-0}"
+TEST_REFRESH_BARRIER_MILLIS=""
+TEST_REFRESH_BARRIER_PANES=""
+INJECT_RESPONSIVE_TIMEOUT="${ZAPHOD_SMOKE_INJECT_RESPONSIVE_TIMEOUT:-}"
+RESPONSIVE_TIMEOUT_INJECTED=0
 CURRENT_PHASE="boot"
 INJECTED_FAILURE=""
 ENTRY_START_TIMEOUT=30
@@ -435,7 +442,26 @@ case "$INJECT_CLEANUP_PROBE_HANG" in
     none|tmux|zellij|both) ;;
     *) fail "ZAPHOD_SMOKE_INJECT_CLEANUP_PROBE_HANG must be none, tmux, zellij, or both" ;;
 esac
+case "$RESPONSIVENESS_CHECK" in
+    0|1) ;;
+    *) fail "ZAPHOD_SMOKE_RESPONSIVENESS_CHECK must be 0 or 1" ;;
+esac
+if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
+    TEST_REFRESH_BARRIER_MILLIS=400
+    TEST_REFRESH_BARRIER_PANES=2
+fi
+case "$INJECT_RESPONSIVE_TIMEOUT" in
+    ""|pane-1|pane-2|pane-3|new-tab|tab-1|tab-2|sidebar-closed|quiet-after) ;;
+    *) fail "ZAPHOD_SMOKE_INJECT_RESPONSIVE_TIMEOUT names an unknown observation" ;;
+esac
+[ -z "$INJECT_RESPONSIVE_TIMEOUT" ] || [ "$RESPONSIVENESS_CHECK" = 1 ] ||
+    fail "responsive timeout injection requires ZAPHOD_SMOKE_RESPONSIVENESS_CHECK=1"
 zaphod_require_zellij_0443
+WEDGE_THRESHOLD_SECS="$(sed -nE \
+    's/^const WEDGE_THRESHOLD: Duration = Duration::from_secs\(([0-9]+)\);/\1/p' \
+    "$REPO_ROOT/src/main.rs")"
+[ "$WEDGE_THRESHOLD_SECS" = 1 ] ||
+    fail "could not derive the one-second action deadline from WEDGE_THRESHOLD"
 for inherited_client_var in ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID; do
     if printenv "$inherited_client_var" >/dev/null 2>&1; then
         fail "inherited Zellij client identity reached isolated smoke: $inherited_client_var"
@@ -534,8 +560,8 @@ start_tmux_zellij() {
         printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; printf %q; exit %q' \
             "$release" "injected startup exit $INJECT_STARTUP_EXIT\n" "$INJECT_STARTUP_EXIT"
     else
-        printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; exec env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID HOME=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
-            "$release" "$HOME_DIR" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
+        printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; exec env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID HOME=%q TMPDIR=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
+            "$release" "$HOME_DIR" "$ROOT/tmp" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
     fi
     tmux_command new-session -d -x 160 -y 45 -s "$TMUX_SESSION" "$command"
     tmux_command set-option -w -t "$TMUX_SESSION:0" remain-on-exit on
@@ -568,8 +594,306 @@ wait_for_nonempty_panes() {
     fail "isolated Zellij session did not become ready"
 }
 
+wait_for_completed_fixture_refresh() {
+    local panes="$1"
+    local fixture_id="$2"
+    local tab_id="$3"
+    local sidebar_id="$4"
+    local output="$5"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    local records="$ROOT/fixture-refresh-records.jsonl"
+    local deadline now
+    deadline="$(( $(monotonic_ms) + 12000 ))"
+    while :; do
+        if [ -f "$plugin_log" ]; then
+            zaphod_refresh_log_records "$plugin_log" "$sidebar_id" complete > "$records"
+            tail -1 "$records" > "$output"
+            if zaphod_fixture_refresh_record_valid "$panes" "$output" \
+                "$fixture_id" "$tab_id" "$WASM_URL" "$sidebar_id"; then
+                return
+            fi
+        fi
+        now="$(monotonic_ms)"
+        [ "$now" -lt "$deadline" ] ||
+            fail "sidebar did not emit an exact completed refresh record for tail pane $fixture_id"
+        sleep 0.05
+    done
+}
+
+wait_for_next_in_flight_fixture_refresh() {
+    local sidebar_id="$1"
+    local fixture_id="$2"
+    local after_refresh_id="$3"
+    local output="$4"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    local records="$ROOT/fixture-refresh-starts.jsonl"
+    local deadline now refresh_id
+    deadline="$(( $(monotonic_ms) + 12000 ))"
+    while :; do
+        if [ -f "$plugin_log" ]; then
+            zaphod_refresh_log_records "$plugin_log" "$sidebar_id" start > "$records"
+            jq -sc --arg after "$after_refresh_id" --arg fixture "$fixture_id" '
+                [.[] | select(
+                    .refresh_id > ($after | tonumber)
+                    and any(.pane_ids[]; (tostring) == $fixture)
+                )] | last // empty
+            ' "$records" > "$output"
+            if [ -s "$output" ]; then
+                refresh_id="$(jq -er '.refresh_id | tostring' "$output")"
+                if zaphod_refresh_id_is_in_flight \
+                    "$plugin_log" "$sidebar_id" "$refresh_id"; then
+                    return
+                fi
+            fi
+        fi
+        now="$(monotonic_ms)"
+        [ "$now" -lt "$deadline" ] ||
+            fail "sidebar did not hold a fixture refresh in flight"
+        sleep 0.02
+    done
+}
+
+assert_fixture_refresh_in_flight() {
+    local label="$1"
+    local sidebar_id="$2"
+    local refresh_id="$3"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    zaphod_refresh_id_is_in_flight "$plugin_log" "$sidebar_id" "$refresh_id" ||
+        fail "$label completed outside fixture refresh $refresh_id"
+}
+
+begin_fixture_refresh_overlap() {
+    local label="$1"
+    wait_for_next_in_flight_fixture_refresh "$RESPONSIVE_PLUGIN_ID" \
+        "$RESPONSIVE_FIXTURE_NUM" "$RESPONSIVE_LAST_REFRESH_ID" \
+        "$ROOT/responsive-$label-refresh-start.json"
+    RESPONSIVE_IN_FLIGHT_REFRESH_ID="$(jq -er '.refresh_id | tostring' \
+        "$ROOT/responsive-$label-refresh-start.json")"
+}
+
+finish_fixture_refresh_overlap() {
+    local label="$1"
+    local panes="$2"
+    wait_for_matching_fixture_refresh_completion "$panes" \
+        "$RESPONSIVE_FIXTURE_NUM" "$TAB_ID" "$RESPONSIVE_PLUGIN_ID" \
+        "$RESPONSIVE_IN_FLIGHT_REFRESH_ID" "$ROOT/responsive-$label-refresh-complete.json"
+    RESPONSIVE_LAST_REFRESH_ID="$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
+}
+
+wait_for_matching_fixture_refresh_completion() {
+    local panes="$1"
+    local fixture_id="$2"
+    local tab_id="$3"
+    local sidebar_id="$4"
+    local refresh_id="$5"
+    local output="$6"
+    local plugin_log="$ROOT/tmp/zellij-$(id -u)/zellij-log/zellij.log"
+    local records="$ROOT/matching-refresh-records.jsonl"
+    local deadline now
+    deadline="$(( $(monotonic_ms) + 12000 ))"
+    while :; do
+        zaphod_refresh_log_records "$plugin_log" "$sidebar_id" complete > "$records"
+        jq -sc --arg refresh_id "$refresh_id" \
+            '[.[] | select((.refresh_id | tostring) == $refresh_id)] | if length == 1 then .[0] else empty end' \
+            "$records" > "$output"
+        if [ -s "$output" ] &&
+            zaphod_fixture_refresh_record_valid "$panes" "$output" \
+                "$fixture_id" "$tab_id" "$WASM_URL" "$sidebar_id"; then
+            return
+        fi
+        now="$(monotonic_ms)"
+        [ "$now" -lt "$deadline" ] ||
+            fail "in-flight fixture refresh $refresh_id did not complete exactly once"
+        sleep 0.05
+    done
+}
+
 send_literal() {
     tmux_command send-keys -l -t "$TMUX_PANE" -- "$1"
+}
+
+monotonic_ms() {
+    perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e \
+        'printf "%d\n", clock_gettime(CLOCK_MONOTONIC) * 1000'
+}
+
+capture_action_inventory() {
+    local label="$1"
+    local panes="$2"
+    local tabs="$3"
+    local pane_status=0 tab_status=0 pane_pid tab_pid
+    if [ "$label" = "$INJECT_RESPONSIVE_TIMEOUT" ] &&
+        [ "$RESPONSIVE_TIMEOUT_INJECTED" -eq 0 ]; then
+        RESPONSIVE_TIMEOUT_INJECTED=1
+        phase responsive-action-timeout
+        bounded_exec "$WEDGE_THRESHOLD_SECS" sleep 60 \
+            > "$panes" 2> "$panes.err" || pane_status=$?
+        fail "injected $label native pane observation timed out: status $pane_status"
+    fi
+    # Both replies describe one native observation point and are independent.
+    # Launch them together so the pre-send absolute deadline does not acquire
+    # an artificial second CLI round trip.
+    zellij_session_with_timeout "$WEDGE_THRESHOLD_SECS" \
+        action list-panes --json --all --command --geometry --state --tab \
+        > "$panes" 2> "$panes.err" &
+    pane_pid=$!
+    zellij_session_with_timeout "$WEDGE_THRESHOLD_SECS" \
+        action list-tabs --json --all --state --layout \
+        > "$tabs" 2> "$tabs.err" &
+    tab_pid=$!
+    wait "$pane_pid" || pane_status=$?
+    wait "$tab_pid" || tab_status=$?
+    [ "$pane_status" -eq 0 ] ||
+        fail "$label native pane observation failed or timed out: status $pane_status"
+    [ "$tab_status" -eq 0 ] ||
+        fail "$label native tab observation failed or timed out: status $tab_status"
+    jq -e 'type == "array" and length > 0' "$panes" >/dev/null || return 1
+    zaphod_valid_tab_inventory "$tabs" || return 1
+}
+
+capture_settled_action_inventory() {
+    local label="$1"
+    local panes="$2"
+    local tabs="$3"
+    local deadline now
+    deadline="$(( $(monotonic_ms) + WEDGE_THRESHOLD_SECS * 1000 ))"
+    while :; do
+        if capture_action_inventory "$label" "$panes" "$tabs"; then
+            return
+        fi
+        now="$(monotonic_ms)"
+        [ "$now" -lt "$deadline" ] ||
+            fail "$label returned incomplete native inventories for ${WEDGE_THRESHOLD_SECS}s"
+        sleep 0.02
+    done
+}
+
+wait_for_exact_action_state() {
+    local label="$1"
+    local expected_terminals="$2"
+    local expected_tabs="$3"
+    local expected_active="$4"
+    local expected_candidate="$5"
+    local deadline="$6"
+    local panes="$ROOT/responsive-$label-panes.json"
+    local tabs="$ROOT/responsive-$label-tabs.json"
+    local now terminal_count="unobserved" tab_count="unobserved"
+    local active_id="unobserved" candidate_count="unobserved"
+    while :; do
+        now="$(monotonic_ms)"
+        zaphod_action_deadline_is_live "$deadline" "$now" || break
+        if ! capture_action_inventory "$label" "$panes" "$tabs"; then
+            now="$(monotonic_ms)"
+            zaphod_action_deadline_is_live "$deadline" "$now" ||
+                fail "$label returned incomplete native inventories for ${WEDGE_THRESHOLD_SECS}s"
+            sleep 0.02
+            continue
+        fi
+        terminal_count="$(jq '[.[] | select((.is_plugin | not) and (.exited | not))] | length' "$panes")"
+        tab_count="$(jq 'length' "$tabs")"
+        active_id="$(jq -er '.[] | select(.active) | .tab_id' "$tabs" 2>/dev/null || true)"
+        candidate_count="$(jq --arg wasm_url "$WASM_URL" \
+            '[.[] | select(.is_plugin and .plugin_url == $wasm_url)] | length' "$panes")"
+        now="$(monotonic_ms)"
+        if [ "$terminal_count" -eq "$expected_terminals" ] &&
+            [ "$tab_count" -eq "$expected_tabs" ] &&
+            [ "$active_id" = "$expected_active" ] &&
+            { [ "$expected_candidate" -lt 0 ] || [ "$candidate_count" -eq "$expected_candidate" ]; } &&
+            zaphod_action_deadline_is_live "$deadline" "$now"; then
+            return
+        fi
+        [ "$now" -lt "$deadline" ] || break
+        sleep 0.02
+    done
+    fail "$label missed the ${WEDGE_THRESHOLD_SECS}s native-state deadline (terminals=$terminal_count tabs=$tab_count active=${active_id:-missing} candidate=$candidate_count)"
+}
+
+wait_for_complete_new_tab() {
+    local label="$1"
+    local expected_terminals="$2"
+    local expected_tabs="$3"
+    local before_tabs="$4"
+    local deadline="$5"
+    local panes="$ROOT/responsive-$label-panes.json"
+    local tabs="$ROOT/responsive-$label-tabs.json"
+    local now terminal_count="unobserved" tab_count="unobserved"
+    local active_id="unobserved" new_id="unobserved" complete_count="unobserved"
+    local old_tabs_present="unobserved"
+    while :; do
+        now="$(monotonic_ms)"
+        zaphod_action_deadline_is_live "$deadline" "$now" || break
+        if ! capture_action_inventory "$label" "$panes" "$tabs"; then
+            now="$(monotonic_ms)"
+            zaphod_action_deadline_is_live "$deadline" "$now" ||
+                fail "$label returned incomplete native inventories for ${WEDGE_THRESHOLD_SECS}s"
+            sleep 0.02
+            continue
+        fi
+        terminal_count="$(jq '[.[] | select((.is_plugin | not) and (.exited | not))] | length' "$panes")"
+        tab_count="$(jq 'length' "$tabs")"
+        active_id="$(jq -er '.[] | select(.active) | .tab_id' "$tabs" 2>/dev/null || true)"
+        new_id="$(jq -er --slurpfile before "$before_tabs" \
+            '($before[0] | map(.tab_id)) as $old | [.[] | select(.tab_id as $id | ($old | index($id) | not)) | .tab_id] | if length == 1 then .[0] | tostring else empty end' \
+            "$tabs" 2>/dev/null || true)"
+        old_tabs_present="$(jq --slurpfile before "$before_tabs" \
+            '($before[0] | map(.tab_id)) as $old | (map(.tab_id)) as $after | all($old[]; . as $id | $after | index($id) != null)' \
+            "$tabs")"
+        complete_count="$(jq --arg new_id "$new_id" \
+            '[.[] | select((.is_plugin | not) and (.exited | not) and (.tab_id | tostring) == $new_id)] | length' "$panes")"
+        now="$(monotonic_ms)"
+        if [ "$terminal_count" -eq "$expected_terminals" ] &&
+            [ "$tab_count" -eq "$expected_tabs" ] &&
+            [ -n "$new_id" ] && [ "$active_id" = "$new_id" ] &&
+            [ "$old_tabs_present" = true ] && [ "$complete_count" -gt 0 ] &&
+            zaphod_action_deadline_is_live "$deadline" "$now"; then
+            RESPONSIVE_NEW_TAB_ID="$new_id"
+            return
+        fi
+        [ "$now" -lt "$deadline" ] || break
+        sleep 0.02
+    done
+    fail "$label missed the ${WEDGE_THRESHOLD_SECS}s complete-tab deadline (terminals=$terminal_count tabs=$tab_count new=${new_id:-missing} active=${active_id:-missing} active_terminals=$complete_count old_tabs_present=$old_tabs_present)"
+}
+
+assert_one_new_terminal_in_tab() {
+    local label="$1"
+    local before="$2"
+    local after="$3"
+    local expected_tab="$4"
+    jq -e --slurpfile before "$before" --arg expected_tab "$expected_tab" '
+        ($before[0] | map(select((.is_plugin | not) and (.exited | not))) | map(.id)) as $old_ids
+        | (map(select((.is_plugin | not) and (.exited | not)))) as $after_terminals
+        | ($after_terminals | map(.id)) as $after_ids
+        | ([$after_terminals[] | select(.id as $id | ($old_ids | index($id) | not))]) as $new
+        | all($old_ids[]; . as $id | $after_ids | index($id) != null)
+          and ($new | length) == 1
+          and (($new[0].tab_id | tostring) == $expected_tab)
+    ' "$after" >/dev/null ||
+        fail "$label did not add exactly one terminal identity to managed tab $expected_tab"
+}
+
+assert_existing_pane_tuples_preserved() {
+    local label="$1"
+    local before="$2"
+    local after="$3"
+    zaphod_existing_pane_tuples_preserved "$before" "$after" ||
+        fail "$label changed pane identity or the resident sidebar's full native state"
+}
+
+assert_pane_tuple_inventory_unchanged() {
+    local label="$1"
+    local before="$2"
+    local after="$3"
+    local before_projection="$ROOT/responsive-tuple-before.json"
+    local after_projection="$ROOT/responsive-tuple-after.json"
+    if ! zaphod_pane_tuple_inventories_equal "$before" "$after"; then
+        jq -S 'def is_sidebar: .is_plugin and (.plugin_url | type) == "string" and (.plugin_url | test("(^|/)zellij-sidebar\\.wasm([?#].*)?$")); def tuple: {id, is_plugin, tab_id, plugin_url} + if is_sidebar then {exited, is_floating, is_suppressed, is_selectable} else {} end; map(tuple) | sort_by(.is_plugin, .id)' \
+            "$before" > "$before_projection"
+        jq -S 'def is_sidebar: .is_plugin and (.plugin_url | type) == "string" and (.plugin_url | test("(^|/)zellij-sidebar\\.wasm([?#].*)?$")); def tuple: {id, is_plugin, tab_id, plugin_url} + if is_sidebar then {exited, is_floating, is_suppressed, is_selectable} else {} end; map(tuple) | sort_by(.is_plugin, .id)' \
+            "$after" > "$after_projection"
+        diff -u "$before_projection" "$after_projection" >&2 || true
+        fail "$label changed the native pane tuple inventory"
+    fi
 }
 
 capture_validated_layout() {
@@ -844,6 +1168,9 @@ entry_command() {
 		ZAPHOD_WATCH_DIR="$ROOT/w" \
         CARGO_TARGET_DIR="$REPO_ROOT/target" \
         ZAPHOD_TEST_PREBUILT_ARTIFACTS="${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" \
+        ZAPHOD_TEST_PLUGIN_DEBUG=1 \
+        ZAPHOD_TEST_REFRESH_BARRIER_MILLIS="$TEST_REFRESH_BARRIER_MILLIS" \
+        ZAPHOD_TEST_REFRESH_BARRIER_PANES="$TEST_REFRESH_BARRIER_PANES" \
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
         --agentsview-url "$AGENTSVIEW_URL"
 }
@@ -994,6 +1321,149 @@ cmp -s "$ROOT/foreign-before.screen" "$ROOT/foreign-after.screen" || {
 jq -e --arg wasm_url "$WASM_URL" \
     '([.[] | select(.is_plugin and .plugin_url == $wasm_url)] | length) == 1' \
     "$ROOT/foreign-after.json" >/dev/null || fail "foreign Alt / created or removed a candidate rail"
+
+if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
+    phase responsive-actions-start
+    capture_settled_action_inventory responsive-start \
+        "$ROOT/responsive-start-panes.json" "$ROOT/responsive-start-tabs.json"
+    RESPONSIVE_TERMINALS="$(jq '[.[] | select((.is_plugin | not) and (.exited | not))] | length' \
+        "$ROOT/responsive-start-panes.json")"
+    RESPONSIVE_TABS="$(jq 'length' "$ROOT/responsive-start-tabs.json")"
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
+    zellij_session action go-to-tab 2
+    wait_for_exact_action_state managed-return "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
+
+    # The earlier routing proof leaves the sidebar in its one-column shape.
+    # Restore the same resident to 28 columns so a two-second timer tick runs
+    # before the measured key sequence.
+    send_literal "$(printf '\033/')"
+    wait_for_candidate_width "$ROOT/responsive-docked.json" 28
+    phase responsive-sidebar-docked
+
+    cp "$ROOT/responsive-managed-return-panes.json" "$ROOT/responsive-before-fixture-panes.json"
+    RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
+    zellij_session action new-pane --tab-id "$TAB_ID" --name zaphod-long-running-non-shell \
+        -- tail -f /dev/null > "$ROOT/responsive-fixture-pane-id.txt"
+    RESPONSIVE_FIXTURE_ID="$(tr -d '[:space:]' < "$ROOT/responsive-fixture-pane-id.txt")"
+    case "$RESPONSIVE_FIXTURE_ID" in
+        terminal_[0-9]*) ;;
+        *) fail "non-shell fixture did not return a terminal pane identity: $RESPONSIVE_FIXTURE_ID" ;;
+    esac
+    wait_for_exact_action_state fixture-ready "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
+    RESPONSIVE_FIXTURE_NUM="${RESPONSIVE_FIXTURE_ID#terminal_}"
+    RESPONSIVE_PLUGIN_ID="$(jq -er --arg wasm_url "$WASM_URL" \
+        '[.[] | select(.is_plugin and .plugin_url == $wasm_url)] | if length == 1 then .[0].id | tostring else error("candidate cardinality") end' \
+        "$ROOT/responsive-fixture-ready-panes.json")"
+    wait_for_completed_fixture_refresh "$ROOT/responsive-fixture-ready-panes.json" \
+        "$RESPONSIVE_FIXTURE_NUM" "$TAB_ID" "$RESPONSIVE_PLUGIN_ID" \
+        "$ROOT/responsive-fixture-refresh.json"
+    RESPONSIVE_BASELINE_REFRESH_ID="$(jq -er '.refresh_id | tostring' \
+        "$ROOT/responsive-fixture-refresh.json")"
+    RESPONSIVE_LAST_REFRESH_ID="$RESPONSIVE_BASELINE_REFRESH_ID"
+    phase responsive-fixture-refresh-complete
+    capture_settled_action_inventory responsive-after-timer \
+        "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-after-timer-tabs.json"
+    cp "$ROOT/responsive-after-timer-panes.json" "$ROOT/responsive-panes-before-key.json"
+
+    for RESPONSIVE_PANE_INDEX in 1 2 3; do
+        RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
+        begin_fixture_refresh_overlap "pane-$RESPONSIVE_PANE_INDEX"
+        RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+            "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
+        assert_fixture_refresh_in_flight "literal Alt p $RESPONSIVE_PANE_INDEX pre-send" \
+            "$RESPONSIVE_PLUGIN_ID" "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
+        send_literal "$(printf '\033p')"
+        wait_for_exact_action_state "pane-$RESPONSIVE_PANE_INDEX" \
+            "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" "$TAB_ID" 1 \
+            "$RESPONSIVE_ACTION_DEADLINE"
+        assert_one_new_terminal_in_tab "literal Alt p $RESPONSIVE_PANE_INDEX" \
+            "$ROOT/responsive-panes-before-key.json" \
+            "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" "$TAB_ID"
+        assert_existing_pane_tuples_preserved "literal Alt p $RESPONSIVE_PANE_INDEX" \
+            "$ROOT/responsive-panes-before-key.json" \
+            "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json"
+        cp "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json" \
+            "$ROOT/responsive-panes-before-key.json"
+        finish_fixture_refresh_overlap "pane-$RESPONSIVE_PANE_INDEX" \
+            "$ROOT/responsive-pane-$RESPONSIVE_PANE_INDEX-panes.json"
+    done
+
+    cp "$ROOT/responsive-pane-3-tabs.json" "$ROOT/responsive-tabs-before-new.json"
+    RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
+    RESPONSIVE_TABS="$((RESPONSIVE_TABS + 1))"
+    RESPONSIVE_NEW_TAB_ID=""
+    begin_fixture_refresh_overlap new-tab
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
+    assert_fixture_refresh_in_flight "literal Alt n pre-send" \
+        "$RESPONSIVE_PLUGIN_ID" "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
+    send_literal "$(printf '\033n')"
+    wait_for_complete_new_tab new-tab "$RESPONSIVE_TERMINALS" "$RESPONSIVE_TABS" \
+        "$ROOT/responsive-tabs-before-new.json" "$RESPONSIVE_ACTION_DEADLINE"
+    [[ "$RESPONSIVE_NEW_TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]] ||
+        fail "literal Alt n did not expose one stable active tab identity"
+    assert_one_new_terminal_in_tab "literal Alt n" \
+        "$ROOT/responsive-pane-3-panes.json" "$ROOT/responsive-new-tab-panes.json" \
+        "$RESPONSIVE_NEW_TAB_ID"
+    assert_existing_pane_tuples_preserved "literal Alt n" \
+        "$ROOT/responsive-pane-3-panes.json" "$ROOT/responsive-new-tab-panes.json"
+    finish_fixture_refresh_overlap new-tab "$ROOT/responsive-new-tab-panes.json"
+
+    begin_fixture_refresh_overlap tab-1
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
+    assert_fixture_refresh_in_flight "literal Alt 1 pre-send" \
+        "$RESPONSIVE_PLUGIN_ID" "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
+    send_literal "$(printf '\0331')"
+    wait_for_exact_action_state tab-1 "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$FOREIGN_TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
+    assert_pane_tuple_inventory_unchanged "literal Alt 1" \
+        "$ROOT/responsive-new-tab-panes.json" "$ROOT/responsive-tab-1-panes.json"
+    finish_fixture_refresh_overlap tab-1 "$ROOT/responsive-tab-1-panes.json"
+    begin_fixture_refresh_overlap tab-2
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
+    assert_fixture_refresh_in_flight "literal Alt 2 pre-send" \
+        "$RESPONSIVE_PLUGIN_ID" "$RESPONSIVE_IN_FLIGHT_REFRESH_ID"
+    send_literal "$(printf '\0332')"
+    wait_for_exact_action_state tab-2 "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 1 "$RESPONSIVE_ACTION_DEADLINE"
+    assert_pane_tuple_inventory_unchanged "literal Alt 2" \
+        "$ROOT/responsive-tab-1-panes.json" "$ROOT/responsive-tab-2-panes.json"
+    finish_fixture_refresh_overlap tab-2 "$ROOT/responsive-tab-2-panes.json"
+    RESPONSIVE_ACTION_DEADLINE="$(zaphod_action_deadline_ms \
+        "$(monotonic_ms)" "$WEDGE_THRESHOLD_SECS")"
+    zellij_session action close-pane --pane-id "plugin_$RESPONSIVE_PLUGIN_ID"
+    wait_for_exact_action_state sidebar-closed "$RESPONSIVE_TERMINALS" \
+        "$RESPONSIVE_TABS" "$TAB_ID" 0 "$RESPONSIVE_ACTION_DEADLINE"
+    jq -S 'map({id, is_plugin, plugin_url, tab_id, exited}) | sort_by(.is_plugin, .id)' \
+        "$ROOT/responsive-sidebar-closed-panes.json" > "$ROOT/responsive-quiet-panes-before.json"
+    jq -S 'map({tab_id, active}) | sort_by(.tab_id)' \
+        "$ROOT/responsive-sidebar-closed-tabs.json" > "$ROOT/responsive-quiet-tabs-before.json"
+
+    sleep 6
+    capture_settled_action_inventory quiet-after \
+        "$ROOT/responsive-quiet-after-panes.json" "$ROOT/responsive-quiet-after-tabs.json"
+    jq -S 'map({id, is_plugin, plugin_url, tab_id, exited}) | sort_by(.is_plugin, .id)' \
+        "$ROOT/responsive-quiet-after-panes.json" > "$ROOT/responsive-quiet-panes-after.json"
+    jq -S 'map({tab_id, active}) | sort_by(.tab_id)' \
+        "$ROOT/responsive-quiet-after-tabs.json" > "$ROOT/responsive-quiet-tabs-after.json"
+    cmp -s "$ROOT/responsive-quiet-panes-before.json" "$ROOT/responsive-quiet-panes-after.json" || {
+        diff -u "$ROOT/responsive-quiet-panes-before.json" "$ROOT/responsive-quiet-panes-after.json" >&2 || true
+        fail "pane identities changed during the six-second no-input window"
+    }
+    cmp -s "$ROOT/responsive-quiet-tabs-before.json" "$ROOT/responsive-quiet-tabs-after.json" || {
+        diff -u "$ROOT/responsive-quiet-tabs-before.json" "$ROOT/responsive-quiet-tabs-after.json" >&2 || true
+        fail "tab identity or active tab changed during the six-second no-input window"
+    }
+    phase responsive-actions-complete
+    printf 'PASS: literal Alt p/Alt n/Alt 1/Alt 2 met native one-second deadlines during exact in-flight refreshes; the six-second post-close state was stable\n'
+fi
 
 [ "$(file_state "$STANDING_CONFIG")" = "$STANDING_CONFIG_BEFORE" ] ||
     fail "standing Zellij config changed during tmux smoke: $STANDING_CONFIG"
