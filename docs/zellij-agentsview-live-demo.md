@@ -1,66 +1,30 @@
-# Chat-guided AgentsView live demo
+# Chat-guided exact AgentsView binding demo
 
-Use this packet to prove the direct selected-checkout journey against a real
-AgentsView-backed agent session. The first officer sends one step at a time in
-chat; the captain does not need clipboard support in a Subspace TUI float.
+This drill proves that rows follow explicit Codex SessionStart registrations,
+not checkout history or CWD. It uses two fresh managed tabs with the same CWD.
+Do not press `Alt /` or `Alt Shift z` during the identity drill.
 
-This is not a keybinding drill. Do not press `Alt /` or `Alt Shift z`. Do not
-run `target/zaphod subscribe` by hand. The direct script starts the one private
-sidecar after it creates and verifies the fresh tab. No step writes standing
-`config.kdl` or `layouts/zaphod.kdl`.
+The project-local hook in `.codex/hooks.json` calls this checkout's
+`target/zaphod register-agent-session`. It records the authoritative Codex
+`session_id` with inherited `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`.
+It never edits global Codex configuration.
 
-## 1. Wait for the real AgentsView API
+## 1. Prepare AgentsView and the selected checkout
 
-Run these commands in an ordinary control terminal outside the attached
-`WORK` client, not inside the Subspace review float. Keep this terminal open;
-the direct command targets `WORK` remotely, so the same terminal remains
-available for the final checks. Open it in the selected checkout, then derive
-all paths for this run:
+Run these commands in a control terminal:
 
 ```bash
 set -euo pipefail
 FQ="$(git rev-parse --show-toplevel)"
-AGENTSVIEW_BIN="$(command -v agentsview)"
 AGENTSVIEW_URL=http://127.0.0.1:8080
-RUN_ID="$(date +%s)"
-MARKER="fq-initial-${RUN_ID}"
-SSE_MARKER="fq-sse-${RUN_ID}"
-printf 'selected checkout: %s\ninitial marker: %s\nSSE marker: %s\n' "$FQ" "$MARKER" "$SSE_MARKER"
-```
-
-Check the real server. Start it only if no server is running:
-
-```bash
-"$AGENTSVIEW_BIN" serve status || "$AGENTSVIEW_BIN" serve --background --no-browser
-```
-
-`serve status` may report a startup phase such as `full resync`. Do not run the
-Zaphod entry command during that phase. Wait until the HTTP sessions endpoint
-responds:
-
-```bash
-until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?include_one_shot=true&include_children=true&limit=1" > /tmp/fq-agentsview-ready.json; do
-  "$AGENTSVIEW_BIN" serve status
-  sleep 5
+agentsview serve status
+until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?limit=1" >/dev/null; do
+  sleep 2
 done
-jq -e '.sessions | type == "array"' /tmp/fq-agentsview-ready.json
-```
 
-The `jq` command must print `true`. A connection refusal means AgentsView is
-still starting; keep waiting. The Zaphod sidecar deliberately exits on its
-first source failure and has no reconnect loop.
-
-## 2. Create the direct-entry tab
-
-Still in the ordinary terminal, record standing hashes and run the direct
-script:
-
-```bash
-cd "$FQ"
 CONFIG_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 CONFIG_FILE="${ZELLIJ_CONFIG_FILE:-$CONFIG_ROOT/config.kdl}"
 LAYOUT_FILE="$CONFIG_ROOT/layouts/zaphod.kdl"
-ZELLIJ_BIN="${ZELLIJ_BIN:-zellij}"
 if [ -n "${ZELLIJ_DATA_DIR:-}" ]; then
   DATA_DIR="$ZELLIJ_DATA_DIR"
 elif [ "$(uname -s)" = Darwin ]; then
@@ -68,120 +32,168 @@ elif [ "$(uname -s)" = Darwin ]; then
 else
   DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/zellij"
 fi
-ZELLIJ_PROFILE_ARGS=(--config-dir "$CONFIG_ROOT" --config "$CONFIG_FILE" --data-dir "$DATA_DIR")
-shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-before.sha256
-./scripts/zellij-new-tab.sh --session WORK --name 'Zaphod fq AgentsView drill' --agentsview-url "$AGENTSVIEW_URL" | tee /tmp/fq-entry.out
+shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/kj-kdl-before.sha256
 ```
 
-Do not start another sidecar. The entry output must contain `TAB_ID`,
-`WASM_URL`, `SIDECAR_LOG`, and `SIDECAR_PID`. The command emits those values
-only after the sidecar has verified the exact tab target and established a
-correctly typed SSE response that remains open through its stability probe.
-Initial replay follows that
-handshake while stream events remain queued.
+AgentsView must report a running server, not a resync or startup phase.
 
-## 3. Create one real agent session
+## 2. Create two same-CWD managed tabs
 
-The direct command activates a fresh managed tab. In that tab's shell pane,
-run `pwd`. It must print the selected checkout path shown in step 1. If it
-does not, the first officer supplies that derived path for a short `cd`
-command. Then type:
+From the selected checkout, run the direct entry twice:
 
 ```bash
-codex
+./scripts/zellij-new-tab.sh --session WORK --name 'KJ exact A'   --agentsview-url "$AGENTSVIEW_URL" | tee /tmp/kj-entry-a.out
+./scripts/zellij-new-tab.sh --session WORK --name 'KJ exact B'   --agentsview-url "$AGENTSVIEW_URL" | tee /tmp/kj-entry-b.out
 ```
 
-At the Codex prompt, send this short request, replacing `<MARKER>` with the
-exact marker printed in step 1:
+Each command must report a distinct `TAB_ID`, one `WASM_URL`, one
+`SIDECAR_PID`, and one `SIDECAR_LOG`. Both sidecars may start with an empty
+snapshot. An empty rail is correct until a trusted SessionStart registration
+exists.
+
+## 3. Trust the checkout hook once
+
+In tab A, start `codex` and open `/hooks`. Review and trust the
+project-local `SessionStart` command
+`scripts/zaphod-codex-session-hook.sh`. Exit that Codex process after trust is
+recorded. Repeat the trust check in tab B if Codex asks there.
+
+The startup that displayed the trust prompt may have skipped the hook. Do not
+use it as evidence. Start a new Codex process for the measured run.
+
+## 4. Start one measured top-level session per tab
+
+In tab A, start Codex and send:
 
 ```text
-<MARKER>: inspect README.md without edits, then wait for my next instruction.
+KJ_TAB_A_REAL: inspect README.md without edits, then wait.
 ```
 
-Keep the agent session open. AgentsView must index a session whose `cwd` is
-the selected checkout and whose first message starts with the unique marker.
-
-The rail's terminal-pane status line and its subscription section are separate
-signals. A shell pane may show `unknown . unknown`; that line does not prove or
-disprove subscription. The required visible proof is a separate `AGENTS`
-section with a `codex` session row and the exact marker in its summary. The
-captain records that visual observation in chat; Zellij 0.44.x does not expose
-plugin-pane rendering through `dump-screen`.
-
-## 4. Establish the initial row
-
-Return to the ordinary terminal. Wait for the real session to reach the served
-API:
-
-```bash
-until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?include_one_shot=true&include_children=true&limit=1000" > /tmp/fq-agentsview-sessions.json && jq -e --arg cwd "$FQ" --arg marker "$MARKER" '[.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($marker)))] | length == 1' /tmp/fq-agentsview-sessions.json > /dev/null; do
-  sleep 5
-done
-```
-
-The captain must now report a visible `AGENTS` header and `codex` row with the
-exact initial marker. This is only the baseline: the sidecar may have emitted
-an older session during its initial HTTP refresh, but this new session was
-created after the entry command's stream-ready handshake.
-
-## 5. Prove a post-baseline SSE refresh
-
-Return to the first Codex session, enter `/exit`, and wait for the shell prompt.
-Start `codex` again in the same pane and selected checkout. At its prompt, send
-this request, replacing `<SSE_MARKER>` with the exact SSE marker from step 1:
+In tab B, start Codex and send:
 
 ```text
-<SSE_MARKER>: inspect README.md without edits, then wait for my next instruction.
+KJ_TAB_B_REAL: inspect README.md without edits, then wait.
 ```
 
-This second session is created only after the first row is visible. Return to
-the ordinary terminal and require AgentsView to serve exactly one session for
-each marker:
+Ask the tab-B Codex process to spawn one subagent that replies with a short
+marker. The child creates AgentsView history but no top-level SessionStart
+registration.
+
+The rails must settle to these cardinalities:
+
+- tab A: exactly one top-level row, `KJ_TAB_A_REAL`;
+- tab B: exactly one top-level row, `KJ_TAB_B_REAL`;
+- both rails combined: zero child rows and zero older same-CWD history rows.
+
+A row in both tabs, an `unbound` row, or any child row fails the drill.
+
+## 5. Verify registry and API identity
+
+Derive the private registry root with the same rule as the native binary:
 
 ```bash
-until curl -fsS "$AGENTSVIEW_URL/api/v1/sessions?include_one_shot=true&include_children=true&limit=1000" > /tmp/fq-agentsview-sessions.json && jq -e --arg cwd "$FQ" --arg first "$MARKER" --arg second "$SSE_MARKER" '([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($first)))] | length == 1) and ([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($second)))] | length == 1)' /tmp/fq-agentsview-sessions.json > /dev/null; do
-  sleep 5
-done
+if [ -n "${ZAPHOD_REGISTRY_DIR:-}" ]; then
+  REGISTRY_DIR="$ZAPHOD_REGISTRY_DIR"
+elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  REGISTRY_DIR="$XDG_RUNTIME_DIR/zaphod/agent-sessions-v1"
+else
+  REGISTRY_DIR="${TMPDIR:-/tmp}/zaphod-agent-sessions-v1-$(id -u)"
+fi
+find "$REGISTRY_DIR" -maxdepth 1 -name 'session-*.json' -print
 ```
 
-The captain must now report a second visible `codex` row with the exact SSE
-marker. Because that session did not exist when the initial row was visible,
-its appearance in the rail proves that the sidecar consumed a later
-`data_changed` event and refreshed from the persistent SSE stream.
-
-## 6. Capture the final proof
-
-Capture the exact managed target:
+Inspect the record whose `zellij_session` is `WORK`:
 
 ```bash
-TAB_ID="$(sed -n 's/^TAB_ID=//p' /tmp/fq-entry.out)"
-WASM_URL="$(sed -n 's/^WASM_URL=//p' /tmp/fq-entry.out)"
-SIDECAR_LOG="$(sed -n 's/^SIDECAR_LOG=//p' /tmp/fq-entry.out)"
-SIDECAR_PID="$(sed -n 's/^SIDECAR_PID=//p' /tmp/fq-entry.out)"
-test -n "$TAB_ID"
-test -n "$WASM_URL"
-test -n "$SIDECAR_LOG"
-[[ "$SIDECAR_PID" =~ ^[1-9][0-9]*$ ]]
-"$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-panes --json --all --command --geometry --state --tab > /tmp/fq-panes.json
-"$ZELLIJ_BIN" "${ZELLIJ_PROFILE_ARGS[@]}" --session WORK action list-tabs --json --all --state --layout > /tmp/fq-tabs.json
+jq . "$REGISTRY_DIR"/session-*.json
 ```
 
-Verify one stable-ID resident, one active target tab, both real sessions, a
-still-live sidecar with no terminal diagnostics, and unchanged standing KDL:
+It must contain one record for each measured top-level pane. For each record,
+the following relation must hold exactly:
+
+```text
+agentsview_session_id == "codex:" + agent_session_id
+```
+
+Fetch each `agentsview_session_id` through
+`/api/v1/sessions/{id}`. The returned `id` must equal the requested ID.
+Do not substitute a list query, CWD match, newest session, title, prompt, or
+timestamp.
+
+## 6. Prove direct focus and replacement
+
+Click tab A's session row. Zellij must focus tab A's registered terminal pane.
+Click tab B's row; it must focus tab B's registered terminal pane.
+
+Exit the top-level Codex process in tab A, then start a new top-level Codex
+session in the same pane with marker `KJ_TAB_A_REPLACEMENT`. The new
+SessionStart must replace the old record. Tab A must show one replacement row,
+not two. A Codex `Stop` between prompts must retain the current mapping.
+
+If the operator's Zellij profile exposes a native move-to-tab action, move one
+registered terminal between the two managed tabs. During convergence, the row
+may appear in zero or one rail; it must never appear in both. It must settle in
+the rail that owns the pane's current native tab. Skip this manual move when
+the profile has no such action; the disposable native smoke covers membership
+and stale-delivery barriers without changing the operator's keymap.
+
+## 7. Prove sidecar rehydration
+
+Reconstruct tab A's private invocation from the entry output, then terminate
+and restart only its sidecar:
 
 ```bash
-jq -e --arg id "$TAB_ID" --arg url "$WASM_URL" '[.[] | select((.tab_id | tostring) == $id and .is_plugin and .plugin_url == $url and (.is_floating | not) and (.is_suppressed | not))] | length == 1' /tmp/fq-panes.json > /dev/null
-jq -e --arg id "$TAB_ID" '[.[] | select((.tab_id | tostring) == $id and .active)] | length == 1' /tmp/fq-tabs.json > /dev/null
-jq -e --arg cwd "$FQ" --arg first "$MARKER" --arg second "$SSE_MARKER" '([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($first)))] | length == 1) and ([.sessions[] | select(.cwd == $cwd and ((.first_message // "") | startswith($second)))] | length == 1)' /tmp/fq-agentsview-sessions.json > /dev/null
-test -f "$SIDECAR_LOG"
-test ! -s "$SIDECAR_LOG"
-kill -0 "$SIDECAR_PID"
-shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/fq-kdl-after.sha256
-cmp /tmp/fq-kdl-before.sha256 /tmp/fq-kdl-after.sha256
+TAB_A="$(sed -n 's/^TAB_ID=//p' /tmp/kj-entry-a.out)"
+WASM_A="$(sed -n 's/^WASM_URL=//p' /tmp/kj-entry-a.out)"
+PID_A="$(sed -n 's/^SIDECAR_PID=//p' /tmp/kj-entry-a.out)"
+TOKEN_A="$(sed -n 's/^RECIPIENT_TOKEN=//p' /tmp/kj-entry-a.out)"
+REGISTRY_A="$(sed -n 's/^REGISTRY_DIR=//p' /tmp/kj-entry-a.out)"
+kill -TERM "$PID_A"
+
+nohup "$FQ/target/zaphod" subscribe \
+  --server "$AGENTSVIEW_URL" \
+  --zellij-bin "${ZELLIJ_BIN:-zellij}" \
+  --zellij-config-dir "$CONFIG_ROOT" \
+  --zellij-config "$CONFIG_FILE" \
+  --zellij-data-dir "$DATA_DIR" \
+  --zellij-session WORK \
+  --tab-id "$TAB_A" \
+  --rail-url "$WASM_A" \
+  --checkout-cwd "$FQ" \
+  --recipient-token "$TOKEN_A" \
+  --registry-dir "$REGISTRY_A" \
+  >/tmp/kj-sidecar-a-restart.log 2>&1 &
+RESTARTED_SIDECAR_A=$!
 ```
 
-Every command must exit zero. The captain must also report the visible
-`AGENTS` header and both distinct `codex` rows with their exact per-run markers
-in chat. The second row is the required SSE refresh evidence. The visible rail
-and served API must identify the same two real agent sessions. Reject the demo
-if any condition fails.
+The surviving registry entry must restore exactly one tab-A row without
+another prompt or hook event. The restart log must stay empty, and
+`kill -0 "$RESTARTED_SIDECAR_A"` must succeed.
+
+For the repeatable, fully isolated version, run:
+
+```bash
+./tests/zellij-two-rail-recipient-smoke-test.sh
+```
+
+That test creates two same-CWD tabs, registers two exact top-level IDs, exposes
+one unregistered child, asserts `1/1/0`, clears one snapshot, restarts its
+sidecar, and proves one-row rehydration. It then closes the registered native
+terminal and proves the surviving rail prunes the claim and renders zero
+stale rows.
+
+## 8. Confirm cleanup boundaries
+
+Back in the control terminal:
+
+```bash
+SIDECAR_A="$(sed -n 's/^SIDECAR_PID=//p' /tmp/kj-entry-a.out)"
+SIDECAR_B="$(sed -n 's/^SIDECAR_PID=//p' /tmp/kj-entry-b.out)"
+kill -0 "$SIDECAR_A"
+kill -0 "$SIDECAR_B"
+shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/kj-kdl-after.sha256
+cmp /tmp/kj-kdl-before.sha256 /tmp/kj-kdl-after.sha256
+```
+
+The drill fails on a guessed row, duplicate row, child row, mismatched exact
+ID, stale focus action, orphan helper, or standing KDL change.

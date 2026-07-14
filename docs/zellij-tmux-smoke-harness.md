@@ -85,14 +85,22 @@ Run the companion two-rail check with:
 ./tests/zellij-two-rail-recipient-smoke-test.sh
 ```
 
-It creates two rails in one isolated Zellij session with the same terminal
-CWD and, as an adversarial fixture, the same recipient token. After obtaining
-their distinct stable tab IDs, it sends one private, versioned named-pipe
-broadcast addressed to the target ID. Both rails receive the broadcast, but
-only the target may render the marker. This tests stable-tab admission rather
-than CWD, pane ID, title, display position, or sender-side channel isolation.
-It uses the same tmux-hosted boundary and native Zellij state—no custom PTY
-controller.
+It creates two same-CWD rails in one isolated Zellij session. Deterministic
+Codex-schema SessionStart fixtures register distinct provider IDs with the two
+live terminal pane IDs. An AgentsView-compatible server exposes those two
+top-level records plus one unregistered child and logs every request.
+
+Two private sidecars must produce row cardinality `1/1/0`: each rail shows
+only its registered top-level session, and neither rail shows the child. The
+request log must contain only the two exact
+`/api/v1/sessions/{codex:<UUID>}` lookups; a global list request fails the
+test. The harness then clears one authoritative snapshot, restarts that
+sidecar, and requires one-row rehydration without another registration. This
+proves stable recipient routing, exact pane membership, child exclusion,
+snapshot removal, and restart behavior through real Zellij named pipes. It
+then closes the registered native terminal while leaving a spare terminal and
+resident rail alive; the next sidecar generation must prune the claim and
+render zero stale rows.
 
 For headless coverage, the script gives Zellij a disposable `HOME` and writes
 a deliberate pre-grant to its temporary permission cache. The cache key is the

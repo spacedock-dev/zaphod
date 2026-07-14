@@ -38,9 +38,11 @@ tab and what does it want from me?**
 - Per-tab instances that toggle independently
 - **Tab-bound session rows**: `scripts/zellij-new-tab.sh` creates a fresh
   managed tab, verifies its resident rail, and privately starts the
-  checkout-local subscriber. It projects AgentsView session state (blocked /
-  working / idle / done) into that rail only; a click focuses one exact
-  cwd-bound terminal and leaves zero or multiple matches unbound.
+  checkout-local subscriber. A trusted project `SessionStart` hook registers
+  the exact Codex session ID with its inherited Zellij pane ID. The sidecar
+  fetches only that AgentsView ID, and the rail focuses only that live pane.
+  CWD, title, prompt text, timestamps, history order, and child labels never
+  authorize a row.
 - **Gate rows**: the rail can display pending decisions and float
   `subspace-tui` on a gate artifact with `--log` pointed at its decision log.
   Gate delivery is separate from the first tab-bound session subscriber.
@@ -148,6 +150,11 @@ checkout's canonical WASM URL. Only then does it start one private
 `target/zaphod subscribe` process with the same Zellij profile and session.
 The inline rail and sidecar also share a fresh per-entry recipient token, so a
 second rail in the same stable tab cannot acknowledge or receive its rows.
+The sidecar and the trusted `.codex/hooks.json` command also share a private,
+versioned runtime registry. The hook invokes this checkout's
+`target/zaphod register-agent-session`; it accepts only Codex `SessionStart`
+events with source `startup` or `resume`. Outside Zellij, the hook exits
+without writing. It never changes global Codex configuration.
 The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
 `--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
 The startup handshake allows 30 seconds for the sidecar to verify the exact
@@ -156,11 +163,19 @@ remains open through a short stability probe, and deliver one acknowledged
 initial snapshot. Changes arriving during that work are fetched and
 acknowledged before readiness; the sidecar reports success only after a short
 quiet window with no pending change.
-Start AgentsView and wait for the sessions endpoint before direct entry because
-the sidecar exits on its first later source failure and does not retry. A
+Start AgentsView and wait for its API before direct entry because the sidecar
+exits on its first later source failure and does not retry. A
 failed handshake terminates and reaps the unready sidecar. Do not run the
 sidecar yourself. For a live session-row check, follow the
 [chat-guided AgentsView demo](docs/zellij-agentsview-live-demo.md).
+
+The initial snapshot may be empty. A row appears only after Codex runs the
+trusted project hook in a live pane and AgentsView serves the exact canonical
+ID `codex:<SessionStart session_id>`. A missing exact record, mismatched
+returned ID, corrupt registry, duplicate live claim, stale pane, foreign tab,
+or unregistered child yields no row. A later top-level session in the same
+pane replaces the old row. Sidecar restart rehydrates the surviving mapping
+without another hook event.
 
 If that exact rail never appears, the command reports
 `sidecar-target-unready`, starts no sidecar, and preserves the newly created
@@ -177,8 +192,9 @@ materializes a helper pane.
 Zellij named pipes remain session-wide broadcasts. Direct entry therefore
 uses a versioned pipe name derived from its fresh recipient token. The rail
 also requires a fresh `PaneUpdate` followed by `TabUpdate` and the exact
-stable `recipient-tab-id`. CWD is used only after these checks to focus a pane
-in the accepted rail.
+stable `recipient-tab-id`. Stable recipient routing chooses the rail;
+SessionStart registration and fresh native pane membership choose the session
+and focus target.
 
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail requests a temporary runtime `Alt /` route to its own already-running
@@ -203,8 +219,10 @@ ZAPHOD_PERMISSION_FIXTURE=upgrade ./tests/zellij-tmux-smoke-test.sh
 ```
 
 They use the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
-The second test deliberately gives two same-CWD rails one recipient token and
-proves that the stable-tab guard still delivers only to the target rail.
+The second test creates two same-CWD managed tabs, registers one distinct
+top-level session per terminal, and exposes one unregistered child. It proves
+row cardinality `1/1/0`, exact-ID HTTP requests, direct pane binding, stable
+recipient routing, and sidecar restart rehydration.
 
 ### Historical worktree profile
 
@@ -235,7 +253,7 @@ to disk. `RunCommands` is required only when a gate row floats `subspace-tui`.
 
 Working prototype (zellij 0.44.3): per-tab toggle, click/keyboard switching,
 plugin-local agent awareness, tab-bound session rows from the direct script,
-state/status lines, and docked/sliver toggle. Use
+exact SessionStart-to-pane registration, state/status lines, and docked/sliver toggle. Use
 `scripts/zellij-new-tab.sh` to create a rail from a selected checkout. A
 separately installed `Alt Shift z` binding opens only its fixed configured
 layout and does not select a checkout or start session rows. `Alt /` never

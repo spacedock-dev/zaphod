@@ -1503,7 +1503,7 @@ fn decide_click(line: isize, rows: &[Row]) -> ClickAction {
 
 // Click decision over the whole sectioned rail. Pane-region lines defer to
 // decide_click (the shipped pane-rows decider); a session row focuses its
-// cwd-bound pane and an unbound row's click is dead — never guessed; a gate
+// registered live pane and an unbound row's click is dead — never guessed; a gate
 // row floats the review TUI on the gate's brief, and a log path with no
 // derivable brief clicks to nothing rather than floating a wrong file.
 fn decide_rail_click(
@@ -2076,7 +2076,7 @@ fn state_marker(fields: &agent::AgentFields) -> &'static str {
 }
 
 // First line of a session row: the session's state marker and agent name,
-// with an explicit ·unbound tag when no listed pane matches its cwd.
+// with an explicit ·unbound tag if its registered pane is no longer live.
 fn session_row_line(session: &SessionEvent, bound: bool, cols: usize) -> String {
     let text = if bound {
         session.agent.clone()
@@ -2798,7 +2798,7 @@ mod tests {
         sidebar.rows = vec![cwd_row(4), cwd_row(8)];
         sidebar.pane_cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp")]);
         // The session row's marker reflects the line's state; bound rows
-        // carry no unbound tag and click through to the cwd-bound pane.
+        // carry no unbound tag and click through to the registered pane.
         let session = &sidebar.sessions[0];
         let bound = registered_session_pane(session, &sidebar.rows);
         assert_eq!(bound, Some(4));

@@ -1,5 +1,5 @@
 // ABOUTME: Covers the private Zaphod subscriber's one tab-bound session path.
-// ABOUTME: The loopback source makes data_changed re-list before one targeted pipe.
+// ABOUTME: The loopback source makes data_changed rebuild one exact registered snapshot.
 
 package main
 
