@@ -61,3 +61,65 @@ func TestCLIRequiresPrivateSubscribeTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestRegisterAgentSessionCLIUsesHookStdinAndInheritedPaneIdentity(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "zaphod")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = wd
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	registryRoot := filepath.Join(t.TempDir(), "registry")
+	const id = "019f5f94-a596-7d92-9928-398653669161"
+	command := exec.Command(bin, "register-agent-session", "--registry-dir", registryRoot)
+	command.Env = append(os.Environ(), "ZELLIJ_SESSION_NAME=managed", "ZELLIJ_PANE_ID=7")
+	command.Stdin = bytes.NewReader(validHook(id))
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("register: %v\n%s", err, output)
+	}
+	snapshot, err := (agentRegistryStore{root: registryRoot}).read("managed")
+	if err != nil || len(snapshot.Registrations) != 1 {
+		t.Fatalf("snapshot = %#v, err = %v", snapshot, err)
+	}
+	if got := snapshot.Registrations[0]; got.PaneID != 7 || got.AgentsViewSessionID != "codex:"+id {
+		t.Fatalf("registration = %#v", got)
+	}
+}
+
+func TestRegisterAgentSessionCLIIsNoopOutsideZellijAndFailsClosedOnBadInput(t *testing.T) {
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "zaphod")
+	build := exec.Command("go", "build", "-o", bin, ".")
+	build.Dir = wd
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	registryRoot := filepath.Join(t.TempDir(), "registry")
+
+	outside := exec.Command(bin, "register-agent-session", "--registry-dir", registryRoot)
+	outside.Env = []string{"PATH=" + os.Getenv("PATH")}
+	outside.Stdin = strings.NewReader("not json")
+	if output, err := outside.CombinedOutput(); err != nil {
+		t.Fatalf("outside Zellij should be a no-op: %v\n%s", err, output)
+	}
+	if _, err := os.Stat(registryRoot); !os.IsNotExist(err) {
+		t.Fatalf("outside-Zellij hook mutated registry: %v", err)
+	}
+
+	bad := exec.Command(bin, "register-agent-session", "--registry-dir", registryRoot)
+	bad.Env = append(os.Environ(), "ZELLIJ_SESSION_NAME=managed", "ZELLIJ_PANE_ID=7")
+	bad.Stdin = strings.NewReader(`{"session_id":"newest","hook_event_name":"SessionStart","source":"startup"}`)
+	if exit, ok := bad.Run().(*exec.ExitError); !ok || exit.ExitCode() != 1 {
+		t.Fatalf("bad input exit = %v, want 1", exit)
+	}
+	if _, err := os.Stat(registryRoot); !os.IsNotExist(err) {
+		t.Fatalf("bad hook mutated registry: %v", err)
+	}
+}
