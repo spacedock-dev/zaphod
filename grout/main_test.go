@@ -31,7 +31,7 @@ func TestCLIExposesOnlyManualWatcherSurface(t *testing.T) {
 	}
 
 	// Validation must not depend on the caller's CWD or discover a target
-	// ambiently. The sidecar only starts from the direct script's full tuple.
+	// ambiently. The watcher starts only from the direct script's full tuple.
 	for _, tc := range []struct {
 		name string
 		args []string

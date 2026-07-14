@@ -37,15 +37,15 @@ tab and what does it want from me?**
   keeps its arrangement (the swap set is regenerated from the live layout)
 - Per-tab instances that toggle independently
 - **Tab-bound session rows**: `scripts/zellij-new-tab.sh` creates a fresh
-  managed tab, verifies its resident rail, and privately starts the
-  checkout-local subscriber. A trusted project `SessionStart` hook registers
-  the exact Codex session ID with its inherited Zellij pane ID. The sidecar
-  fetches only that AgentsView ID, and the rail focuses only that live pane.
-  CWD, title, prompt text, timestamps, history order, and child labels never
-  authorize a row.
+  managed tab and injects an exact watcher route. The operator runs
+  `target/zaphod watch-tab` in the selected terminal. A trusted SessionStart
+  hook sends the exact Codex session ID through that terminal's private
+  socket. The watcher fetches only that AgentsView ID, and the rail focuses
+  only that live pane. CWD, titles, prompts, timestamps, history, and child
+  labels never authorize a row.
 - **Gate rows**: the rail can display pending decisions and float
   `subspace-tui` on a gate artifact with `--log` pointed at its decision log.
-  Gate delivery is separate from the first tab-bound session subscriber.
+  Gate delivery is separate from the tab-local watcher.
   Floating the review tool requires the `RunCommands` permission (prompted
   once).
 
@@ -62,8 +62,7 @@ Requires a Rust toolchain with the `wasm32-wasip1` target
 
 `build.sh` pins rustup's `rustc` explicitly because a homebrew Rust earlier
 on `PATH` lacks the wasm std and fails with `can't find crate for core`.
-The second artifact is an internal native sidecar; it is not an installed
-command or a second launcher.
+The second artifact is the checkout-local manual watcher and hook receiver.
 
 ## Usage
 
@@ -132,75 +131,52 @@ run:
 ./scripts/zellij-new-tab.sh --session WORK
 ```
 
-The command asks Zellij to validate the selected profile, builds this checkout,
-renders its canonical WASM URL into a disposable inline layout, and creates
-exactly one new tab. It does not parse, rewrite, stage, or restore the standing
-`config.kdl` or `layouts/zaphod.kdl`; failures and interruption leave both
-byte-identical. Persistent key policy, including `Alt /` and `Alt .`, remains
-global profile setup; the direct command neither validates nor retargets those
-routes and adds no runtime keybinding. A global `Alt .` route may therefore
-remain tied to its fixed installed plugin; it is not a selected-checkout entry
-guarantee. The direct command guarantees the fresh tab and private session-row
-subscriber described below. It never changes an existing tab.
+The command validates the selected profile, builds this checkout, renders its
+canonical WASM URL into a disposable inline layout, and creates one new tab.
+It leaves standing `config.kdl` and `layouts/zaphod.kdl` bytes unchanged. It
+then verifies one tiled rail at the new stable tab ID. A missing or ambiguous
+rail reports `rail-target-unready` and leaves the new tab available for
+inspection.
 
-This direct command is also the current session-row entry point. After
-`new-tab` returns, it waits for native `list-panes` state to show exactly one
-tiled, non-suppressed Zaphod rail with the returned stable tab ID and this
-checkout's canonical WASM URL. Only then does it start one private
-`target/zaphod subscribe` process with the same Zellij profile and session.
-The inline rail and sidecar also share a fresh per-entry recipient token, so a
-second rail in the same stable tab cannot acknowledge or receive its rows.
-The sidecar and the trusted `.codex/hooks.json` command also share a private,
-versioned runtime registry. The hook invokes this checkout's
-`target/zaphod register-agent-session`; it accepts only Codex `SessionStart`
-events with source `startup` or `resume`. Outside Zellij, the hook exits
-without writing. The direct entry starts the managed shell with the same
-absolute registry root it gives the sidecar, even when the invoking client
-and Zellij server have different runtime-directory environments. It never
-changes global Codex configuration.
-The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
-`--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
-The startup handshake allows 30 seconds for the sidecar to verify the exact
-stable-tab target, establish a correctly typed AgentsView SSE response that
-remains open through a short stability probe, and deliver one acknowledged
-initial snapshot. Changes arriving during that work are fetched and
-acknowledged before readiness; the sidecar reports success only after a short
-quiet window with no pending change.
-Start AgentsView and wait for its API before direct entry because the sidecar
-exits on its first later source failure and does not retry. A
-failed handshake terminates and reaps the unready sidecar. Do not run the
-sidecar yourself. For a live session-row check, follow the
-[chat-guided AgentsView demo](docs/zellij-agentsview-live-demo.md).
+Direct entry starts no watcher. It injects the exact AgentsView URL, rail URL,
+recipient token, Zellij profile, binary, and private socket root into the new
+terminal. In that terminal, run:
 
-The initial snapshot may be empty. A row appears only after Codex runs the
-trusted project hook in a live pane and AgentsView serves the exact canonical
-ID `codex:<SessionStart session_id>`. Every two seconds, a bounded refresh
-rechecks registry and native pane membership, so late hook commits, delayed
-AgentsView indexing, and pane moves converge without another source event.
-A missing exact record, mismatched
-returned ID, corrupt registry, duplicate live claim, stale pane, foreign tab,
-or unregistered child yields no row. A later top-level session in the same
-pane replaces the old row. Sidecar restart rehydrates the surviving mapping
-without another hook event.
+```bash
+./target/zaphod watch-tab
+```
 
-If that exact rail never appears, the command reports
-`sidecar-target-unready`, starts no sidecar, and preserves the newly created
-tab for inspection. After it starts, target-tab loss, a delivered SIGINT or
-SIGTERM, source EOF, or a source failure ends the sidecar. It does not
-restart, retarget, or clean up AgentsView, Zellij sessions, tabs, panes, or
-plugins.
+The command returns after its background watcher proves the terminal, stable
+tab, original rail, AgentsView event stream, recipient, socket, and initial
+empty lease. It prints the watcher PID and log path. Start AgentsView before
+this command. The default endpoint is `http://127.0.0.1:8080`; direct entry's
+`--agentsview-url URL` selects another endpoint.
+
+The trusted `.codex/hooks.json` command invokes
+`target/zaphod register-agent-session`. It accepts only Codex `SessionStart`
+events from `startup` or `resume` and sends one bounded record to the live
+socket derived from `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`. Outside
+Zellij, the hook exits successfully before it requires a built receiver.
+
+The watcher keeps one registration in memory. It fetches only
+`/api/v1/sessions/{codex:<SessionStart session_id>}` and sends leased snapshots
+to the exact recipient tab. Heartbeats renew the cached projection; new hook
+records and AgentsView events trigger exact fetches. A later SessionStart in
+the same terminal replaces the old row. Restart starts empty and requires a
+new SessionStart.
+
+Socket loss, terminal loss, stable-tab loss, original-rail loss, source EOF,
+source failure, or rejected delivery ends the watcher. Rows then expire by
+lease. The watcher never follows a replacement pane or rail, consults the
+global session list, writes durable session authority, or guesses from CWD.
+Follow the [chat-guided AgentsView demo](docs/zellij-agentsview-live-demo.md)
+for the two-tab journey.
 
 `Alt Shift z` remains a separately configured tab-only shortcut. It opens the
-one fixed layout already named by the operator's global config; it does not
-select an arbitrary checkout and the direct script never repoints it. It also
-cannot safely start the subscriber because a native Zellij `Run` keybind
-materializes a helper pane.
-Zellij named pipes remain session-wide broadcasts. Direct entry therefore
-uses a versioned pipe name derived from its fresh recipient token. The rail
-also requires a fresh `PaneUpdate` followed by `TabUpdate` and the exact
-stable `recipient-tab-id`. Stable recipient routing chooses the rail;
-SessionStart registration and fresh native pane membership choose the session
-and focus target.
+fixed layout named by the operator's global config; it does not select a
+checkout or launch a watcher. Zellij pipes remain session-wide broadcasts,
+so every snapshot carries the recipient token, stable tab ID, watcher
+generation, and lease.
 
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail requests a temporary runtime `Alt /` route to its own already-running
@@ -220,15 +196,15 @@ Run the real-key boundary with:
 
 ```bash
 ./tests/zellij-tmux-smoke-test.sh
-ZAPHOD_PERMISSION_FIXTURE=upgrade ./tests/zellij-tmux-smoke-test.sh
+./tests/zellij-watcher-lifecycle-smoke-test.sh
 ./tests/zellij-two-rail-recipient-smoke-test.sh
 ```
 
 They use the [isolated tmux smoke harness](docs/zellij-tmux-smoke-harness.md).
-The second test creates two same-CWD managed tabs, registers one distinct
-top-level session per terminal, and exposes one unregistered child. It proves
-row cardinality `1/1/0`, exact-ID HTTP requests, direct pane binding, stable
-recipient routing, and sidecar restart rehydration.
+The two-rail test creates two same-CWD tabs, starts one watcher per terminal,
+and exposes one unregistered child. It proves `1/1/0` cardinality, exact-ID
+requests, direct focus, restart-empty behavior, lease expiry, and failure on
+terminal loss.
 
 ### Historical worktree profile
 
@@ -242,16 +218,12 @@ real-key candidate check.
 Tokenless installed-layout rails request `ReadApplicationState`,
 `ChangeApplicationState`, `ReadPaneContents`, `Reconfigure`, and `RunCommands`.
 A token-bound direct-entry rail also requests `ReadCliPipes` for its private
-subscriber. On the first request or grant expansion, focus the pane and
+watcher. On the first request or grant expansion, focus the pane and
 approve its native prompt once.
 Zellij's grant cache is keyed by the raw WASM path. By default, the smoke
 harness redirects `HOME` to a temporary root and uses a pre-granted fixture.
-Its `upgrade` mode seeds an old grant without `ReadCliPipes`, focuses the exact
-candidate pane, sends one literal `y` through the attached tmux client, and
-checks the expanded cache and normal session row. Neither mode writes the
-operator's cache. `ReadCliPipes` is used only for the direct-entry
-subscriber's private recipient, initial-snapshot, and accepted-row
-acknowledgments.
+It never writes the operator's cache. `ReadCliPipes` carries the watcher's
+private readiness probes, leased snapshots, and acknowledgments.
 `Reconfigure` changes only runtime keybinds; Zaphod does not save that route
 to disk. `RunCommands` is required only when a gate row floats `subspace-tui`.
 
@@ -259,10 +231,10 @@ to disk. `RunCommands` is required only when a gate row floats `subspace-tui`.
 
 Working prototype (zellij 0.44.3): per-tab toggle, click/keyboard switching,
 plugin-local agent awareness, tab-bound session rows from the direct script,
-exact SessionStart-to-pane registration, state/status lines, and docked/sliver toggle. Use
+exact SessionStart-to-pane admission, state/status lines, and docked/sliver toggle. Use
 `scripts/zellij-new-tab.sh` to create a rail from a selected checkout. A
 separately installed `Alt Shift z` binding opens only its fixed configured
-layout and does not select a checkout or start session rows. `Alt /` never
+layout and does not select a checkout or launch a watcher. `Alt /` never
 creates or retrofits a tab.
 
 [SPEC.md](SPEC.md) records the shipped prototype and its numbered Zellij
