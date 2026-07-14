@@ -343,3 +343,54 @@ The bounded fourth round repaired parent `1001`'s three named gaps and froze a
 green candidate at `6bbcf72`. Parent `1073` nevertheless found four new Medium
 false-positive paths. The branch remains frozen, no fifth panel was launched,
 and implementation returns to the captain for a new convergence decision.
+
+## Stage Report: implementation (cycle 3)
+
+- FAILED: Replace broad screen/log matches with structured pane-targeted
+  observations that atomically prove the exact terminal, sidebar, full relevant
+  state, and refresh `pane_ids` membership.
+  Commits `f6f146d..b4e4940` add wrong-pane and wrong-field attacks, and
+  `dd91519..0d41aa7` replace text greps with exact JSON refresh records; parent
+  `1152` found that action preservation still omits four terminal state fields.
+- FAILED: Hold deterministic periodic refresh work in flight while sending each
+  measured action under one pre-send absolute deadline, with adjacent
+  wrong-pane and wrong-field variants failing.
+  Red `4a3da23` failed with `sidebar did not hold a fixture refresh in flight`;
+  green `7898a3b` adds per-action refresh IDs and a 400 ms disposable barrier,
+  but parent `1152` found that completion before native observation can pass.
+- FAILED: Keep product behavior and scope frozen, rerun the complete relevant
+  green packet, then launch exactly one final exact-head `code_completion`
+  panel and stop on either verdict.
+  Product layouts remain unchanged and the full packet is green, but the one
+  authorized final panel returned FAIL; no further panel was launched.
+- DONE: Parse each refresh lifecycle atomically.
+  Red `dd91519` rejected the new record, green `0d41aa7` binds exact event,
+  plugin, refresh ID, and unique numeric `pane_ids`; `8e1dce3..b3cce7f` makes
+  abort a terminal event.
+- DONE: Bind the native fixture's exact command.
+  Red `c69ec7` accepted `tail -f /tmp/wrong`; green `79245eb` requires the
+  exact `tail -f /dev/null` argv shape and passes the live smoke.
+- DONE: Record frozen-head green evidence.
+  Head `79245ebc16d891640a6885a9770e63c39bb0b33f` passes Rust 143/143,
+  `cargo check --tests`, focused structured proof, docs, artifact, new-tab,
+  layout capture, and live responsiveness plus injected cleanup. Standing
+  config remains `8ce2a42d...a196`; layout remains `f1004741...d6e`.
+- DONE: Clear the final exact-tip quick gate.
+  `roborev wait HEAD` reviewed `79245eb` and reported no issues.
+- FAILED: The single final `code_completion` panel did not pass.
+  Parent `1152` reviewed
+  `a5fc0f3649ac903bc45c737f188e50808a101a71..79245ebc16d891640a6885a9770e63c39bb0b33f`;
+  members `1149` (`correctness`), `1150` (`journey`), and `1151` (`proof`) each
+  ran once without execution failure and returned FAIL. The parent returned
+  FAIL with two Medium findings: overlap ends too early, and terminal lifecycle
+  fields are absent from action-preservation tuples.
+- SKIPPED: Captain AC-I1 live `subspace-tui` demonstration.
+  `subspace-tui` remains unavailable, and the failed offline panel blocks
+  validation.
+
+### Summary
+
+The proof reframe removed broad screen and log matches, added exact refresh
+authority, and froze a green candidate at `79245eb`. Parent `1152` still found
+two false-positive paths. The final-panel authority is exhausted, so the branch
+remains frozen and returns to the captain.
