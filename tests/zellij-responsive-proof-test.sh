@@ -66,6 +66,12 @@ JSON
 zaphod_fixture_refresh_record_valid "$ROOT/before.json" "$ROOT/refresh.json" \
     7 2 file:/candidate/zellij-sidebar.wasm 9 ||
     fail "the exact terminal/sidebar/refresh record was rejected"
+jq 'map(if .id == 7 then .terminal_command = ["tail", "-f", "/tmp/wrong"] else . end)' \
+    "$ROOT/before.json" > "$ROOT/wrong-command.json"
+if zaphod_fixture_refresh_record_valid "$ROOT/wrong-command.json" "$ROOT/refresh.json" \
+    7 2 file:/candidate/zellij-sidebar.wasm 9; then
+    fail "a wrong tail target incorrectly proved the exact terminal command"
+fi
 
 printf '%s\n' '{"event":"complete","plugin_id":7,"refresh_id":4,"pane_ids":[]}' > "$ROOT/wrong-field-refresh.json"
 if zaphod_fixture_refresh_record_valid "$ROOT/before.json" \
