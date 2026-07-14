@@ -182,3 +182,25 @@ func TestRegistryLockContentionHasAnIndependentDeadline(t *testing.T) {
 		t.Fatalf("contended upsert exceeded independent deadline: %s", elapsed)
 	}
 }
+
+func TestRegistryPruneStaleRemovesOnlyAbsentPanes(t *testing.T) {
+	store := agentRegistryStore{root: t.TempDir()}
+	first := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
+	second := registrationForTest(t, "019f5f95-bbfd-7993-8620-0d698008217f", "managed", "8")
+	if err := store.upsert(first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.upsert(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pruneStale("managed", map[uint32]uint64{7: 73}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.read("managed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Registrations) != 1 || snapshot.Registrations[0].PaneID != 7 {
+		t.Fatalf("pruned snapshot = %#v, want only live pane 7", snapshot)
+	}
+}
