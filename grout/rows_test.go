@@ -163,7 +163,11 @@ func TestBuildRegisteredSessionRowCarriesExactPaneIdentity(t *testing.T) {
 		ID: "codex:019f5f94-a596-7d92-9928-398653669161", Cwd: "/misleading/same/cwd",
 		Agent: "codex", TerminationStatus: "awaiting_user", FirstMessage: "exact pane",
 	}, 73, time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC), 512)
-	if row.PaneID != 73 || row.ID != "codex:019f5f94-a596-7d92-9928-398653669161" {
+	if row.PaneID == nil || *row.PaneID != 73 || row.ID != "codex:019f5f94-a596-7d92-9928-398653669161" {
 		t.Fatalf("registered row = %#v", row)
+	}
+	zero, err := json.Marshal(BuildRegisteredSessionRow(sessionInfo{ID: "zero"}, 0, time.Now(), 512))
+	if err != nil || !strings.Contains(string(zero), `"pane_id":0`) {
+		t.Fatalf("pane zero lost from registered row: %s, %v", zero, err)
 	}
 }

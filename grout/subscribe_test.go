@@ -574,7 +574,7 @@ func TestSubscribeRefreshesAfterTransientLayoutReplyAndStaysAlive(t *testing.T) 
 	if err := json.Unmarshal(snapshotPayload, &snapshot); err != nil {
 		t.Fatalf("initial snapshot stdin is not valid row JSON: %v", err)
 	}
-	if len(snapshot) != 1 || snapshot[0].ID != "codex:"+registeredID || snapshot[0].PaneID != 7 || snapshot[0].Summary != "fq-second-marker" {
+	if len(snapshot) != 1 || snapshot[0].ID != "codex:"+registeredID || snapshot[0].PaneID == nil || *snapshot[0].PaneID != 7 || snapshot[0].Summary != "fq-second-marker" {
 		t.Fatalf("refreshed snapshot = %#v, want exact registered session row", snapshot)
 	}
 
