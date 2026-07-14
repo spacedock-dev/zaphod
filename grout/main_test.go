@@ -123,3 +123,21 @@ func TestRegisterAgentSessionCLIIsNoopOutsideZellijAndFailsClosedOnBadInput(t *t
 		t.Fatalf("bad hook mutated registry: %v", err)
 	}
 }
+
+func TestSubscribeUsesTheSameExplicitRegistryRootAsSessionStart(t *testing.T) {
+	registryDir := filepath.Join(t.TempDir(), "registry")
+	t.Setenv("ZAPHOD_REGISTRY_DIR", registryDir)
+	cfg, err := parseSubscribeArgs([]string{
+		"--server", "http://127.0.0.1:8080", "--zellij-bin", "zellij",
+		"--zellij-config-dir", "/c", "--zellij-config", "/c/config.kdl",
+		"--zellij-data-dir", "/d", "--zellij-session", "managed", "--tab-id", "73",
+		"--rail-url", "file:/candidate.wasm", "--checkout-cwd", "/checkout",
+		"--recipient-token", "token",
+	}, &bytes.Buffer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.RegistryDir != registryDir {
+		t.Fatalf("subscriber registry = %q, want hook registry %q", cfg.RegistryDir, registryDir)
+	}
+}
