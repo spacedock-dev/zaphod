@@ -73,3 +73,34 @@ grep -F 'stress_root_exists_after=0' "$EVIDENCE/stress-cleanup.txt" >/dev/null |
 [ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "forced failure changed standing layout"
 
 echo "PASS: forced lifecycle failure retains bounded evidence after complete cleanup"
+
+HANG_EVIDENCE="$ROOT/hang-evidence"
+HANG_OUT="$ROOT/hang.out"
+HANG_ERR="$ROOT/hang.err"
+set +e
+ZAPHOD_LAYOUT_STRESS_EVIDENCE_DIR="$HANG_EVIDENCE" \
+ZAPHOD_SMOKE_INJECT_NATIVE_HANG=list-panes \
+ZAPHOD_SMOKE_NATIVE_COMMAND_TIMEOUT_SECS=2 \
+ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS=15 \
+ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS=1 \
+    "$SCRIPT_DIR/zellij-subscription-layout-stress-test.sh" > "$HANG_OUT" 2> "$HANG_ERR"
+hang_status=$?
+set -e
+
+[ "$hang_status" -ne 0 ] || fail "injected native command hang unexpectedly passed"
+grep -F 'native-command-timeout: owner=zellij-session command=action list-panes' \
+    "$HANG_EVIDENCE/serial-1/case.stderr" >/dev/null ||
+    fail "native command hang reached the outer watchdog without an inner timeout marker"
+grep -F 'phase=session-ready-wait' \
+    "$HANG_EVIDENCE/serial-1/outside-foreground/phase.log" >/dev/null ||
+    fail "native command hang bundle omitted its last entered phase"
+grep -F 'session_alive_after=0' \
+    "$HANG_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
+    fail "native command hang cleanup left the Zellij session alive"
+grep -F 'tmux_alive_after=0' \
+    "$HANG_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
+    fail "native command hang cleanup left the tmux server alive"
+[ "$(file_state "$STANDING_CONFIG")" = "$CONFIG_BEFORE" ] || fail "native hang changed standing config"
+[ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "native hang changed standing layout"
+
+echo "PASS: native command hang fails at its inner deadline with retained cleanup evidence"
