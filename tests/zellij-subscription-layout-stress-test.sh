@@ -52,11 +52,28 @@ retain_failure_bundle() {
     local status="$2"
     local expected="$3"
     local case_evidence="$EVIDENCE_DIR/$name"
+    local stdout_len stderr_len stdout_truncated=0 stderr_truncated=0
     mkdir -p "$case_evidence"
-    cp "$ROOT/$name.out" "$case_evidence/case.stdout" 2>/dev/null || : > "$case_evidence/case.stdout"
-    cp "$ROOT/$name.err" "$case_evidence/case.stderr" 2>/dev/null || : > "$case_evidence/case.stderr"
+    stdout_len="$(wc -c < "$ROOT/$name.out" | tr -d '[:space:]')"
+    stderr_len="$(wc -c < "$ROOT/$name.err" | tr -d '[:space:]')"
+    if [ "$stdout_len" -le 65536 ]; then
+        cp "$ROOT/$name.out" "$case_evidence/case.stdout"
+    else
+        stdout_truncated=1
+        { head -c 32700 "$ROOT/$name.out"; printf '\n... retained output truncated ...\n'; tail -c 32700 "$ROOT/$name.out"; } \
+            > "$case_evidence/case.stdout"
+    fi
+    if [ "$stderr_len" -le 65536 ]; then
+        cp "$ROOT/$name.err" "$case_evidence/case.stderr"
+    else
+        stderr_truncated=1
+        { head -c 32700 "$ROOT/$name.err"; printf '\n... retained output truncated ...\n'; tail -c 32700 "$ROOT/$name.err"; } \
+            > "$case_evidence/case.stderr"
+    fi
     {
         printf 'case=%s\nstatus=%s\nexpected=%s\n' "$name" "$status" "$expected"
+        printf 'case_stdout_len=%s\ncase_stdout_truncated=%s\n' "$stdout_len" "$stdout_truncated"
+        printf 'case_stderr_len=%s\ncase_stderr_truncated=%s\n' "$stderr_len" "$stderr_truncated"
         printf 'stress_pid=%s\nroot=%s\ntimeout_secs=%s\n' "$$" "$ROOT" "$TIMEOUT_SECS"
         printf 'injected_failure_phase=%s\n' "$INJECT_FAILURE_PHASE"
     } >> "$EVIDENCE_DIR/bundle-manifest.txt"
@@ -95,8 +112,8 @@ run_owned_case() {
     wait "$watchdog" 2>/dev/null || true
     if [ "$status" -ne 0 ]; then
         retain_failure_bundle "$name" "$status" "$expected"
-        sed -n '1,120p' "$ROOT/$name.out" >&2 || true
-        sed -n '1,160p' "$ROOT/$name.err" >&2 || true
+        { head -c 4096 "$ROOT/$name.out"; tail -c 4096 "$ROOT/$name.out"; } >&2 || true
+        { head -c 4096 "$ROOT/$name.err"; tail -c 4096 "$ROOT/$name.err"; } >&2 || true
         return "$status"
     fi
     if ! grep -F "$expected" "$ROOT/$name.out" >/dev/null; then

@@ -54,6 +54,7 @@ NATIVE_HANG_INJECTED=0
 INJECT_STARTUP_EXIT="${ZAPHOD_SMOKE_INJECT_STARTUP_EXIT:-}"
 EVIDENCE_DIR="${ZAPHOD_SMOKE_EVIDENCE_DIR:-}"
 INJECT_FAILURE_PHASE="${ZAPHOD_SMOKE_INJECT_FAILURE_PHASE:-}"
+INJECT_FAILURE_PAYLOAD_BYTES="${ZAPHOD_SMOKE_INJECT_FAILURE_PAYLOAD_BYTES:-0}"
 CURRENT_PHASE="boot"
 INJECTED_FAILURE=""
 ENTRY_START_TIMEOUT=30
@@ -177,6 +178,10 @@ phase() {
     fi
     if [ -n "$INJECT_FAILURE_PHASE" ] && [ "$name" = "$INJECT_FAILURE_PHASE" ]; then
         INJECTED_FAILURE="$name"
+        if [ "$INJECT_FAILURE_PAYLOAD_BYTES" -gt 0 ]; then
+            head -c "$INJECT_FAILURE_PAYLOAD_BYTES" /dev/zero | tr '\0' x >&2
+            printf '\n' >&2
+        fi
         fail "injected lifecycle failure at phase $name"
     fi
 }
@@ -339,6 +344,9 @@ if [ -n "$INJECT_STARTUP_EXIT" ]; then
     [[ "$INJECT_STARTUP_EXIT" =~ ^([1-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])$ ]] ||
         fail "ZAPHOD_SMOKE_INJECT_STARTUP_EXIT must be an exit status from 1 through 255"
 fi
+[[ "$INJECT_FAILURE_PAYLOAD_BYTES" =~ ^(0|[1-9][0-9]*)$ ]] &&
+    [ "$INJECT_FAILURE_PAYLOAD_BYTES" -le 1048576 ] ||
+    fail "ZAPHOD_SMOKE_INJECT_FAILURE_PAYLOAD_BYTES must be from 0 through 1048576"
 zaphod_require_zellij_0443
 for inherited_client_var in ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID; do
     if printenv "$inherited_client_var" >/dev/null 2>&1; then
