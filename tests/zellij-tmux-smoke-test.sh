@@ -48,6 +48,10 @@ PERMISSION_CACHE=""
 PERMISSION_FIXTURE="${ZAPHOD_PERMISSION_FIXTURE:-pregranted}"
 SUBSCRIBER_MODE="${ZAPHOD_SUBSCRIBER_MODE:-automatic}"
 CALLER_ENV="${ZAPHOD_CALLER_ENV:-unspecified}"
+EVIDENCE_DIR="${ZAPHOD_SMOKE_EVIDENCE_DIR:-}"
+INJECT_FAILURE_PHASE="${ZAPHOD_SMOKE_INJECT_FAILURE_PHASE:-}"
+CURRENT_PHASE="boot"
+INJECTED_FAILURE=""
 ENTRY_START_TIMEOUT=30
 ISOLATED_CONFIG_BEFORE=""
 ISOLATED_LAYOUT=""
@@ -64,9 +68,33 @@ SIDECAR_START_FIFO=""
 ENTRY_PID=""
 LAYOUT_VALIDATOR=""
 
+bounded_exec() {
+    local seconds="$1"
+    shift
+    perl -e '$SIG{ALRM} = sub { exit 124 }; alarm shift; exec @ARGV or exit 127' \
+        "$seconds" "$@"
+}
+
+zellij_control_with_timeout() {
+    local seconds="$1"
+    shift
+    bounded_exec "$seconds" env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+        ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+        zellij --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
+}
+
 zellij_control() {
     env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
         zellij --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
+}
+
+zellij_session_with_timeout() {
+    local seconds="$1"
+    shift
+    bounded_exec "$seconds" env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+        ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+        zellij --session "$SESSION_NAME" \
+        --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
 }
 
 zellij_session() {
@@ -75,67 +103,168 @@ zellij_session() {
         --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
 }
 
+tmux_with_timeout() {
+    local seconds="$1"
+    shift
+    bounded_exec "$seconds" tmux -L "$TMUX_SERVER" "$@"
+}
+
 tmux_command() {
     tmux -L "$TMUX_SERVER" "$@"
+}
+
+phase() {
+    local name="$1"
+    local marker="zaphod-phase: phase=$name pid=$$ caller=$CALLER_ENV mode=$SUBSCRIBER_MODE"
+    CURRENT_PHASE="$name"
+    printf '%s\n' "$marker" >&2
+    if [ -n "$EVIDENCE_DIR" ]; then
+        mkdir -p "$EVIDENCE_DIR"
+        printf '%s\n' "$marker" >> "$EVIDENCE_DIR/phase.log"
+    fi
+    if [ -n "$INJECT_FAILURE_PHASE" ] && [ "$name" = "$INJECT_FAILURE_PHASE" ]; then
+        INJECTED_FAILURE="$name"
+        fail "injected lifecycle failure at phase $name"
+    fi
+}
+
+pid_is_alive() {
+    [ -n "$1" ] && kill -0 "$1" 2>/dev/null
+}
+
+terminate_owned_pid() {
+    local pid="$1"
+    local label="$2"
+    local attempt
+    [ -n "$pid" ] || return 0
+    kill -TERM "$pid" 2>/dev/null || true
+    for attempt in $(seq 1 40); do
+        pid_is_alive "$pid" || break
+        sleep 0.05
+    done
+    if pid_is_alive "$pid"; then
+        kill -KILL "$pid" 2>/dev/null || true
+    fi
+    wait "$pid" 2>/dev/null || true
+    if pid_is_alive "$pid"; then
+        echo "$label survived cleanup: $pid" >&2
+        return 1
+    fi
+    return 0
+}
+
+copy_bounded_native_evidence() {
+    local path name
+    [ -n "$EVIDENCE_DIR" ] && [ -d "$ROOT" ] || return 0
+    mkdir -p "$EVIDENCE_DIR/native"
+    while IFS= read -r path; do
+        name="$(basename "$path")"
+        case "$name" in
+            *.json|*.kdl|*.err|*.stderr|*.stdout|*.out|*.log|*.screen|entry.out)
+                head -c 4096 "$path" > "$EVIDENCE_DIR/native/$name" 2>/dev/null || true
+                ;;
+        esac
+    done < <(find "$ROOT" -maxdepth 1 -type f -print | sort | head -64)
+}
+
+record_precleanup_evidence() {
+    local original_status="$1"
+    local failed_phase="$CURRENT_PHASE"
+    local tmux_status=125 session_status=125
+    [ -n "$EVIDENCE_DIR" ] || return 0
+    mkdir -p "$EVIDENCE_DIR/native"
+    phase cleanup-start
+    {
+        printf 'original_status=%s\n' "$original_status"
+        printf 'last_phase=%s\n' "$failed_phase"
+        printf 'injected_failure=%s\n' "$INJECTED_FAILURE"
+        printf 'smoke_pid=%s\nparent_pid=%s\n' "$$" "$PPID"
+        printf 'root=%s\nsession=%s\ntmux_server=%s\ntmux_pane=%s\n' \
+            "$ROOT" "$SESSION_NAME" "$TMUX_SERVER" "$TMUX_PANE"
+        printf 'entry_pid=%s entry_alive_before=%s\n' "$ENTRY_PID" "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
+        printf 'sidecar_pid=%s sidecar_alive_before=%s\n' "$SIDECAR_PID" "$(pid_is_alive "$SIDECAR_PID" && echo 1 || echo 0)"
+        printf 'agentsview_pid=%s agentsview_alive_before=%s\n' "$AGENTSVIEW_PID" "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
+    } > "$EVIDENCE_DIR/process-ownership.txt"
+    if [ -n "$TMUX_SERVER" ]; then
+        tmux_with_timeout 1 capture-pane -p -t "$TMUX_PANE" \
+            > "$EVIDENCE_DIR/tmux-pane.txt" 2> "$EVIDENCE_DIR/tmux-pane.err"
+        tmux_status=$?
+    else
+        : > "$EVIDENCE_DIR/tmux-pane.txt"
+    fi
+    if [ -n "$SESSION_NAME" ] && [ -n "$CONFIG_DIR" ]; then
+        zellij_control_with_timeout 1 --session "$SESSION_NAME" \
+            action list-panes --json --all --command --geometry --state --tab \
+            > "$EVIDENCE_DIR/native/list-panes-cleanup.json" \
+            2> "$EVIDENCE_DIR/native/list-panes-cleanup.err"
+        session_status=$?
+    fi
+    {
+        printf 'tmux_capture_status=%s\n' "$tmux_status"
+        printf 'zellij_probe_status=%s\n' "$session_status"
+    } >> "$EVIDENCE_DIR/process-ownership.txt"
+    copy_bounded_native_evidence
 }
 
 cleanup() {
     local status=$?
     local cleanup_status=0
+    local session_alive_after=0 tmux_alive_after=0 root_exists_after=0
+    local config_after layout_after
     trap - EXIT INT TERM HUP
     set +e
-    if [ -n "$ENTRY_PID" ]; then
-        kill -TERM "$ENTRY_PID" 2>/dev/null || true
-        wait "$ENTRY_PID" 2>/dev/null || true
-    fi
-    if [ -n "$SIDECAR_PID" ]; then
-        kill -TERM "$SIDECAR_PID" 2>/dev/null || true
-        for _attempt in $(seq 1 100); do
-            kill -0 "$SIDECAR_PID" 2>/dev/null || break
-            sleep 0.05
-        done
-        if kill -0 "$SIDECAR_PID" 2>/dev/null; then
-            echo "private sidecar survived cleanup: $SIDECAR_PID" >&2
-            cleanup_status=1
-        fi
-    fi
+    record_precleanup_evidence "$status"
+    terminate_owned_pid "$ENTRY_PID" "entry process" || cleanup_status=1
+    terminate_owned_pid "$SIDECAR_PID" "private sidecar" || cleanup_status=1
     if [ -n "$SESSION_NAME" ]; then
-        zellij_control delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
-        if zellij_control --session "$SESSION_NAME" action list-panes --json --all \
+        zellij_control_with_timeout 2 delete-session --force "$SESSION_NAME" >/dev/null 2>&1 || true
+        if zellij_control_with_timeout 1 --session "$SESSION_NAME" action list-panes --json --all \
             >/dev/null 2>&1; then
             echo "isolated Zellij session survived cleanup: $SESSION_NAME" >&2
+            session_alive_after=1
             cleanup_status=1
         fi
     fi
     if [ -n "$TMUX_SERVER" ]; then
-        tmux -L "$TMUX_SERVER" kill-server >/dev/null 2>&1 || true
-        if tmux -L "$TMUX_SERVER" has-session -t "$TMUX_SESSION" >/dev/null 2>&1; then
+        tmux_with_timeout 2 kill-server >/dev/null 2>&1 || true
+        if tmux_with_timeout 1 has-session -t "$TMUX_SESSION" >/dev/null 2>&1; then
             echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
+            tmux_alive_after=1
             cleanup_status=1
         fi
     fi
-    if [ -n "$AGENTSVIEW_PID" ]; then
-        kill -TERM "$AGENTSVIEW_PID" 2>/dev/null || true
-        wait "$AGENTSVIEW_PID" 2>/dev/null || true
-        if kill -0 "$AGENTSVIEW_PID" 2>/dev/null; then
-            echo "AgentsView fixture survived cleanup: $AGENTSVIEW_PID" >&2
-            cleanup_status=1
-        fi
-    fi
+    terminate_owned_pid "$AGENTSVIEW_PID" "AgentsView fixture" || cleanup_status=1
     if [ -n "$ROOT" ] && [ -d "$ROOT" ]; then
         rm -rf "$ROOT" || cleanup_status=1
         if [ -e "$ROOT" ]; then
             echo "isolated smoke root survived cleanup: $ROOT" >&2
+            root_exists_after=1
             cleanup_status=1
         fi
     fi
-    if [ "$(file_state "$STANDING_CONFIG")" != "$STANDING_CONFIG_BEFORE" ]; then
+    config_after="$(file_state "$STANDING_CONFIG")"
+    layout_after="$(file_state "$STANDING_LAYOUT")"
+    if [ "$config_after" != "$STANDING_CONFIG_BEFORE" ]; then
         echo "standing Zellij config changed during tmux smoke: $STANDING_CONFIG" >&2
         cleanup_status=1
     fi
-    if [ "$(file_state "$STANDING_LAYOUT")" != "$STANDING_LAYOUT_BEFORE" ]; then
+    if [ "$layout_after" != "$STANDING_LAYOUT_BEFORE" ]; then
         echo "standing Zellij layout changed during tmux smoke: $STANDING_LAYOUT" >&2
         cleanup_status=1
+    fi
+    if [ -n "$EVIDENCE_DIR" ]; then
+        {
+            printf 'original_status=%s\ncleanup_status=%s\n' "$status" "$cleanup_status"
+            printf 'session_alive_after=%s\ntmux_alive_after=%s\n' "$session_alive_after" "$tmux_alive_after"
+            printf 'entry_alive_after=%s\n' "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
+            printf 'sidecar_alive_after=%s\n' "$(pid_is_alive "$SIDECAR_PID" && echo 1 || echo 0)"
+            printf 'agentsview_alive_after=%s\n' "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
+            printf 'root_exists_after=%s\n' "$root_exists_after"
+            printf 'standing_config_unchanged=%s\n' "$([ "$config_after" = "$STANDING_CONFIG_BEFORE" ] && echo 1 || echo 0)"
+            printf 'standing_layout_unchanged=%s\n' "$([ "$layout_after" = "$STANDING_LAYOUT_BEFORE" ] && echo 1 || echo 0)"
+        } > "$EVIDENCE_DIR/cleanup-result.txt"
+        printf 'zaphod-phase: phase=cleanup-complete pid=%s caller=%s mode=%s\n' \
+            "$$" "$CALLER_ENV" "$SUBSCRIBER_MODE" >> "$EVIDENCE_DIR/phase.log"
     fi
     if [ "$cleanup_status" -ne 0 ]; then
         exit "$cleanup_status"
@@ -148,7 +277,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-for required in tmux jq shasum go cargo; do
+for required in tmux jq shasum go cargo perl; do
     command -v "$required" >/dev/null 2>&1 || fail "$required is required for the tmux smoke"
 done
 zaphod_require_zellij_0443
@@ -185,6 +314,7 @@ SOCKET_DIR="$ROOT/socket"
 SESSION_NAME="zs$$"
 TMUX_SERVER="zs$$"
 mkdir -p "$CONFIG_DIR/layouts" "$DATA_DIR" "$SOCKET_DIR" "$ROOT/tmp"
+phase root-created
 ISOLATED_LAYOUT="$CONFIG_DIR/layouts/zaphod.kdl"
 sed "s|<FIXED_OPERATOR_LAYOUT>|$ISOLATED_LAYOUT|" \
     "$SCRIPT_DIR/fixtures/zellij-tmux-smoke-config.kdl" > "$CONFIG_FILE"
@@ -192,6 +322,7 @@ printf '%s\n' 'layout { pane; }' > "$ISOLATED_LAYOUT"
 ISOLATED_CONFIG_BEFORE="$(file_state "$CONFIG_FILE")"
 ISOLATED_LAYOUT_BEFORE="$(file_state "$ISOLATED_LAYOUT")"
 
+phase agentsview-building
 go build -o "$ROOT/agentsview-fixture" "$SCRIPT_DIR/helpers/agentsview-fixture.go"
 "$ROOT/agentsview-fixture" --ready-file "$ROOT/agentsview-url" --cwd "$REPO_ROOT" \
     --trigger-file "$ROOT/agentsview-second-session" >"$ROOT/agentsview.out" 2>"$ROOT/agentsview.err" &
@@ -206,6 +337,7 @@ done
     fail "isolated AgentsView fixture did not become ready"
 }
 AGENTSVIEW_URL="$(cat "$ROOT/agentsview-url")"
+phase agentsview-ready
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 if [ "${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" != 1 ]; then
@@ -220,6 +352,7 @@ LAYOUT_VALIDATOR="$REPO_ROOT/target/debug/zaphod-kdl-validate"
 [ -x "$LAYOUT_VALIDATOR" ] || fail "host KDL validator was not built"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive the candidate WASM URL"
+phase artifacts-ready
 
 # This is a deliberately pre-authorized, disposable permission fixture. The
 # server starts with HOME under ROOT, so the real prompt remains available for
@@ -244,6 +377,7 @@ mkdir -p "$(dirname "$PERMISSION_CACHE")"
         '    RunCommands'
     printf '%s\n' '}'
 } > "$PERMISSION_CACHE"
+phase profile-ready
 
 start_tmux_zellij() {
     local command
@@ -480,8 +614,12 @@ wait_for_settled_candidate_resident() {
 # Run the selected-checkout entry against a real attached client. The fixture
 # already has a fixed global Alt Shift z shortcut and fail-closed Alt / policy;
 # the direct command must create its own inline tab without changing either.
+phase tmux-zellij-starting
 start_tmux_zellij
+phase tmux-zellij-launched
+phase session-ready-wait
 wait_for_nonempty_panes "$ROOT/foreign-ready.json"
+phase session-ready
 dismiss_startup_tip
 zellij_control setup --check >/dev/null
 capture_tabs "$ROOT/foreign-tabs-before.json"
@@ -490,6 +628,7 @@ zaphod_valid_tab_inventory "$ROOT/foreign-tabs-before.json" ||
 TAB_COUNT_BEFORE="$(jq -er 'length' "$ROOT/foreign-tabs-before.json")"
 FOREIGN_TAB_ID="$(jq -er '.[] | select(.active) | .tab_id' "$ROOT/foreign-tabs-before.json")"
 capture_state "$ROOT/foreign-ready.json" "$ROOT/foreign-ready.kdl" "$ROOT/foreign-ready.screen" absent
+phase foreign-baseline-captured
 jq -e --arg wasm_url "$WASM_URL" \
     'all(.[]; .plugin_url != $wasm_url)' "$ROOT/foreign-ready.json" >/dev/null ||
     fail "isolated profile unexpectedly started on the selected checkout rail"
@@ -622,6 +761,7 @@ foreground_entry() {
     } > "$ROOT/entry.out"
 }
 
+phase entry-start
 if [ "$SUBSCRIBER_MODE" = foreground ]; then
     foreground_entry
 elif [ "$PERMISSION_FIXTURE" = upgrade ]; then
@@ -664,6 +804,7 @@ elif [ "$PERMISSION_FIXTURE" = upgrade ]; then
 else
     entry_command > "$ROOT/entry.out"
 fi
+phase entry-complete
 TAB_ID="$(sed -n 's/^TAB_ID=//p' "$ROOT/entry.out")"
 SIDECAR_PID="$(sed -n 's/^SIDECAR_PID=//p' "$ROOT/entry.out")"
 SIDECAR_LOG="$(sed -n 's/^SIDECAR_LOG=//p' "$ROOT/entry.out")"
@@ -678,6 +819,7 @@ wait_for_settled_candidate_resident \
     "$ROOT/candidate-before.kdl" \
     "$ROOT/candidate-before.screen" \
     "$ROOT/candidate-tabs-before.json"
+phase candidate-settled
 for _attempt in $(seq 1 100); do
     tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/agents-row.screen"
     if grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null &&
@@ -688,6 +830,7 @@ for _attempt in $(seq 1 100); do
 done
 grep -F 'AGENTS' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row section never rendered"
 grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-row.screen" >/dev/null || fail "initial subscriber row was lost before recipient arming"
+phase initial-row-rendered
 touch "$ROOT/agentsview-second-session"
 for _attempt in $(seq 1 160); do
     tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/agents-second-row.screen"
@@ -705,6 +848,7 @@ if ! grep -F 'SMOKE_INITIAL_ROW' "$ROOT/agents-second-row.screen" >/dev/null ||
     fail "post-readiness data_changed did not render both distinct session rows"
 fi
 kill -0 "$SIDECAR_PID" 2>/dev/null || fail "subscriber exited after post-readiness data_changed delivery"
+phase second-row-rendered
 TAB_COUNT_AFTER="$(jq -er 'length' "$ROOT/candidate-tabs-before.json")"
 [ "$TAB_COUNT_AFTER" -eq "$((TAB_COUNT_BEFORE + 1))" ] ||
     fail "direct entry changed tab count from $TAB_COUNT_BEFORE to $TAB_COUNT_AFTER (expected one fresh tab)"
@@ -740,6 +884,7 @@ without_geometry "$ROOT/candidate-before.json" "$ROOT/candidate-before.identity.
 candidate_geometry "$ROOT/candidate-before.json" "$ROOT/candidate-before.geometry.json"
 send_literal "$(printf '\033/')"
 wait_for_candidate_width "$ROOT/candidate-after.json" 1
+phase managed-toggle-complete
 # `wait_for_candidate_width` already captured the valid post-key native pane
 # inventory. Do not issue a second list-panes call in the swap transition;
 # v0.44 can briefly return an empty successful response while it redraws.
@@ -765,6 +910,7 @@ cmp -s "$ROOT/candidate-before.screen" "$ROOT/candidate-after.screen" &&
 # send literal Alt / and require byte-identical foreign state.
 zellij_session action go-to-previous-tab
 wait_for_foreign_active_tab "$ROOT/foreign-tabs-after-route.json" "$FOREIGN_TAB_ID"
+phase foreign-route-check
 capture_state "$ROOT/foreign-before.json" "$ROOT/foreign-before.kdl" "$ROOT/foreign-before.screen" present
 send_literal "$(printf '\033/')"
 sleep 0.10
@@ -791,5 +937,6 @@ jq -e --arg wasm_url "$WASM_URL" \
     fail "standing Zellij layout changed during tmux smoke: $STANDING_LAYOUT"
 kill -0 "$SIDECAR_PID" 2>/dev/null || fail "private sidecar exited during smoke assertions"
 
+phase smoke-complete
 printf 'PASS: %s caller with %s target/zaphod subscribe rendered SMOKE_INITIAL_ROW then SMOKE_SECOND_ROW, stayed alive, preserved routing, and cleaned up\n' \
     "$CALLER_ENV" "$SUBSCRIBER_MODE"

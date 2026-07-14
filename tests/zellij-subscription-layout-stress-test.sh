@@ -6,12 +6,32 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-stress.XXXXXX")"
+EVIDENCE_DIR="${ZAPHOD_LAYOUT_STRESS_EVIDENCE_DIR:-}"
+INJECT_FAILURE_PHASE="${ZAPHOD_LAYOUT_STRESS_INJECT_FAILURE_PHASE:-}"
 TIMEOUT_SECS="${ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS:-180}"
 SERIAL_ROUNDS="${ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS:-2}"
+if [ -z "$EVIDENCE_DIR" ]; then
+    EVIDENCE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-layout-stress-evidence.XXXXXX")"
+else
+    mkdir -p "$EVIDENCE_DIR"
+fi
 cleanup() {
+    local original_status=$?
+    trap - EXIT INT TERM HUP
     rm -rf "$ROOT"
+    if [ -f "$EVIDENCE_DIR/bundle-manifest.txt" ]; then
+        printf 'stress_status=%s\nstress_root=%s\nstress_root_exists_after=%s\n' \
+            "$original_status" "$ROOT" "$([ -e "$ROOT" ] && echo 1 || echo 0)" \
+            > "$EVIDENCE_DIR/stress-cleanup.txt"
+    else
+        rm -rf "$EVIDENCE_DIR"
+    fi
+    exit "$original_status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 fail() {
     echo "FAIL: $*" >&2
@@ -27,19 +47,43 @@ cargo build --quiet --manifest-path "$REPO_ROOT/Cargo.toml" \
     --target-dir "$REPO_ROOT/target" \
     --features host-kdl-validator --bin zaphod-kdl-validate
 
+retain_failure_bundle() {
+    local name="$1"
+    local status="$2"
+    local expected="$3"
+    local case_evidence="$EVIDENCE_DIR/$name"
+    mkdir -p "$case_evidence"
+    cp "$ROOT/$name.out" "$case_evidence/case.stdout" 2>/dev/null || : > "$case_evidence/case.stdout"
+    cp "$ROOT/$name.err" "$case_evidence/case.stderr" 2>/dev/null || : > "$case_evidence/case.stderr"
+    {
+        printf 'case=%s\nstatus=%s\nexpected=%s\n' "$name" "$status" "$expected"
+        printf 'stress_pid=%s\nroot=%s\ntimeout_secs=%s\n' "$$" "$ROOT" "$TIMEOUT_SECS"
+        printf 'injected_failure_phase=%s\n' "$INJECT_FAILURE_PHASE"
+    } >> "$EVIDENCE_DIR/bundle-manifest.txt"
+    printf 'retained failure evidence: %s\n' "$EVIDENCE_DIR" >&2
+}
+
 run_owned_case() {
     local name="$1"
     local expected="$2"
     shift 2
     local child watchdog status
+    local case_evidence="$EVIDENCE_DIR/$name"
+    rm -rf "$case_evidence"
+    mkdir -p "$case_evidence"
     perl -MPOSIX -e 'defined POSIX::setsid() or die "setsid failed: $!"; exec @ARGV or die "exec failed: $!"' \
+        env \
+        ZAPHOD_LIFECYCLE_EVIDENCE_DIR="$case_evidence" \
+        ZAPHOD_LIFECYCLE_INJECT_FAILURE_PHASE="$INJECT_FAILURE_PHASE" \
+        ZAPHOD_SMOKE_EVIDENCE_DIR="$case_evidence" \
+        ZAPHOD_SMOKE_INJECT_FAILURE_PHASE="$INJECT_FAILURE_PHASE" \
         "$@" \
         > "$ROOT/$name.out" 2> "$ROOT/$name.err" &
     child=$!
     (
         sleep "$TIMEOUT_SECS"
         /bin/kill -TERM "-$child" 2>/dev/null || exit 0
-        sleep 5
+        sleep 15
         /bin/kill -KILL "-$child" 2>/dev/null || true
     ) &
     watchdog=$!
@@ -50,11 +94,16 @@ run_owned_case() {
     kill "$watchdog" 2>/dev/null || true
     wait "$watchdog" 2>/dev/null || true
     if [ "$status" -ne 0 ]; then
+        retain_failure_bundle "$name" "$status" "$expected"
         sed -n '1,120p' "$ROOT/$name.out" >&2 || true
         sed -n '1,160p' "$ROOT/$name.err" >&2 || true
         return "$status"
     fi
-    grep -F "$expected" "$ROOT/$name.out" >/dev/null || return 1
+    if ! grep -F "$expected" "$ROOT/$name.out" >/dev/null; then
+        retain_failure_bundle "$name" 1 "$expected"
+        return 1
+    fi
+    rm -rf "$case_evidence"
     printf 'PASS: %s native stress case\n' "$name"
 }
 
