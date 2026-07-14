@@ -18,14 +18,14 @@ fail() {
 cat > "$ROOT/before.json" <<'JSON'
 [
   {"id": 7, "is_plugin": false, "tab_id": 2, "plugin_url": null, "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": true, "title": "zaphod-long-running-non-shell", "terminal_command": ["tail", "-f", "/dev/null"]},
-  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate.wasm", "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": false}
+  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate/zellij-sidebar.wasm", "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": false}
 ]
 JSON
 
 cat > "$ROOT/added.json" <<'JSON'
 [
   {"id": 7, "is_plugin": false, "tab_id": 2, "plugin_url": null, "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": true, "title": "zaphod-long-running-non-shell", "terminal_command": ["tail", "-f", "/dev/null"]},
-  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate.wasm", "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": false},
+  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate/zellij-sidebar.wasm", "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": false},
   {"id": 10, "is_plugin": false, "tab_id": 2, "plugin_url": null, "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": true}
 ]
 JSON
@@ -64,17 +64,17 @@ cat > "$ROOT/refresh.json" <<'JSON'
 {"event":"complete","plugin_id":9,"refresh_id":4,"pane_ids":[7]}
 JSON
 zaphod_fixture_refresh_record_valid "$ROOT/before.json" "$ROOT/refresh.json" \
-    7 2 file:/candidate.wasm 9 ||
+    7 2 file:/candidate/zellij-sidebar.wasm 9 ||
     fail "the exact terminal/sidebar/refresh record was rejected"
 
 printf '%s\n' '{"event":"complete","plugin_id":7,"refresh_id":4,"pane_ids":[]}' > "$ROOT/wrong-field-refresh.json"
 if zaphod_fixture_refresh_record_valid "$ROOT/before.json" \
-    "$ROOT/wrong-field-refresh.json" 7 2 file:/candidate.wasm 9; then
+    "$ROOT/wrong-field-refresh.json" 7 2 file:/candidate/zellij-sidebar.wasm 9; then
     fail "fixture ID outside pane_ids incorrectly proved refresh membership"
 fi
 printf '%s\n' '{"event":"complete","plugin_id":9,"refresh_id":4,"pane_ids":[70]}' > "$ROOT/wrong-pane-refresh.json"
 if zaphod_fixture_refresh_record_valid "$ROOT/before.json" \
-    "$ROOT/wrong-pane-refresh.json" 7 2 file:/candidate.wasm 9; then
+    "$ROOT/wrong-pane-refresh.json" 7 2 file:/candidate/zellij-sidebar.wasm 9; then
     fail "adjacent wrong pane incorrectly proved refresh membership"
 fi
 

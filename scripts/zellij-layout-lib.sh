@@ -182,6 +182,8 @@ zaphod_render_layout() {
     local output="$3"
     local recipient_token="${4:-}"
     local debug_enabled="${5:-}"
+    local barrier_millis="${6:-}"
+    local barrier_panes="${7:-}"
     local replacement token_replacement rendered
     replacement="${wasm_url//&/\\&}"
     replacement="${replacement//|/\\|}"
@@ -194,6 +196,13 @@ zaphod_render_layout() {
             return 1
             ;;
     esac
+    if { [ -n "$barrier_millis" ] || [ -n "$barrier_panes" ]; } &&
+        { [ "$debug_enabled" != 1 ] ||
+          ! [[ "$barrier_millis" =~ ^[1-9][0-9]*$ ]] ||
+          ! [[ "$barrier_panes" =~ ^[1-9][0-9]*$ ]]; }; then
+        echo "layout refresh barrier requires debug plus positive millisecond and pane values" >&2
+        return 1
+    fi
     if [ -n "$recipient_token" ]; then
         sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
             -e "s|__ZAPHOD_RECIPIENT__|$token_replacement|g" "$template" > "$output"
@@ -203,11 +212,15 @@ zaphod_render_layout() {
     fi
     if [ "$debug_enabled" = 1 ]; then
         rendered="$output.debug.$$"
-        awk '
+        awk -v barrier_millis="$barrier_millis" -v barrier_panes="$barrier_panes" '
             { print }
             /^[[:space:]]*rail[[:space:]]+"1"[[:space:]]*$/ {
                 match($0, /^[[:space:]]*/)
                 print substr($0, 1, RLENGTH) "debug \"1\""
+                if (barrier_millis != "") {
+                    print substr($0, 1, RLENGTH) "test_refresh_barrier_millis \"" barrier_millis "\""
+                    print substr($0, 1, RLENGTH) "test_refresh_barrier_panes \"" barrier_panes "\""
+                }
             }
         ' "$output" > "$rendered"
         mv "$rendered" "$output"

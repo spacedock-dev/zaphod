@@ -6,10 +6,15 @@ zaphod_existing_pane_tuples_preserved() {
     local before="$1"
     local after="$2"
     jq -e --slurpfile before "$before" '
-        def tuple: {
-            id, is_plugin, tab_id, plugin_url, exited,
-            is_floating, is_suppressed, is_selectable
-        };
+        def is_sidebar:
+            .is_plugin
+            and (.plugin_url | type) == "string"
+            and (.plugin_url | test("(^|/)zellij-sidebar\\.wasm([?#].*)?$"));
+        def tuple:
+            {id, is_plugin, tab_id, plugin_url}
+            + if is_sidebar then {
+                exited, is_floating, is_suppressed, is_selectable
+              } else {} end;
         ($before[0] | map(tuple)) as $old
         | (map(tuple)) as $new
         | all($old[]; . as $tuple | $new | index($tuple) != null)
@@ -20,10 +25,16 @@ zaphod_pane_tuple_inventories_equal() {
     local before="$1"
     local after="$2"
     jq -e --slurpfile before "$before" '
-        def tuples: map({
-            id, is_plugin, tab_id, plugin_url, exited,
-            is_floating, is_suppressed, is_selectable
-        }) | sort_by(.is_plugin, .id);
+        def is_sidebar:
+            .is_plugin
+            and (.plugin_url | type) == "string"
+            and (.plugin_url | test("(^|/)zellij-sidebar\\.wasm([?#].*)?$"));
+        def tuple:
+            {id, is_plugin, tab_id, plugin_url}
+            + if is_sidebar then {
+                exited, is_floating, is_suppressed, is_selectable
+              } else {} end;
+        def tuples: map(tuple) | sort_by(.is_plugin, .id);
         tuples == ($before[0] | tuples)
     ' "$after" >/dev/null
 }

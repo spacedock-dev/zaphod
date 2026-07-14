@@ -718,8 +718,9 @@ impl ZellijPlugin for Sidebar {
                 self.rows != old || !self.rendered_once
             }
             Event::Timer(_) => {
-                let changed =
-                    if should_poll_statuses(self.own_tab, self.reported_active_tab, self.last_cols) {
+                let changed = if self.test_refresh_barrier.is_some()
+                    || should_poll_statuses(self.own_tab, self.reported_active_tab, self.last_cols)
+                {
                         self.refresh_statuses()
                     } else {
                         false
