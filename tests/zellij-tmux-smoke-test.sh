@@ -273,6 +273,8 @@ cleanup() {
     local tmux_kill_status=125 tmux_probe_status_after=125 tmux_absence_confirmed=0
     local tmux_socket_status=125 tmux_socket_path="" tmux_socket_absent_after=0
     local tmux_server_unreachable_after=0
+    local tmux_server_pid="" tmux_server_pid_alive_after=0 tmux_socket_removed_after=0
+    local tmux_absence_basis="unproven"
     local config_after layout_after
     trap - EXIT INT TERM HUP
     set +e
@@ -280,11 +282,11 @@ cleanup() {
     terminate_owned_pid "$ENTRY_PID" "entry process" || cleanup_status=1
     terminate_owned_pid "$SIDECAR_PID" "private sidecar" || cleanup_status=1
     if [ -n "$TMUX_SERVER" ]; then
-        tmux_with_timeout 1 display-message -p '#{socket_path}' \
+        tmux_with_timeout 1 display-message -p '#{pid} #{socket_path}' \
             > "$ROOT/tmux-socket-path.stdout" 2> "$ROOT/tmux-socket-path.stderr"
         tmux_socket_status=$?
         if [ "$tmux_socket_status" -eq 0 ]; then
-            IFS= read -r tmux_socket_path < "$ROOT/tmux-socket-path.stdout" || true
+            IFS=' ' read -r tmux_server_pid tmux_socket_path < "$ROOT/tmux-socket-path.stdout" || true
         fi
         tmux_with_timeout 2 kill-server > "$ROOT/tmux-kill.stdout" 2> "$ROOT/tmux-kill.stderr"
         tmux_kill_status=$?
@@ -295,6 +297,9 @@ cleanup() {
                 > "$ROOT/tmux-probe.stdout" 2> "$ROOT/tmux-probe.stderr"
         fi
         tmux_probe_status_after=$?
+        if pid_is_alive "$tmux_server_pid"; then
+            tmux_server_pid_alive_after=1
+        fi
         case "$tmux_probe_status_after" in
             0)
                 echo "dedicated tmux server survived cleanup: $TMUX_SERVER" >&2
@@ -307,12 +312,11 @@ cleanup() {
                     { grep -F 'error connecting to ' "$ROOT/tmux-probe.stderr" >/dev/null &&
                       grep -F 'No such file or directory' "$ROOT/tmux-probe.stderr" >/dev/null; }; }; then
                     tmux_server_unreachable_after=1
-                    [ -z "$tmux_socket_path" ] || rm -f "$tmux_socket_path"
-                    if [ -n "$tmux_socket_path" ] && [ ! -e "$tmux_socket_path" ]; then
-                        tmux_socket_absent_after=1
+                    if [ -n "$tmux_server_pid" ] && [ "$tmux_server_pid_alive_after" -eq 0 ]; then
                         tmux_absence_confirmed=1
+                        tmux_absence_basis="native-unreachable+pid-exited"
                     else
-                        echo "dedicated tmux socket survived unreachable server: $tmux_socket_path" >&2
+                        echo "dedicated tmux server PID did not conclusively exit: ${tmux_server_pid:-missing}" >&2
                         cleanup_status=1
                     fi
                 else
@@ -325,6 +329,13 @@ cleanup() {
                 cleanup_status=1
                 ;;
         esac
+        if [ "$tmux_absence_confirmed" -eq 1 ] && [ -n "$tmux_socket_path" ] && [ -e "$tmux_socket_path" ]; then
+            rm -f "$tmux_socket_path" || cleanup_status=1
+            [ -e "$tmux_socket_path" ] || tmux_socket_removed_after=1
+        fi
+        if [ -n "$tmux_socket_path" ] && [ ! -e "$tmux_socket_path" ]; then
+            tmux_socket_absent_after=1
+        fi
     fi
     if [ -n "$SESSION_NAME" ]; then
         zellij_control_with_timeout 2 delete-session --force "$SESSION_NAME" \
@@ -387,8 +398,10 @@ cleanup() {
                 "$tmux_kill_status" "$tmux_probe_status_after" "$tmux_absence_confirmed"
             printf 'tmux_probe_command=list-sessions\ntmux_server_unreachable_after=%s\n' \
                 "$tmux_server_unreachable_after"
-            printf 'tmux_socket_status=%s\ntmux_socket_path=%s\ntmux_socket_absent_after=%s\n' \
-                "$tmux_socket_status" "$tmux_socket_path" "$tmux_socket_absent_after"
+            printf 'tmux_server_pid=%s\ntmux_server_pid_alive_after=%s\ntmux_absence_basis=%s\n' \
+                "$tmux_server_pid" "$tmux_server_pid_alive_after" "$tmux_absence_basis"
+            printf 'tmux_socket_status=%s\ntmux_socket_path=%s\ntmux_socket_removed_after=%s\ntmux_socket_absent_after=%s\n' \
+                "$tmux_socket_status" "$tmux_socket_path" "$tmux_socket_removed_after" "$tmux_socket_absent_after"
             printf 'entry_alive_after=%s\n' "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
             printf 'sidecar_alive_after=%s\n' "$(pid_is_alive "$SIDECAR_PID" && echo 1 || echo 0)"
             printf 'agentsview_alive_after=%s\n' "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
