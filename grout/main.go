@@ -98,14 +98,15 @@ func run(cfg Config, stderr io.Writer) error {
 }
 
 func subscribeUsage(stderr io.Writer) {
+	fmt.Fprintln(stderr, "usage: zaphod watch-tab --server URL [--foreground]")
 	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL --checkout-cwd PATH --recipient-token TOKEN [--registry-dir DIR]")
-	fmt.Fprintln(stderr, "       zaphod register-agent-session [--registry-dir DIR]")
+	fmt.Fprintln(stderr, "       zaphod register-agent-session [--watch-dir DIR]")
 }
 
 func runRegisterAgentSession(args []string, stdin io.Reader, stderr io.Writer) error {
 	flags := flag.NewFlagSet("zaphod register-agent-session", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	registryDir := flags.String("registry-dir", defaultAgentRegistryDir(), "private agent-session registry root")
+	watchDir := flags.String("watch-dir", defaultWatchRoot(), "private tab-watcher socket root")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -120,8 +121,8 @@ func runRegisterAgentSession(args []string, stdin io.Reader, stderr io.Writer) e
 	if zellijSession == "" || paneID == "" {
 		return fmt.Errorf("register-agent-session requires both ZELLIJ_SESSION_NAME and ZELLIJ_PANE_ID")
 	}
-	if !filepath.IsAbs(*registryDir) {
-		return fmt.Errorf("register-agent-session registry directory must be absolute")
+	if !filepath.IsAbs(*watchDir) {
+		return fmt.Errorf("register-agent-session watch directory must be absolute")
 	}
 	const maxHookBytes = 1 << 20
 	payload, err := io.ReadAll(io.LimitReader(stdin, maxHookBytes+1))
@@ -131,11 +132,83 @@ func runRegisterAgentSession(args []string, stdin io.Reader, stderr io.Writer) e
 	if len(payload) > maxHookBytes {
 		return fmt.Errorf("Codex hook exceeds %d bytes", maxHookBytes)
 	}
-	registration, err := decodeCodexRegistration(payload, zellijSession, paneID, os.Getpid(), time.Now())
-	if err != nil {
-		return err
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	return sendWatchHook(ctx, *watchDir, zellijSession, paneID, payload)
+}
+
+type WatchCommandConfig struct {
+	WatchConfig
+	Foreground bool
+	StartupFD  int
+}
+
+func defaultWatchRoot() string {
+	if value := os.Getenv("ZAPHOD_WATCH_DIR"); value != "" {
+		return value
 	}
-	return (agentRegistryStore{root: *registryDir}).upsert(registration)
+	if value := os.Getenv("XDG_RUNTIME_DIR"); value != "" {
+		return filepath.Join(value, "zaphod", "watch-tab-v1")
+	}
+	return filepath.Join("/tmp", fmt.Sprintf("zaphod-watch-tab-v1-%d", os.Getuid()))
+}
+
+func parseWatchTabArgs(args []string, stderr io.Writer) (WatchCommandConfig, error) {
+	flags := flag.NewFlagSet("zaphod watch-tab", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	server := flags.String("server", os.Getenv("ZAPHOD_AGENTSVIEW_URL"), "AgentsView server URL")
+	watchDir := flags.String("watch-dir", defaultWatchRoot(), "private tab-watcher socket root")
+	foreground := flags.Bool("foreground", false, "run the watcher in the foreground")
+	startupFD := flags.Int("startup-fd", -1, "private daemon readiness descriptor")
+	if err := flags.Parse(args); err != nil {
+		return WatchCommandConfig{}, err
+	}
+	if flags.NArg() != 0 {
+		return WatchCommandConfig{}, fmt.Errorf("watch-tab accepts flags only")
+	}
+	paneID, err := canonicalPaneID(os.Getenv("ZELLIJ_PANE_ID"))
+	if err != nil {
+		return WatchCommandConfig{}, err
+	}
+	values := map[string]string{
+		"server": *server, "ZELLIJ_SESSION_NAME": os.Getenv("ZELLIJ_SESSION_NAME"),
+		"ZAPHOD_RAIL_URL":           os.Getenv("ZAPHOD_RAIL_URL"),
+		"ZAPHOD_RECIPIENT_TOKEN":    os.Getenv("ZAPHOD_RECIPIENT_TOKEN"),
+		"ZAPHOD_ZELLIJ_CONFIG_DIR":  os.Getenv("ZAPHOD_ZELLIJ_CONFIG_DIR"),
+		"ZAPHOD_ZELLIJ_CONFIG_FILE": os.Getenv("ZAPHOD_ZELLIJ_CONFIG_FILE"),
+		"ZAPHOD_ZELLIJ_DATA_DIR":    os.Getenv("ZAPHOD_ZELLIJ_DATA_DIR"),
+	}
+	missing := make([]string, 0)
+	for name, value := range values {
+		if value == "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return WatchCommandConfig{}, fmt.Errorf("watch-tab missing explicit route context: %s", strings.Join(missing, ", "))
+	}
+	if !filepath.IsAbs(*watchDir) {
+		return WatchCommandConfig{}, fmt.Errorf("watch-tab watch directory must be absolute")
+	}
+	zellijBin := os.Getenv("ZELLIJ_BIN")
+	if zellijBin == "" {
+		zellijBin = "zellij"
+	}
+	return WatchCommandConfig{
+		WatchConfig: WatchConfig{
+			SubscribeConfig: SubscribeConfig{
+				ServerURL: *server, ZellijBin: zellijBin,
+				ZellijConfigDir:  values["ZAPHOD_ZELLIJ_CONFIG_DIR"],
+				ZellijConfigFile: values["ZAPHOD_ZELLIJ_CONFIG_FILE"],
+				ZellijDataDir:    values["ZAPHOD_ZELLIJ_DATA_DIR"],
+				ZellijSession:    values["ZELLIJ_SESSION_NAME"], RailURL: values["ZAPHOD_RAIL_URL"],
+				RecipientToken: values["ZAPHOD_RECIPIENT_TOKEN"], PipeTimeout: 5 * time.Second,
+				SourceTimeout: 5 * time.Second, SummaryClampBytes: 512,
+			},
+			PaneID: paneID, SocketRoot: *watchDir, Lease: 500 * time.Millisecond, Heartbeat: 200 * time.Millisecond,
+		},
+		Foreground: *foreground, StartupFD: *startupFD,
+	}, nil
 }
 
 func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error) {
@@ -213,6 +286,26 @@ func runMain(args []string, stderr io.Writer) int {
 			if !errors.Is(err, flag.ErrHelp) {
 				fmt.Fprintln(stderr, err)
 			}
+			return 1
+		}
+		return 0
+	}
+	if args[0] == "watch-tab" {
+		cfg, err := parseWatchTabArgs(args[1:], stderr)
+		if err != nil {
+			if !errors.Is(err, flag.ErrHelp) {
+				fmt.Fprintln(stderr, err)
+			}
+			return 2
+		}
+		if !cfg.Foreground {
+			fmt.Fprintln(stderr, "watch-tab daemon launch is unavailable; use --foreground")
+			return 2
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := runWatchTab(ctx, cfg.WatchConfig, stderr); err != nil {
+			fmt.Fprintln(stderr, err)
 			return 1
 		}
 		return 0
