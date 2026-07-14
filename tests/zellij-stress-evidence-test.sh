@@ -1,0 +1,75 @@
+#!/bin/bash
+# ABOUTME: Proves a forced native lifecycle failure retains bounded evidence after live cleanup.
+# ABOUTME: The retained bundle must identify the phase, owned processes, native state, and cleanup result.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-stress-evidence-test.XXXXXX")"
+EVIDENCE="$ROOT/evidence"
+OUT="$ROOT/stress.out"
+ERR="$ROOT/stress.err"
+trap 'rm -rf "$ROOT"' EXIT
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+file_state() {
+    local path="$1"
+    if [ -e "$path" ]; then
+        printf 'present:%s\n' "$(shasum -a 256 "$path" | awk '{print $1}')"
+    else
+        printf 'missing\n'
+    fi
+}
+
+STANDING_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
+STANDING_CONFIG="${ZELLIJ_CONFIG_FILE:-$STANDING_ROOT/config.kdl}"
+STANDING_LAYOUT="$STANDING_ROOT/layouts/zaphod.kdl"
+CONFIG_BEFORE="$(file_state "$STANDING_CONFIG")"
+LAYOUT_BEFORE="$(file_state "$STANDING_LAYOUT")"
+
+set +e
+ZAPHOD_LAYOUT_STRESS_EVIDENCE_DIR="$EVIDENCE" \
+ZAPHOD_LAYOUT_STRESS_INJECT_FAILURE_PHASE=tmux-zellij-launched \
+ZAPHOD_LAYOUT_STRESS_TIMEOUT_SECS=5 \
+ZAPHOD_LAYOUT_STRESS_SERIAL_ROUNDS=1 \
+    "$SCRIPT_DIR/zellij-subscription-layout-stress-test.sh" > "$OUT" 2> "$ERR"
+status=$?
+set -e
+
+[ "$status" -ne 0 ] || fail "injected lifecycle failure unexpectedly passed"
+grep -F "retained failure evidence: $EVIDENCE" "$ERR" >/dev/null ||
+    fail "stress failure did not report its retained evidence path"
+[ -f "$EVIDENCE/bundle-manifest.txt" ] || fail "failure bundle omitted its manifest"
+[ -f "$EVIDENCE/serial-1/case.stdout" ] || fail "failure bundle omitted case stdout"
+[ -f "$EVIDENCE/serial-1/case.stderr" ] || fail "failure bundle omitted case stderr"
+[ -f "$EVIDENCE/serial-1/lifecycle-phases.log" ] || fail "failure bundle omitted lifecycle phases"
+[ -f "$EVIDENCE/serial-1/outside-foreground/phase.log" ] || fail "failure bundle omitted smoke phases"
+[ -f "$EVIDENCE/serial-1/outside-foreground/process-ownership.txt" ] ||
+    fail "failure bundle omitted process ownership"
+[ -f "$EVIDENCE/serial-1/outside-foreground/tmux-pane.txt" ] ||
+    fail "failure bundle omitted bounded tmux pane evidence"
+[ -d "$EVIDENCE/serial-1/outside-foreground/native" ] ||
+    fail "failure bundle omitted bounded native replies"
+[ -f "$EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" ] ||
+    fail "failure bundle omitted smoke cleanup result"
+[ -f "$EVIDENCE/stress-cleanup.txt" ] || fail "failure bundle omitted stress cleanup result"
+
+grep -F 'phase=tmux-zellij-launched' "$EVIDENCE/serial-1/outside-foreground/phase.log" >/dev/null ||
+    fail "smoke phase evidence did not reach the injected failure"
+grep -F 'injected_failure=tmux-zellij-launched' "$EVIDENCE/serial-1/outside-foreground/process-ownership.txt" >/dev/null ||
+    fail "process evidence omitted the injected failure identity"
+grep -F 'session_alive_after=0' "$EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
+    fail "cleanup evidence did not prove the Zellij session stopped"
+grep -F 'tmux_alive_after=0' "$EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
+    fail "cleanup evidence did not prove the tmux server stopped"
+grep -F 'root_exists_after=0' "$EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
+    fail "cleanup evidence did not prove the smoke root was removed"
+grep -F 'stress_root_exists_after=0' "$EVIDENCE/stress-cleanup.txt" >/dev/null ||
+    fail "cleanup evidence did not prove the stress root was removed"
+[ "$(file_state "$STANDING_CONFIG")" = "$CONFIG_BEFORE" ] || fail "forced failure changed standing config"
+[ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "forced failure changed standing layout"
+
+echo "PASS: forced lifecycle failure retains bounded evidence after complete cleanup"
