@@ -37,7 +37,11 @@ tool_call_pending, absent; `truncated` exists in code, unobserved).
 The sidecar owns one SSE connection, exact record fetches, target probes, and
 short-lived pipe children. Initial connection and each `data_changed` event
 produce a complete snapshot from the current registry and fresh native pane
-inventory. It never calls the global session list. Target loss, source EOF,
+inventory. A two-second bounded refresh also converges registry commits,
+delayed exact-record indexing, and native pane moves without a source event.
+After the first exact rail-URL proof, that hot-path membership query uses the
+trusted native rail pane ID and omits `--all`, command, and geometry metadata.
+It never calls the global session list. Target loss, source EOF,
 a source error, corrupt or conflicting registry state, exact-record mismatch,
 or a pipe error ends the sidecar; it does not reconnect, retry, guess,
 retarget, or clean up external resources. Source and pipe operations have

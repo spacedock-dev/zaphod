@@ -154,7 +154,10 @@ The sidecar and the trusted `.codex/hooks.json` command also share a private,
 versioned runtime registry. The hook invokes this checkout's
 `target/zaphod register-agent-session`; it accepts only Codex `SessionStart`
 events with source `startup` or `resume`. Outside Zellij, the hook exits
-without writing. It never changes global Codex configuration.
+without writing. The direct entry starts the managed shell with the same
+absolute registry root it gives the sidecar, even when the invoking client
+and Zellij server have different runtime-directory environments. It never
+changes global Codex configuration.
 The sidecar reads AgentsView from `http://127.0.0.1:8080` by default; pass
 `--agentsview-url URL` or set `ZAPHOD_AGENTSVIEW_URL` to use another endpoint.
 The startup handshake allows 30 seconds for the sidecar to verify the exact
@@ -171,7 +174,10 @@ sidecar yourself. For a live session-row check, follow the
 
 The initial snapshot may be empty. A row appears only after Codex runs the
 trusted project hook in a live pane and AgentsView serves the exact canonical
-ID `codex:<SessionStart session_id>`. A missing exact record, mismatched
+ID `codex:<SessionStart session_id>`. Every two seconds, a bounded refresh
+rechecks registry and native pane membership, so late hook commits, delayed
+AgentsView indexing, and pane moves converge without another source event.
+A missing exact record, mismatched
 returned ID, corrupt registry, duplicate live claim, stale pane, foreign tab,
 or unregistered child yields no row. A later top-level session in the same
 pane replaces the old row. Sidecar restart rehydrates the surviving mapping

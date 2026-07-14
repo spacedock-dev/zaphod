@@ -106,6 +106,11 @@ then closes the registered native terminal while leaving a spare terminal and
 resident rail alive; the next sidecar generation must prune the claim and
 render zero stale rows.
 
+Go loopback tests separately hold the SSE stream quiet while committing a
+late registration, turning an exact 404 into an indexed record, and moving a
+registered pane. The bounded membership refresh must project, recover, or
+remove the row without a `data_changed` event.
+
 For headless coverage, the script gives Zellij a disposable `HOME` and writes
 a deliberate pre-grant to its temporary permission cache. The cache key is the
 raw WASM path, not the `file:` URL rendered into layouts. This is a fixture,
