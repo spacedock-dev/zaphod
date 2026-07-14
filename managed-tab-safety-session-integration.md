@@ -245,3 +245,31 @@ files: exact managed provenance, one stable-tab subscriber, target-only
 session/focus, and managed-only toggle/lookalike inertness. README must retain
 both delivered contracts and explicitly defer gate pooling and review behavior
 to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
+
+### Feedback Cycles
+
+#### Cycle 1 — 2026-07-14 — captain rejected ideation
+
+- The current design proves the recipient tab for delivery but does not prove
+  which terminal pane originated an AgentsView session. Checkout CWD is a
+  project hint, not session authority; live use admitted historical sessions
+  and subagents, and the reviewed `yb` design independently demonstrated that
+  the same session can appear in two tabs sharing one CWD.
+- Reframe the walking skeleton around an explicit AgentsView-session-to-live-
+  terminal-pane identity bridge. Unregistered, stale, ambiguous, child, and
+  foreign-tab sessions must fail closed and render no row. Preserve the stable
+  tab/recipient-token delivery proof; do not replace one inferred identity
+  with another.
+- Spike the riskiest mechanism before revising the design: from a real agent
+  harness started inside a managed terminal, obtain its authoritative
+  AgentsView session ID and `ZELLIJ_PANE_ID`, register the pair, and prove that
+  two managed tabs with the same checkout each render exactly their own one
+  top-level session while spawned subagents render nowhere. Record lifecycle
+  behavior for pane move/close, agent completion/restart, and plugin/sidecar
+  restart. If the harness cannot expose an authoritative session ID at startup,
+  stop and return the failed probe rather than falling back to CWD, timing,
+  title, prompt text, or newest-session inference.
+- Revise the acceptance criteria and test plan around exact identity,
+  cardinality, negative evidence, cleanup, and rehydration. The spike result
+  must choose the smallest supported registration carrier and name its owner;
+  implementation remains out of scope for this ideation rework.
