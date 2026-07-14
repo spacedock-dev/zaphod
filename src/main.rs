@@ -2700,6 +2700,30 @@ mod tests {
     }
 
     #[test]
+    fn session_snapshot_replaces_stale_rows_and_rejects_duplicate_pane_authority() {
+        let mut sessions = vec![SessionEvent {
+            id: "stale".to_owned(),
+            pane_id: Some(9),
+            ..Default::default()
+        }];
+        let mut gates = vec![GateEvent {
+            log_path: "/gate.decisions.jsonl".to_owned(),
+            ..Default::default()
+        }];
+        assert!(apply_agent_snapshot(&mut sessions, &mut gates, Some("[]")).unwrap());
+        assert!(sessions.is_empty(), "empty authoritative snapshot removes stale rows");
+        assert_eq!(gates.len(), 1, "session snapshots do not erase gate state");
+
+        let duplicate = r#"[
+          {"kind":"session","id":"one","pane_id":7},
+          {"kind":"session","id":"two","pane_id":7}
+        ]"#;
+        let before = sessions.clone();
+        assert!(apply_agent_snapshot(&mut sessions, &mut gates, Some(duplicate)).is_err());
+        assert_eq!(sessions, before, "invalid snapshot is atomic");
+    }
+
+    #[test]
     fn agent_event_lines_land_as_session_and_gate_rows() {
         let mut sidebar = Sidebar::default();
         arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
