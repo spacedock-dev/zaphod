@@ -1312,7 +1312,7 @@ if [ "$RESPONSIVENESS_CHECK" = 1 ]; then
     cp "$ROOT/responsive-managed-return-panes.json" "$ROOT/responsive-before-fixture-panes.json"
     RESPONSIVE_TERMINALS="$((RESPONSIVE_TERMINALS + 1))"
     zellij_session action new-pane --tab-id "$TAB_ID" --name zaphod-long-running-non-shell \
-        -- sh -c 'while :; do sleep 60; done' > "$ROOT/responsive-fixture-pane-id.txt"
+        -- tail -f /dev/null > "$ROOT/responsive-fixture-pane-id.txt"
     RESPONSIVE_FIXTURE_ID="$(tr -d '[:space:]' < "$ROOT/responsive-fixture-pane-id.txt")"
     case "$RESPONSIVE_FIXTURE_ID" in
         terminal_[0-9]*) ;;
