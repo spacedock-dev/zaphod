@@ -273,3 +273,351 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   cardinality, negative evidence, cleanup, and rehydration. The spike result
   must choose the smallest supported registration carrier and name its owner;
   implementation remains out of scope for this ideation rework.
+
+## Cycle 2 revised contract — explicit session-to-pane registration
+
+This contract supersedes the cycle-1 CWD-bound journey. The previous merge
+shape and managed-tab proof remain constraints, but CWD is no longer a
+session-routing input.
+
+### Revised problem
+
+BB proved that a private sidecar can deliver to one stable tab and V3 proved
+which rail may own managed actions. Neither proves which live terminal
+originated an AgentsView session. Current production code first lists up to
+1,000 sessions with `include_children=true`, selects every session whose CWD
+appears in the recipient tab, then lets the plugin bind that CWD to one pane.
+Two same-checkout tabs therefore admit the same history; child sessions can
+also pass through when AgentsView's child metadata is incomplete.
+
+The original Zaphod evidence did not contain a stronger join:
+
+- The archived 2026-07-07 AgentsView spike explicitly chose “identity binding
+  lives in the plugin” through exact CWD matching
+  (`docs/archive/plan-agent-rail-prototype-2026-07-07.md`, shipped prototype
+  decision 1).
+- The later live packet found a session by CWD plus unique first-message text
+  (`docs/zellij-agentsview-live-demo.md`, steps 3–6). It proved SSE refresh,
+  not session-to-pane identity.
+- The 2026-07-08 child filter (`e3619bb`) recorded that AgentsView's own child
+  and automated flags missed 59/59 sampled Task-tool children and substituted
+  an `agent-` ID-prefix heuristic. The current Codex child observed below has
+  a normal `codex:<UUID>` ID, so that historical heuristic is not authority.
+- `zellij-managed-identity-feasibility.md` proves a possible managed-view
+  marker and session-incarnation direction. It never joins an AgentsView
+  session ID to the terminal that launched it.
+
+### Primary-source comparison and reused mechanism
+
+The field already supplies the mechanism; KJ should reuse it rather than
+inventing another identity inference.
+
+- **Herdr** injects `HERDR_PANE_ID`, `HERDR_SOCKET_PATH`, and `HERDR_ENV` into
+  each terminal. Its agent hook reads the agent-native session reference from
+  hook stdin and reports it with that inherited pane ID. The server stores the
+  hook authority on the pane and persists the session reference. See
+  `spacedock-ui-research/notes/herdr-agent-integration.md`,
+  `herdr/src/integration/mod.rs`, `herdr/src/cli/pane.rs`, and
+  `herdr/src/terminal/state.rs` in the local Spaceterm research checkout.
+- **Superset** injects `SUPERSET_TERMINAL_ID` into the PTY
+  (`packages/host-service/src/terminal/env.ts`), extracts the agent's
+  `session_id` from lifecycle-hook JSON, posts both values, and keys its live
+  `TerminalAgentStore` by terminal ID. Terminal exit deletes the binding; a
+  new session ID replaces the prior session in that terminal. See
+  `notify-hook.template.sh` and `packages/host-service/src/terminal-agents/`.
+- **cmux** receives an agent-native hook session ID alongside inherited
+  `CMUX_WORKSPACE_ID`/`CMUX_SURFACE_ID`, validates that the direct surface is
+  still accessible, and persists `sessionId → {workspaceId, surfaceId}` for
+  hook and restart routing (`CLI/CMUXCLI+AgentHookDefinitions.swift` and the
+  `ClaudeHookSessionStore` in `CLI/cmux.swift`). cmux also has TTY/PID and
+  newest-active recovery paths for agents that strip environment. KJ does not
+  reuse those fallbacks: an absent direct join must stay absent.
+
+The common proven shape is **terminal identity inherited from the spawn
+context + agent session identity supplied by the lifecycle hook**. Zellij
+already provides the two required terminal values to processes in a pane:
+`ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`. Codex 0.144.1's documented
+`SessionStart` hook input supplies `session_id`; `SubagentStart` is a distinct
+event and carries the parent session ID. Those are the only identity sources
+authorized here.
+
+The wider research agrees with this choice:
+`spacedock-ui-research/problem-map.md` names env-contract pane↔session binding
+as solved field work to borrow, and `capability-matrix.md` records hook-bound
+session awareness in Herdr, cmux, and Superset while identifying Zaphod's gap.
+
+### Riskiest mechanism spike — run first, PASSED
+
+The smallest real harness spike ran on 2026-07-14 with Zellij 0.44.3, tmux
+3.6a, Codex 0.144.1, and AgentsView 0.37.5. It used disposable
+config/data/socket/HOME/Codex/AgentsView roots and the current candidate WASM.
+
+1. It opened two rail-bearing tabs, `Managed-A` and `Managed-B`, at the exact
+   same `/Users/clkao/git/zaphod` CWD. Native state assigned tab/pane pairs
+   `0/0` and `1/1`.
+2. A real Codex process started through each attached tmux/Zellij terminal.
+   `SessionStart` hook stdin supplied
+   `019f5f99-38d9-7352-824e-e42734bf8d9f` in pane 0 and
+   `019f5f99-39be-7af0-94b5-de0da85f96d6` in pane 1. The inherited
+   `ZELLIJ_SESSION_NAME` was `kj-spike-32122` for both.
+3. Isolated AgentsView indexed those exact sessions as
+   `codex:019f5f99-38d9-7352-824e-e42734bf8d9f` and
+   `codex:019f5f99-39be-7af0-94b5-de0da85f96d6`. Thus the Codex adapter's
+   canonical AgentsView key is the observed `codex:` namespace plus the exact
+   hook UUID; a failure of that exact lookup is terminal.
+4. The second Codex process spawned one real subagent. Codex emitted one
+   `SubagentStart` with the parent ID and wrote a separate child transcript;
+   AgentsView indexed the child as
+   `codex:019f5f99-62ef-7661-9e76-3a1f1a93d351` but did not label it as a
+   child in list output. Because it produced no top-level `SessionStart`
+   registration, the explicit registry omitted it.
+5. The registry-to-live-pane join projected exactly one row per tab. Stable
+   recipient-token pipes rendered `KJ_TAB_A_ROW` only in A and
+   `KJ_TAB_B_ROW` only in B; the unregistered child rendered nowhere. The
+   tmux server and Zellij session were removed afterward.
+
+This passes the mechanism that CWD could not prove. It also sharpens the
+failure rule: AgentsView classification is not sufficient to exclude a child;
+only an exact top-level registration admits a session. If a future provider's
+startup hook cannot supply an agent-native ID that resolves to one exact
+AgentsView ID, that provider is unsupported for this slice. CWD, timing,
+titles, prompts, ID prefixes, and newest-session selection remain forbidden.
+
+### Proposed approach
+
+#### One native, lock-safe ephemeral registry
+
+Add a native `zaphod register-agent-session` hook receiver and a versioned,
+user-private registry scoped by the exact Zellij session. The native binary,
+not a shell hook or WASM plugin, owns locking, validation, atomic replacement,
+and garbage collection. Its minimum record is:
+
+```text
+AgentPaneRegistrationV1 {
+  zellij_session: exact inherited ZELLIJ_SESSION_NAME,
+  pane_id: exact inherited ZELLIJ_PANE_ID,
+  agent: provider namespace, initially "codex",
+  agent_session_id: exact provider SessionStart id,
+  agentsview_session_id: provider adapter's exact canonical key,
+  pid: hook caller/process observation for lifecycle diagnostics only,
+  updated_at: monotonic/UTC registration observation,
+}
+```
+
+The file lives under a per-user runtime directory with a `0700` parent and
+`0600` contents. The receiver takes a native advisory lock, validates one
+JSON hook object, writes a same-directory temporary file, fsyncs, and renames.
+It accepts only `SessionStart` `startup|resume` for registration. A duplicate
+pair is idempotent; a new top-level session in the same live pane supersedes
+the old one. The same session ID concurrently claimed by two live panes is an
+ambiguous conflict and neither claim is deliverable. `pid` and `updated_at`
+help cleanup but never override the exact session/pane pair.
+
+For the selected-checkout dogfood slice, a trusted repo-local Codex hook calls
+the checkout-built native receiver. It exits successfully without mutation
+when the two Zellij environment values are absent. General installation,
+other agents, and a portable provider registry remain later work. Hook trust
+is explicit; implementation must not modify the captain's global Codex config.
+
+#### Stable recipient plus fresh pane membership defines the tab
+
+The direct entry still creates one V3-proved rail and starts exactly one
+private sidecar with its stable tab ID, canonical rail URL, and recipient
+token. On startup and every source refresh, that sidecar:
+
+1. reads one consistent registry snapshot;
+2. queries native `list-panes` for the exact Zellij session;
+3. retains only registrations whose terminal pane is live and currently a
+   member of its stable tab ID;
+4. fetches only each retained `agentsview_session_id` through AgentsView's
+   exact `/api/v1/sessions/{id}` endpoint; and
+5. emits a session snapshot carrying the registered `pane_id` through the
+   existing stable-tab/recipient-token channel.
+
+The plugin adds `pane_id` to `SessionEvent`. Rendering treats a row as bound
+only when that exact terminal ID is present in the rail's current tab manifest;
+clicking focuses that ID directly. The CWD fields may remain display metadata
+but leave `bind_session`, admission, focus, and ordering. Extend the existing
+pure `apply_agent_snapshot`, `apply_agent_event`, `section_layout`, and
+`decide_rail_click` functions; replace the CWD-only pure `bind_session` with an
+exact `registered_session_pane` membership decision. No title, prompt, clock,
+or list order enters the decision.
+
+The source and delivery probes bracket the exact fetch. A pane moved between
+the two managed tabs therefore yields zero or one row during convergence and
+then exactly one row in its new tab—never one in each. Closing the pane removes
+the row. A Codex `Stop` is a turn boundary, not deregistration; the row remains
+and AgentsView supplies its updated state. A later top-level `SessionStart` in
+the same pane replaces the prior session. Plugin or sidecar restart rehydrates
+from the registry, then revalidates native membership before redelivery.
+
+This cycle does not claim safety across destruction and recreation of a whole
+same-named Zellij session with reused pane IDs; durable session incarnation is
+owned by `zellij-managed-identity-feasibility`. Until that capability lands,
+full native-session replacement must discard the ephemeral registry rather
+than rebind it.
+
+### Acceptance criteria
+
+#### Offline (agent-reproducible)
+
+**AC-O1 — registration is an exact, single-owner identity bridge.** Two valid
+top-level `SessionStart` hook objects produce two records whose canonical
+AgentsView IDs resolve exactly and whose pane IDs are live in the named
+Zellij session. Duplicate input is idempotent; malformed, missing-ID,
+non-Zellij, non-start, and conflicting live claims produce no deliverable
+record. No CWD, title, prompt, timestamp proximity, ID prefix, or list order is
+consulted.
+
+Verified by: native registrar table tests and a process test with an external
+hook JSON fixture, independently created registry directory/mode sentinels,
+concurrent writers, injected crash-before-rename, and exact AgentsView fixture
+lookups. The failure fixture deliberately makes CWD/title/time/newest all point
+at the wrong session and still expects zero rows.
+
+**AC-O2 — the value result is exactly one top-level session per same-CWD
+managed tab and zero child rows.** Two managed tabs share one checkout CWD;
+their distinct terminal panes register distinct top-level session IDs. Each
+rail renders exactly its registered row and never the other's. One extra
+AgentsView session plus `SubagentStart` evidence renders in neither rail.
+
+Verified by: productionizing the passed tmux/Zellij spike with deterministic
+Codex-schema hook fixtures and an AgentsView-compatible exact-ID server. Native
+tab/pane inventory, registry JSON, exact HTTP request log, targeted pipe acks,
+and both screen captures independently assert cardinalities `1, 1, 0`. The
+already-run real Codex/AgentsView spike above is retained as feasibility
+evidence; CI does not require network credentials.
+
+**AC-O3 — stale, ambiguous, unregistered, and foreign-tab sessions fail
+closed.** A closed pane, a nonexistent pane, a registration for another
+Zellij session, one session concurrently claimed by two live panes, an
+unregistered historical top-level session, and an unregistered child each
+produce zero rows and zero focus actions. A same-CWD, same-title, same-agent
+lookalike cannot change any result.
+
+Verified by: a native-state/registry/HTTP fixture matrix plus Rust snapshot and
+click tests. Every negative records an exact zero row count, zero pipe for the
+rejected ID, and `ClickAction::None`; the HTTP log proves no rejected ID was
+silently replaced by a list-selected session.
+
+**AC-O4 — lifecycle and rehydration preserve exact cardinality.** Moving one
+registered pane A→B removes its row from A and yields exactly one row in B;
+closing it yields zero rows. A `Stop` event retains the same mapping; a new
+top-level start in that pane replaces the old ID. Killing and restarting the
+plugin, the sidecar, or both rehydrates the surviving mapping to exactly one
+row with no duplicate and no need for another hook event.
+
+Verified by: one disposable native sequence with before/after pane membership,
+registry generations, exact-ID HTTP logs, session snapshots, pipe acks, and
+screen/focus projections at each transition. A barrier moves/closes the pane
+between source fetch and delivery to prove the second membership probe removes
+the stale result.
+
+**AC-O5 — managed-tab ownership remains intact.** The direct entry starts one
+registrar-aware private sidecar only after the existing resident/URL/marker
+proof. Stable recipient ID/token still admits the snapshot to one rail.
+Literal `Alt /` changes only the V3-proved managed rail; a same-WASM lookalike
+without the marker remains byte-identical and receives no session row.
+
+Verified by: the combined disposable smoke plus retained
+`zellij-new-tab-test.sh`, `zellij-tmux-smoke-test.sh`, and
+`zellij-two-rail-recipient-smoke-test.sh`. Native pane/tab/layout/focus
+projections prove both the positive and lookalike negative.
+
+**AC-O6 — failure and cleanup are bounded.** Hook-ID-to-AgentsView-ID mismatch,
+registry corruption, source timeout, sidecar kill, and harness interruption
+leave no guessed row, orphan sidecar/hook helper, tmux server, Zellij session,
+temporary registry/profile/Codex/AgentsView root, or standing config/layout
+change. A failed exact lookup is terminal and visible in sidecar evidence.
+
+Verified by: injected failures under existing harness traps, bounded process
+and native-session absence checks, registry-root removal, and pre/post
+standing-file state digests. The harness owns every temporary process and path;
+normal product hooks remain fire-and-forget and bounded.
+
+#### Captain-live (only after AC-O1 through AC-O6)
+
+**AC-I1 — real Codex sessions follow their panes, not their checkout.** In the
+disposable managed profile, the captain starts one real Codex session in each
+of two same-CWD tabs and asks the second to spawn one subagent. The two
+top-level AgentsView IDs appear exactly once in their originating rails; the
+child and existing history appear nowhere. Clicking each row focuses its exact
+registered pane. Moving one pane moves its row, and restarting that tab's
+sidecar restores one row without another prompt or hook event.
+
+Verified by: captain observation plus captured hook payload IDs, registry,
+native pane/tab IDs, exact AgentsView responses, row screens, focus state, and
+pre/post standing-state hashes. Any failure to correlate the real hook ID with
+one exact AgentsView ID ends the demo; no inference fallback is permitted.
+
+### Test plan
+
+1. **Riskiest mechanism first — DONE, PASSED.** Preserve the real spike result
+   above. Before product changes, reduce it to a focused registrar prototype
+   that performs native lock-safe atomic upsert and exact-ID fetch. If the
+   implementation cannot reproduce the hook UUID→`codex:<UUID>` join, stop
+   with the failed probe and no CWD/timing/title/prompt/newest fallback.
+2. Add registrar unit/process tests: permissions, schema, SessionStart-only
+   admission, canonical provider ID, duplicate idempotence, same-pane
+   replacement, concurrent live conflict, stale-pane cleanup, lock contention,
+   corrupt input, and crash-before-rename. The expected hook shape comes from
+   Codex's published hook schema, not a product-authored prose parser.
+3. Extend the AgentsView fixture with `/api/v1/sessions/{id}` and a request
+   log. Change the sidecar from global list+CWD filtering to registry snapshot
+   + fresh native membership + exact-ID fetch + registered pane delivery.
+   Test not-found, mismatched returned ID, timeout, and move/close races.
+4. Extend `SessionEvent` with `pane_id` and replace CWD binding in render/click
+   decisions. Run pure tests for exact live membership, zero/duplicate IDs,
+   snapshot removal, click focus, and every AC-O3 lookalike.
+5. Productionize the two-tab tmux smoke using deterministic hook/API fixtures;
+   then add the pane move, close, new-session replacement, plugin restart,
+   sidecar restart, stale-delivery barrier, and cleanup cases. Keep real PTY
+   input, independently bounded native calls, unique roots, and exact counts.
+6. Run Rust/Go/native entry and retained managed-tab suites, then the full
+   relevant shell packet and `git diff --check`. No Zellij case may silently
+   skip; no test may touch `WORK` or standing KDL.
+7. Only after offline green, run AC-I1 with real Codex and isolated AgentsView.
+   Preserve IDs and negative evidence, then delete the disposable registry,
+   AgentsView/Codex roots, Zellij session, and tmux server.
+
+### Documentation change
+
+- Rewrite README's “Tab-bound session rows” and fresh-managed-tab section to
+  say that stable recipient routing limits delivery while explicit
+  SessionStart registration authorizes the exact session and live pane. State
+  that CWD/title/prompt/time/newest and child classification do not bind.
+- Replace the CWD-marker proof in `docs/zellij-agentsview-live-demo.md` with
+  the exact two-tab registration/cardinality/move/restart demo above.
+- Extend `docs/zellij-tmux-smoke-harness.md` with the registry, exact-ID HTTP,
+  move/close, child-negative, and restart evidence surfaces.
+- Keep the archived prototype record historical; add no claim that its CWD
+  decision was authoritative product architecture.
+
+### Out of scope
+
+Implementing the registrar, sidecar, plugin, hook asset, or tests in ideation;
+global Codex hook installation or mutation; non-Codex provider adapters;
+inferring identity for a provider without an authoritative startup ID;
+whole-machine session adoption; durable same-name Zellij-session incarnation
+and pane-ID-reuse recovery; multi-client routing; standing Zellij mutation;
+gate discovery/review/resolution; and the broader hub/controller architecture.
+
+## Stage Report: ideation (cycle 2)
+
+- DONE: Run the smallest real-harness spike first: obtain authoritative AgentsView session ID plus ZELLIJ_PANE_ID, register them, and prove exact isolation across two same-CWD managed tabs with spawned subagents absent—or return the failed mechanism probe without inference fallback.
+  The disposable Zellij/tmux/Codex/AgentsView spike registered two exact `codex:<hook UUID>` IDs to panes 0 and 1, rendered one row per tab, and excluded one real spawned child; exact IDs and counts are recorded above.
+- DONE: Reframe KJ so stable recipient routing and explicit session-to-live-pane registration jointly define the tab boundary; CWD, timing, titles, prompts, and newest-session selection are never authority.
+  The revised contract reuses the Herdr/Superset/cmux hook-time join, chooses a native lock-safe ephemeral registry owned by `zaphod register-agent-session`, and requires fresh native pane membership before exact-ID fetch and delivery.
+- DONE: Specify exact-cardinality, negative, lifecycle, cleanup, and restart/rehydration acceptance evidence while preserving KJ's existing managed-tab safety constraints and keeping implementation out of ideation.
+  AC-O1 through AC-O6 and AC-I1 cover `1/1/0` cardinality, conflict/stale/foreign negatives, move/close/end/restart, atomic cleanup, V3 lookalikes, and real captain proof without authorizing product changes in this stage.
+- DONE: Recover and compare the original Zaphod evidence and primary-source mechanisms used by Superset, Herdr, and cmux.
+  The original spike/live demo proved only CWD+marker behavior; local Spaceterm notes and raw sources show all three comparators joining inherited terminal identity with hook-supplied agent session identity, while cmux's inference fallbacks are explicitly rejected here.
+
+### Summary
+
+Cycle 2 replaces KJ's CWD heuristic with a passed, field-proven hook-time
+identity bridge. Stable recipient routing answers “which rail,” explicit
+registration answers “which session and pane,” and fresh native membership
+joins them; the revised packet measures exact cardinality, negative evidence,
+lifecycle, rehydration, and cleanup while leaving implementation to the next
+stage.
