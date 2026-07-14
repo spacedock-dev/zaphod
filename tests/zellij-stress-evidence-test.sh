@@ -24,6 +24,20 @@ file_state() {
     fi
 }
 
+assert_cleanup_proven() {
+    local result="$1"
+    local label="$2"
+    grep -F 'cleanup_status=0' "$result" >/dev/null || fail "$label cleanup reported an error"
+    grep -F 'session_probe_status_after=1' "$result" >/dev/null ||
+        fail "$label cleanup omitted the native absent-session probe status"
+    grep -F 'session_absence_confirmed=1' "$result" >/dev/null ||
+        fail "$label cleanup did not prove native session absence"
+    grep -F 'tmux_probe_status_after=1' "$result" >/dev/null ||
+        fail "$label cleanup omitted the absent tmux-server probe status"
+    grep -F 'tmux_absence_confirmed=1' "$result" >/dev/null ||
+        fail "$label cleanup did not prove tmux server absence"
+}
+
 STANDING_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 STANDING_CONFIG="${ZELLIJ_CONFIG_FILE:-$STANDING_ROOT/config.kdl}"
 STANDING_LAYOUT="$STANDING_ROOT/layouts/zaphod.kdl"
@@ -74,6 +88,7 @@ grep -F 'tmux_alive_after=0' "$EVIDENCE/serial-1/outside-foreground/cleanup-resu
     fail "cleanup evidence did not prove the tmux server stopped"
 grep -F 'root_exists_after=0' "$EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
     fail "cleanup evidence did not prove the smoke root was removed"
+assert_cleanup_proven "$EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" "forced failure"
 grep -F 'stress_root_exists_after=0' "$EVIDENCE/stress-cleanup.txt" >/dev/null ||
     fail "cleanup evidence did not prove the stress root was removed"
 [ "$(file_state "$STANDING_CONFIG")" = "$CONFIG_BEFORE" ] || fail "forced failure changed standing config"
@@ -110,6 +125,7 @@ grep -F 'session_alive_after=0' \
 grep -F 'tmux_alive_after=0' \
     "$HANG_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
     fail "native command hang cleanup left the tmux server alive"
+assert_cleanup_proven "$HANG_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" "native hang"
 [ "$(file_state "$STANDING_CONFIG")" = "$CONFIG_BEFORE" ] || fail "native hang changed standing config"
 [ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "native hang changed standing layout"
 
@@ -143,6 +159,7 @@ grep -F 'session_alive_after=0' \
 grep -F 'tmux_alive_after=0' \
     "$STARTUP_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" >/dev/null ||
     fail "vanished startup cleanup left the tmux server alive"
+assert_cleanup_proven "$STARTUP_EVIDENCE/serial-1/outside-foreground/cleanup-result.txt" "startup exit"
 [ "$(file_state "$STANDING_CONFIG")" = "$CONFIG_BEFORE" ] || fail "startup exit changed standing config"
 [ "$(file_state "$STANDING_LAYOUT")" = "$LAYOUT_BEFORE" ] || fail "startup exit changed standing layout"
 
