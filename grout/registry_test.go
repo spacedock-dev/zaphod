@@ -296,3 +296,36 @@ func TestRegistryReadRejectsNonPrivateGeneration(t *testing.T) {
 		})
 	}
 }
+
+func TestRegistryReadRejectsPathReplacedByFIFOWithoutBlocking(t *testing.T) {
+	root := t.TempDir()
+	store := agentRegistryStore{
+		root: root,
+		beforeOpen: func(path string) {
+			if err := os.Remove(path); err != nil {
+				t.Fatal(err)
+			}
+			if err := syscall.Mkfifo(path, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	valid := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
+	payload, err := json.Marshal(AgentRegistryV1{
+		Version: agentRegistryVersion, ZellijSession: "managed",
+		Registrations: []AgentPaneRegistrationV1{valid},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store.registryPath("managed"), payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	if _, err := store.read("managed"); err == nil {
+		t.Fatal("replacement FIFO unexpectedly accepted")
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("replacement FIFO blocked registry read for %s", elapsed)
+	}
+}
