@@ -11,11 +11,18 @@ import (
 type SessionRow struct {
 	Kind    string `json:"kind"`
 	ID      string `json:"id"`
+	PaneID  uint32 `json:"pane_id,omitempty"`
 	Cwd     string `json:"cwd"`
 	Agent   string `json:"agent"`
 	State   string `json:"state"`
 	Summary string `json:"summary"`
 	TS      string `json:"ts"`
+}
+
+func BuildRegisteredSessionRow(si sessionInfo, paneID uint32, now time.Time, clampBytes int) SessionRow {
+	row := BuildSessionRow(si, now, clampBytes)
+	row.PaneID = paneID
+	return row
 }
 
 type GateRow struct {
