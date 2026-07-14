@@ -324,7 +324,14 @@ func fetchExactSession(ctx context.Context, client *http.Client, serverURL, sess
 		return sessionInfo{}, fmt.Errorf("source exact session %q: unexpected HTTP status %s", sessionID, response.Status)
 	}
 	const maxSessionRecordBytes = 1 << 20
-	decoder := json.NewDecoder(io.LimitReader(response.Body, maxSessionRecordBytes+1))
+	payload, err := io.ReadAll(io.LimitReader(response.Body, maxSessionRecordBytes+1))
+	if err != nil {
+		return sessionInfo{}, fmt.Errorf("source exact session %q: read: %w", sessionID, err)
+	}
+	if len(payload) > maxSessionRecordBytes {
+		return sessionInfo{}, fmt.Errorf("source exact session %q exceeds %d bytes", sessionID, maxSessionRecordBytes)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
 	var session sessionInfo
 	if err := decoder.Decode(&session); err != nil {
 		return sessionInfo{}, fmt.Errorf("source exact session %q: decode: %w", sessionID, err)
