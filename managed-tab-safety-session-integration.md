@@ -655,3 +655,47 @@ stage.
 Cycle 3 changes structure only. It makes the accepted explicit
 session-to-live-pane registration contract authoritative and machine-visible,
 while retaining the passed mechanism evidence and complete feedback history.
+
+## Stage Report: implementation
+
+- DONE: Ship the lock-safe native SessionStart registrar with exact provider-to-AgentsView identity, atomic single-owner records, and fail-closed malformed/conflicting/stale behavior.
+  Commit `2fa8e8424d196465cd00bd091932a65d4ef01107` contains the bounded registrar, canonical `codex:<UUID>` identity, private atomic registry, conflict suppression, and stale-record pruning.
+- FAILED: Replace CWD admission and binding with exact registered pane membership through sidecar delivery, rendering, focus, move/close/restart lifecycle, and same-CWD child-negative coverage.
+  Exact membership and `1/1/0` isolation work, but trusted-rail authority, later-pane registry propagation, and transient-inventory pruning remain unresolved MUST FIX NOW findings.
+- FAILED: Prove cardinalities 1/1/0 and bounded cleanup in the disposable native harness, retain managed-tab safety suites, update user-visible docs, and obtain passing exact-head authoritative review.
+  The harness, retained suites, and docs are green, but all three authoritative `code_completion` synthesis parents failed; no passing exact-head panel exists.
+- SKIPPED: None.
+  No dispatched checklist item was intentionally omitted; failed items are recorded as unresolved rather than deferred silently.
+
+### Frozen candidate and green evidence
+
+- Frozen clean product head: `2fa8e8424d196465cd00bd091932a65d4ef01107`; no product change followed the convergence stop.
+- Rust baseline/current: 136/137 tests; `cargo test -q` passed 137/137 and `cargo check --tests` passed.
+- `go test -count=1 -timeout 60s ./...` and `go vet ./...` passed.
+- `tests/build-artifact-test.sh`, `tests/codex-session-hook-test.sh` from a clean detached checkout, and `tests/zellij-new-tab-test.sh` passed.
+- Foreground `tests/zellij-tmux-smoke-test.sh` and `tests/zellij-two-rail-recipient-smoke-test.sh` passed; the latter proved shared-token same-CWD `1/1/0`, exact-pane click, restart rehydration, and native-close pruning.
+- `git diff --check` passed, and exact-tip quick parent 1213/member 1212 returned P.
+- TDD reds covered missing registrar and exact-projection behavior, over-limit input, path replacement, 404/prune/lock races, polling refresh, and registry-root propagation before their corresponding greens.
+
+### Authoritative review rounds
+
+- Parent 1175 reviewed `a5fc0f3649ac903bc45c737f188e50808a101a71..7e44833cb544c31c45ae2fc094ef0f6e288ae32d`; correctness 1172 F, journey 1173 F, proof 1174 F, synthesis F.
+  Fixed 404 termination, prune race, late lock success, distinct-token acceptance, native-focus proof, clean-checkout hook build, and demo PID typo; session-generation authority was rebutted as excluded by the accepted contract.
+- Parent 1191 reviewed `a5fc0f3649ac903bc45c737f188e50808a101a71..400e32b7e8d88ab7ee67a5612a8d26e6c0a79e3f`; correctness 1188 F, journey 1189 F, proof 1190 F, synthesis F.
+  Fixed registry/pane-move refresh, initial managed-shell registry-root propagation, and invalid native-focus construction; session-generation authority repeated.
+- Parent 1217 reviewed `a5fc0f3649ac903bc45c737f188e50808a101a71..2fa8e8424d196465cd00bd091932a65d4ef01107`; correctness 1214 F, journey 1215 F, proof 1216 F, synthesis F.
+  Its six surviving findings are dispositioned below; no fourth panel was launched.
+
+### Convergence gate
+
+- MUST FIX NOW: continuously verify trusted rail identity instead of accepting `resident == 0`; this is an authority boundary.
+- MUST FIX NOW: make native request-count assertions deterministic under the two-second poll; this is a test-only correction.
+- MUST FIX NOW: propagate the registry directory to panes created after the initial managed shell; use a secure session-scoped handoff.
+- MUST FIX NOW: perform the outside-Zellij no-op before checking for the product binary, with wrapper regression coverage.
+- MUST FIX NOW: require repeated absence, a grace window, or a tombstone before pruning on incomplete native inventory.
+- NEEDS DECISION: bind registry records to a Zellij session generation, or explicitly accept same-name session/pane-ID reuse; the accepted ideation contract placed durable incarnation recovery out of scope, while every panel treated it as blocking authority risk.
+- Three failed synthesis parents (1175, 1191, 1217) exhausted the review-round budget. Work stopped at the frozen head for captain disposition; none of these authority, lifecycle, or proof findings was silently deferred.
+
+### Summary
+
+Implementation established the native registration and exact pane-membership walking skeleton and made the broad verification packet green. The stage is not complete: authoritative review failed three times, leaving five MUST FIX NOW findings and one contract-level session-generation decision for the captain before another implementation/review cycle.
