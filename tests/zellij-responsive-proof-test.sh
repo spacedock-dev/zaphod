@@ -17,16 +17,16 @@ fail() {
 
 cat > "$ROOT/before.json" <<'JSON'
 [
-  {"id": 7, "is_plugin": false, "tab_id": 2, "plugin_url": null},
-  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate.wasm"}
+  {"id": 7, "is_plugin": false, "tab_id": 2, "plugin_url": null, "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": true, "title": "zaphod-long-running-non-shell", "terminal_command": ["tail", "-f", "/dev/null"]},
+  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate.wasm", "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": false}
 ]
 JSON
 
 cat > "$ROOT/added.json" <<'JSON'
 [
-  {"id": 7, "is_plugin": false, "tab_id": 2, "plugin_url": null},
-  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate.wasm"},
-  {"id": 10, "is_plugin": false, "tab_id": 2, "plugin_url": null}
+  {"id": 7, "is_plugin": false, "tab_id": 2, "plugin_url": null, "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": true, "title": "zaphod-long-running-non-shell", "terminal_command": ["tail", "-f", "/dev/null"]},
+  {"id": 9, "is_plugin": true, "tab_id": 2, "plugin_url": "file:/candidate.wasm", "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": false},
+  {"id": 10, "is_plugin": false, "tab_id": 2, "plugin_url": null, "exited": false, "is_floating": false, "is_suppressed": false, "is_selectable": true}
 ]
 JSON
 zaphod_existing_pane_tuples_preserved "$ROOT/before.json" "$ROOT/added.json" ||
@@ -44,10 +44,38 @@ if zaphod_existing_pane_tuples_preserved "$ROOT/before.json" "$ROOT/replaced-sid
     fail "sidebar replacement incorrectly preserved its native tuple"
 fi
 
+for field in exited is_floating is_suppressed is_selectable; do
+    jq --arg field "$field" \
+        'map(if .id == 9 then .[$field] = (if $field == "is_selectable" then true else true end) else . end)' \
+        "$ROOT/before.json" > "$ROOT/sidebar-$field.json"
+    if zaphod_existing_pane_tuples_preserved \
+        "$ROOT/before.json" "$ROOT/sidebar-$field.json"; then
+        fail "sidebar $field change incorrectly preserved its native state"
+    fi
+done
+
 zaphod_pane_tuple_inventories_equal "$ROOT/before.json" "$ROOT/before.json" ||
     fail "an unchanged pane tuple inventory was rejected"
 if zaphod_pane_tuple_inventories_equal "$ROOT/before.json" "$ROOT/added.json"; then
     fail "a changed pane tuple inventory was accepted as unchanged"
+fi
+
+cat > "$ROOT/refresh.json" <<'JSON'
+{"plugin_id":9,"pane_ids":[7]}
+JSON
+zaphod_fixture_refresh_record_valid "$ROOT/before.json" "$ROOT/refresh.json" \
+    7 2 file:/candidate.wasm 9 ||
+    fail "the exact terminal/sidebar/refresh record was rejected"
+
+printf '%s\n' '{"plugin_id":7,"pane_ids":[]}' > "$ROOT/wrong-field-refresh.json"
+if zaphod_fixture_refresh_record_valid "$ROOT/before.json" \
+    "$ROOT/wrong-field-refresh.json" 7 2 file:/candidate.wasm 9; then
+    fail "fixture ID outside pane_ids incorrectly proved refresh membership"
+fi
+printf '%s\n' '{"plugin_id":9,"pane_ids":[70]}' > "$ROOT/wrong-pane-refresh.json"
+if zaphod_fixture_refresh_record_valid "$ROOT/before.json" \
+    "$ROOT/wrong-pane-refresh.json" 7 2 file:/candidate.wasm 9; then
+    fail "adjacent wrong pane incorrectly proved refresh membership"
 fi
 
 [ "$(zaphod_action_deadline_ms 42000 1)" = 43000 ] ||
