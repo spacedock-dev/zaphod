@@ -206,7 +206,7 @@ func probeTarget(ctx context.Context, cfg SubscribeConfig, stableTabID uint64) (
 		return targetSnapshot{}, err
 	}
 	paneSnapshotStarted := time.Now().UTC()
-	args := cfg.zellijArgs("action", "list-panes", "--json", "--state", "--tab")
+	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--state", "--tab")
 	var output []byte
 	var panes []zellijPane
 	var stderrOutput string

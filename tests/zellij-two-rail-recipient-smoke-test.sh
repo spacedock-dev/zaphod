@@ -253,10 +253,6 @@ TARGET_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
     | unique
     | if length == 1 then .[0] else error("expected one Target stable tab ID") end
 ' "$PANES")"
-TARGET_RAIL_PANE_ID="$(jq -er --arg wasm_url "$WASM_URL" '
-    [.[] | select(.is_plugin and .plugin_url == $wasm_url and .tab_name == "Target" and (.is_suppressed | not)) | .id]
-    | if length == 1 then .[0] else error("expected one Target resident rail") end
-' "$PANES")"
 BYSTANDER_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
     [.[] | select(.is_plugin and .plugin_url == $wasm_url and .tab_name == "Bystander") | .tab_id]
     | unique
@@ -269,6 +265,11 @@ TARGET_PANE_ID="$(jq -er '
     [.[] | select((.tab_id | tostring) == "'"$TARGET_TAB_ID"'" and (.is_plugin | not) and .is_selectable and (.is_suppressed | not)) | .id]
     | sort
     | if length == 2 then .[0] else error("expected two Target terminals") end
+' "$PANES")"
+TARGET_SPARE_PANE_ID="$(jq -er '
+    [.[] | select((.tab_id | tostring) == "'"$TARGET_TAB_ID"'" and (.is_plugin | not) and .is_selectable and (.is_suppressed | not)) | .id]
+    | sort
+    | if length == 2 then .[1] else error("expected two Target terminals") end
 ' "$PANES")"
 BYSTANDER_PANE_ID="$(jq -er '
     [.[] | select((.tab_id | tostring) == "'"$BYSTANDER_TAB_ID"'" and (.is_plugin | not) and .is_selectable and (.is_suppressed | not)) | .id]
@@ -339,9 +340,20 @@ wait_for_screen_marker 'KJ_TAB_A_ROW' "$TARGET_SCREEN"
 grep -F 'KJ_TAB_B_ROW' "$TARGET_SCREEN" >/dev/null && fail "Target rendered Bystander's exact session"
 grep -F 'KJ_CHILD_ROW' "$TARGET_SCREEN" >/dev/null && fail "Target rendered the unregistered child"
 
-# Exercise the real plugin mouse path. With two same-CWD terminals, the
-# registered row must focus its exact pane rather than the spare lookalike.
-zellij_session action focus-pane-id "plugin_$TARGET_RAIL_PANE_ID"
+# Exercise the real plugin mouse path from the wrong same-CWD terminal. The
+# registered row must change focus to its exact pane rather than leave the
+# spare lookalike focused.
+zellij_session action focus-pane-id "$TARGET_SPARE_PANE_ID"
+for _attempt in $(seq 1 100); do
+	capture_panes
+	jq -e --arg id "$TARGET_SPARE_PANE_ID" '
+		any(.[]; (.is_plugin | not) and ((.id | tostring) == $id) and .is_focused)
+	' "$PANES" >/dev/null && break
+	sleep 0.05
+done
+jq -e --arg id "$TARGET_SPARE_PANE_ID" '
+	any(.[]; (.is_plugin | not) and ((.id | tostring) == $id) and .is_focused)
+' "$PANES" >/dev/null || fail "same-CWD spare was not focused before literal mouse injection"
 tmux_command send-keys -t "$TMUX_PANE" -H \
 	1b 5b 3c 30 3b 35 3b 37 4d \
 	1b 5b 3c 30 3b 35 3b 37 6d
