@@ -90,14 +90,18 @@ Codex-schema SessionStart fixtures register distinct provider IDs with the two
 live terminal pane IDs. An AgentsView-compatible server exposes those two
 top-level records plus one unregistered child and logs every request.
 
-Two private sidecars must produce row cardinality `1/1/0`: each rail shows
-only its registered top-level session, and neither rail shows the child. The
-request log must contain only the two exact
+Two private sidecars deliberately share one recipient token, so both rails
+receive each named-pipe broadcast and stable-tab admission—not channel
+isolation—must reject the foreign snapshot. They produce row cardinality
+`1/1/0`: each rail shows only its registered top-level session, and neither
+rail shows the child. A literal mouse click on the target row must focus its
+registered pane rather than the same-CWD spare. The request log contains only
+the two exact
 `/api/v1/sessions/{codex:<UUID>}` lookups; a global list request fails the
 test. The harness then clears one authoritative snapshot, restarts that
 sidecar, and requires one-row rehydration without another registration. This
-proves stable recipient routing, exact pane membership, child exclusion,
-snapshot removal, and restart behavior through real Zellij named pipes. It
+proves stable recipient routing, exact pane membership and focus, child
+exclusion, snapshot removal, and restart behavior through real Zellij named pipes. It
 then closes the registered native terminal while leaving a spare terminal and
 resident rail alive; the next sidecar generation must prune the claim and
 render zero stale rows.

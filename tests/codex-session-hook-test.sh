@@ -13,6 +13,7 @@ fail() {
 }
 
 cd "$REPO_ROOT/grout"
+mkdir -p "$REPO_ROOT/target"
 go build -o "$REPO_ROOT/target/zaphod" .
 
 jq -e '

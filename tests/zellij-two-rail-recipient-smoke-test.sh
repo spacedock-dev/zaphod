@@ -154,7 +154,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
-    '                    recipient_token "target-token"' \
+    '                    recipient_token "shared-token"' \
     '                }' \
     '            }' \
     '            pane split_direction="horizontal" {' \
@@ -168,7 +168,7 @@ printf '%s\n' \
     '            pane size=28 borderless=true {' \
     "                plugin location=\"$WASM_URL\" {" \
     '                    rail "1"' \
-    '                    recipient_token "bystander-token"' \
+    '                    recipient_token "shared-token"' \
     '                }' \
     '            }' \
     "            pane cwd=\"$ESCAPED_CWD\"" \
@@ -253,6 +253,10 @@ TARGET_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
     | unique
     | if length == 1 then .[0] else error("expected one Target stable tab ID") end
 ' "$PANES")"
+TARGET_RAIL_PANE_ID="$(jq -er --arg wasm_url "$WASM_URL" '
+    [.[] | select(.is_plugin and .plugin_url == $wasm_url and .tab_name == "Target" and (.is_suppressed | not)) | .id]
+    | if length == 1 then .[0] else error("expected one Target resident rail") end
+' "$PANES")"
 BYSTANDER_TAB_ID="$(jq -er --arg wasm_url "$WASM_URL" '
     [.[] | select(.is_plugin and .plugin_url == $wasm_url and .tab_name == "Bystander") | .tab_id]
     | unique
@@ -322,11 +326,11 @@ start_sidecar() {
 		fail "$label sidecar did not become ready"
 	}
 }
-start_sidecar "$TARGET_TAB_ID" target-sidecar target-token
+start_sidecar "$TARGET_TAB_ID" target-sidecar shared-token
 TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
-start_sidecar "$BYSTANDER_TAB_ID" bystander-sidecar bystander-token
+start_sidecar "$BYSTANDER_TAB_ID" bystander-sidecar shared-token
 BYSTANDER_SIDECAR_PID="$STARTED_SIDECAR_PID"
 
 zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"
@@ -335,14 +339,31 @@ wait_for_screen_marker 'KJ_TAB_A_ROW' "$TARGET_SCREEN"
 grep -F 'KJ_TAB_B_ROW' "$TARGET_SCREEN" >/dev/null && fail "Target rendered Bystander's exact session"
 grep -F 'KJ_CHILD_ROW' "$TARGET_SCREEN" >/dev/null && fail "Target rendered the unregistered child"
 
+# Exercise the real plugin mouse path. With two same-CWD terminals, the
+# registered row must focus its exact pane rather than the spare lookalike.
+zellij_session action focus-pane-id "plugin_$TARGET_RAIL_PANE_ID"
+tmux_command send-keys -t "$TMUX_PANE" -H \
+	1b 5b 3c 30 3b 35 3b 37 4d \
+	1b 5b 3c 30 3b 35 3b 37 6d
+for _attempt in $(seq 1 100); do
+	capture_panes
+	jq -e --arg id "$TARGET_PANE_ID" '
+		any(.[]; (.is_plugin | not) and ((.id | tostring) == $id) and .is_focused)
+	' "$PANES" >/dev/null && break
+	sleep 0.05
+done
+jq -e --arg id "$TARGET_PANE_ID" '
+	any(.[]; (.is_plugin | not) and ((.id | tostring) == $id) and .is_focused)
+' "$PANES" >/dev/null || fail "registered row click did not focus exact Target terminal"
+
 zellij_session action go-to-tab-by-id "$BYSTANDER_TAB_ID"
 wait_for_active_tab "$BYSTANDER_TAB_ID"
 wait_for_screen_marker 'KJ_TAB_B_ROW' "$BYSTANDER_SCREEN"
 grep -F 'KJ_TAB_A_ROW' "$BYSTANDER_SCREEN" >/dev/null && fail "Bystander rendered Target's exact session"
 grep -F 'KJ_CHILD_ROW' "$BYSTANDER_SCREEN" >/dev/null && fail "Bystander rendered the unregistered child"
 
-printf '[]' | zellij_session pipe --name zaphod-agent-v1-target-token-snapshot \
-	--args "recipient-tab-id=$TARGET_TAB_ID,recipient-token=target-token" > "$ROOT/clear-ack"
+printf '[]' | zellij_session pipe --name zaphod-agent-v1-shared-token-snapshot \
+	--args "recipient-tab-id=$TARGET_TAB_ID,recipient-token=shared-token" > "$ROOT/clear-ack"
 [ "$(cat "$ROOT/clear-ack")" = accepted ] || fail "Target did not acknowledge the empty snapshot"
 zellij_session action go-to-tab-by-id "$TARGET_TAB_ID"
 wait_for_active_tab "$TARGET_TAB_ID"
@@ -355,7 +376,7 @@ grep -F 'KJ_TAB_A_ROW' "$ROOT/target-cleared.screen" >/dev/null && fail "empty s
 kill -TERM "$TARGET_SIDECAR_PID"
 wait "$TARGET_SIDECAR_PID" 2>/dev/null || true
 TARGET_SIDECAR_PID=""
-start_sidecar "$TARGET_TAB_ID" target-restart target-token
+start_sidecar "$TARGET_TAB_ID" target-restart shared-token
 TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
 wait_for_screen_marker 'KJ_TAB_A_ROW' "$ROOT/target-rehydrated.screen"
 
@@ -373,7 +394,7 @@ jq -e --arg id "$TARGET_PANE_ID" 'all(.[]; .is_plugin or ((.id | tostring) != $i
 kill -TERM "$TARGET_SIDECAR_PID"
 wait "$TARGET_SIDECAR_PID" 2>/dev/null || true
 TARGET_SIDECAR_PID=""
-start_sidecar "$TARGET_TAB_ID" target-after-close target-token
+start_sidecar "$TARGET_TAB_ID" target-after-close shared-token
 TARGET_SIDECAR_PID="$STARTED_SIDECAR_PID"
 for _attempt in $(seq 1 100); do
 	tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-after-close.screen"
@@ -390,4 +411,4 @@ grep -F '019f5f95-cc22-77d2-9c3a-271b1edaabd8' "$ROOT/agentsview-requests.log" >
 [ "$(grep -Fc '/api/v1/sessions/codex:019f5f94-a596-7d92-9928-398653669161' "$ROOT/agentsview-requests.log")" -eq 2 ] || fail "Target exact ID was not fetched once per sidecar generation"
 [ "$(grep -Fc '/api/v1/sessions/codex:019f5f95-bbfd-7993-8620-0d698008217f' "$ROOT/agentsview-requests.log")" -eq 1 ] || fail "Bystander exact ID was not fetched once"
 
-echo "PASS: two same-CWD tabs projected 1/1/0, restart rehydrated one exact row, and native close pruned it"
+echo "PASS: shared-token same-CWD tabs projected 1/1/0, clicked the exact pane, rehydrated on restart, and pruned native close"

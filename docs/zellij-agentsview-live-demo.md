@@ -187,9 +187,8 @@ stale rows.
 Back in the control terminal:
 
 ```bash
-SIDECAR_A="$(sed -n 's/^SIDECAR_PID=//p' /tmp/kj-entry-a.out)"
 SIDECAR_B="$(sed -n 's/^SIDECAR_PID=//p' /tmp/kj-entry-b.out)"
-kill -0 "$SIDECAR_A"
+kill -0 "$RESTARTED_SIDECAR_A"
 kill -0 "$SIDECAR_B"
 shasum -a 256 "$CONFIG_FILE" "$LAYOUT_FILE" > /tmp/kj-kdl-after.sha256
 cmp /tmp/kj-kdl-before.sha256 /tmp/kj-kdl-after.sha256
