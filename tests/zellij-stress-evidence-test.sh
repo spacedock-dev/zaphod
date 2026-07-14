@@ -36,6 +36,10 @@ assert_cleanup_proven() {
         fail "$label cleanup omitted the absent tmux-server probe status"
     grep -F 'tmux_absence_confirmed=1' "$result" >/dev/null ||
         fail "$label cleanup did not prove tmux server absence"
+    grep -F 'tmux_probe_command=list-sessions' "$result" >/dev/null ||
+        fail "$label cleanup used only a named-session probe"
+    grep -F 'tmux_socket_absent_after=1' "$result" >/dev/null ||
+        fail "$label cleanup did not prove the dedicated tmux socket disappeared"
 }
 
 STANDING_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
