@@ -10,7 +10,13 @@ id: kjhq0t2h6drse6b32cqybggv
 started: 2026-07-13T06:54:16Z
 ---
 
-## Problem
+## Historical cycle-1 contract (superseded)
+
+The following contract is retained only as review history. The canonical
+cycle-2 identity contract begins at the next `## Problem` heading and replaces
+these CWD-bound acceptance criteria.
+
+### Problem
 
 The approved managed-only `Alt /` hardening branch and the merged tab-bound
 session subscriber branch diverged from `6f130ee`. At this ideation snapshot,
@@ -26,7 +32,7 @@ stable-tab subscriber, show and focus a session only in that tab, and retain
 V3's managed-only `Alt /` boundary. Existing isolated checks prove pieces of
 that journey, but no current packet names the combined result.
 
-## Required outcome
+### Required outcome
 
 An operator can use a selected-checkout, main-built fresh managed tab whose
 exact `zaphod_managed_tab "v1"` plus canonical WASM URL authorizes its `Alt /`
@@ -37,7 +43,7 @@ same-WASM/sidebar-shaped tab without the proof remains inert. README describes
 all of those limits together. This repair never activates, installs, rewrites,
 or otherwise changes standing Zellij config or layout.
 
-## Proposed approach
+### Proposed approach
 
 ### Exact merge shape and smallest branch
 
@@ -110,7 +116,7 @@ State explicitly that this sidecar emits sessions only. Pending-gate discovery,
 pooling, tab association for gates, provider review launch, and post-resolution
 refresh remain S9/QT Sprint 2 work, not a side effect of this merge.
 
-## Acceptance criteria
+### Acceptance criteria (superseded)
 
 ### Offline (agent-reproducible)
 
@@ -174,7 +180,7 @@ normal config/layout; it does not test a gate or provider review.
 Verified by: the captured disposable profile, native target/tab IDs,
 target/lookalike before/after state, and the source fixture log.
 
-## Test plan
+### Test plan
 
 1. Recompute the no-ff merge shape before editing. If the merge no longer has
    exactly the recorded README conflict, stop and report its paths; do not
@@ -204,7 +210,7 @@ target/lookalike before/after state, and the source fixture log.
    A source fixture, target rail, or click failure returns to this task's
    feedback path; it does not expand into S9/QT or alter standing config.
 
-## Documentation change
+### Documentation change
 
 Update only README's fresh-managed-tab section and real-key command block to
 resolve the conflict as described above. Preserve the BB direct-entry and
@@ -214,7 +220,7 @@ smokes. Add one clear deferral sentence: gates are not emitted or pooled here;
 their lifecycle remains S9/QT. Do not rewrite historical documents or turn the
 evergreen architecture's later hub into a claim about this slice.
 
-## Out of scope
+### Out of scope
 
 - Changing persistent Zellij configuration or layouts, including a WORK drill
   that activates them; the repair uses disposable roots only.
@@ -229,7 +235,7 @@ evergreen architecture's later hub into a claim about this slice.
   provider resolution, and post-resolution refresh. Those remain S9/QT Sprint
   2 scope and this subscriber continues to emit sessions only.
 
-## Stage Report: ideation
+### Stage Report: ideation
 
 - DONE: Prove the exact V3/BB merge shape and preserve both delivered contracts.
   At `main=2809908`, V3=`b3b003a`, and merge base `6f130ee`, merge tree `3a1eac4` has only a README conflict; its generated source contains both V3 managed proof and BB stable-tab delivery.
@@ -246,9 +252,9 @@ session/focus, and managed-only toggle/lookalike inertness. README must retain
 both delivered contracts and explicitly defer gate pooling and review behavior
 to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
 
-### Feedback Cycles
+## Feedback Cycles
 
-#### Cycle 1 — 2026-07-14 — captain rejected ideation
+### Cycle 1 — 2026-07-14 — captain rejected ideation
 
 - The current design proves the recipient tab for delivery but does not prove
   which terminal pane originated an AgentsView session. Checkout CWD is a
@@ -274,7 +280,7 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   must choose the smallest supported registration carrier and name its owner;
   implementation remains out of scope for this ideation rework.
 
-#### Cycle 2 — 2026-07-14 — captain rejected canonical structure
+### Cycle 2 — 2026-07-14 — captain rejected canonical structure
 
 - Preserve the passed real-harness spike and the cycle-2 identity mechanism;
   the design direction is accepted and must not be reopened.
@@ -286,13 +292,13 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   AC-O6 and AC-I1 as the task's authoritative acceptance criteria. Remove or
   relocate stale cycle-1 ACs so they cannot drive a later dispatch or gate.
 
-## Cycle 2 revised contract — explicit session-to-pane registration
+## Problem
 
 This contract supersedes the cycle-1 CWD-bound journey. The previous merge
 shape and managed-tab proof remain constraints, but CWD is no longer a
 session-routing input.
 
-### Revised problem
+### Identity gap
 
 BB proved that a private sidecar can deliver to one stable tab and V3 proved
 which rail may own managed actions. Neither proves which live terminal
@@ -319,7 +325,7 @@ The original Zaphod evidence did not contain a stronger join:
   marker and session-incarnation direction. It never joins an AgentsView
   session ID to the terminal that launched it.
 
-### Primary-source comparison and reused mechanism
+## Primary-source comparison and reused mechanism
 
 The field already supplies the mechanism; KJ should reuse it rather than
 inventing another identity inference.
@@ -358,7 +364,7 @@ The wider research agrees with this choice:
 as solved field work to borrow, and `capability-matrix.md` records hook-bound
 session awareness in Herdr, cmux, and Superset while identifying Zaphod's gap.
 
-### Riskiest mechanism spike — run first, PASSED
+## Riskiest mechanism spike — run first, PASSED
 
 The smallest real harness spike ran on 2026-07-14 with Zellij 0.44.3, tmux
 3.6a, Codex 0.144.1, and AgentsView 0.37.5. It used disposable
@@ -395,9 +401,9 @@ startup hook cannot supply an agent-native ID that resolves to one exact
 AgentsView ID, that provider is unsupported for this slice. CWD, timing,
 titles, prompts, ID prefixes, and newest-session selection remain forbidden.
 
-### Proposed approach
+## Proposed approach
 
-#### One native, lock-safe ephemeral registry
+### One native, lock-safe ephemeral registry
 
 Add a native `zaphod register-agent-session` hook receiver and a versioned,
 user-private registry scoped by the exact Zellij session. The native binary,
@@ -431,7 +437,7 @@ when the two Zellij environment values are absent. General installation,
 other agents, and a portable provider registry remain later work. Hook trust
 is explicit; implementation must not modify the captain's global Codex config.
 
-#### Stable recipient plus fresh pane membership defines the tab
+### Stable recipient plus fresh pane membership defines the tab
 
 The direct entry still creates one V3-proved rail and starts exactly one
 private sidecar with its stable tab ID, canonical rail URL, and recipient
@@ -469,9 +475,9 @@ owned by `zellij-managed-identity-feasibility`. Until that capability lands,
 full native-session replacement must discard the ephemeral registry rather
 than rebind it.
 
-### Acceptance criteria
+## Acceptance criteria
 
-#### Offline (agent-reproducible)
+### Offline (agent-reproducible)
 
 **AC-O1 — registration is an exact, single-owner identity bridge.** Two valid
 top-level `SessionStart` hook objects produce two records whose canonical
@@ -487,8 +493,8 @@ concurrent writers, injected crash-before-rename, and exact AgentsView fixture
 lookups. The failure fixture deliberately makes CWD/title/time/newest all point
 at the wrong session and still expects zero rows.
 
-**AC-O2 — the value result is exactly one top-level session per same-CWD
-managed tab and zero child rows.** Two managed tabs share one checkout CWD;
+**AC-O2 — each same-CWD managed tab has exactly one top-level session and zero child rows.**
+Two managed tabs share one checkout CWD;
 their distinct terminal panes register distinct top-level session IDs. Each
 rail renders exactly its registered row and never the other's. One extra
 AgentsView session plus `SubagentStart` evidence renders in neither rail.
@@ -500,8 +506,8 @@ and both screen captures independently assert cardinalities `1, 1, 0`. The
 already-run real Codex/AgentsView spike above is retained as feasibility
 evidence; CI does not require network credentials.
 
-**AC-O3 — stale, ambiguous, unregistered, and foreign-tab sessions fail
-closed.** A closed pane, a nonexistent pane, a registration for another
+**AC-O3 — stale, ambiguous, unregistered, and foreign-tab sessions fail closed.**
+A closed pane, a nonexistent pane, a registration for another
 Zellij session, one session concurrently claimed by two live panes, an
 unregistered historical top-level session, and an unregistered child each
 produce zero rows and zero focus actions. A same-CWD, same-title, same-agent
@@ -547,7 +553,7 @@ and native-session absence checks, registry-root removal, and pre/post
 standing-file state digests. The harness owns every temporary process and path;
 normal product hooks remain fire-and-forget and bounded.
 
-#### Captain-live (only after AC-O1 through AC-O6)
+### Captain-live (only after AC-O1 through AC-O6)
 
 **AC-I1 — real Codex sessions follow their panes, not their checkout.** In the
 disposable managed profile, the captain starts one real Codex session in each
@@ -562,7 +568,7 @@ native pane/tab IDs, exact AgentsView responses, row screens, focus state, and
 pre/post standing-state hashes. Any failure to correlate the real hook ID with
 one exact AgentsView ID ends the demo; no inference fallback is permitted.
 
-### Test plan
+## Test plan
 
 1. **Riskiest mechanism first — DONE, PASSED.** Preserve the real spike result
    above. Before product changes, reduce it to a focused registrar prototype
@@ -592,7 +598,7 @@ one exact AgentsView ID ends the demo; no inference fallback is permitted.
    Preserve IDs and negative evidence, then delete the disposable registry,
    AgentsView/Codex roots, Zellij session, and tmux server.
 
-### Documentation change
+## Documentation change
 
 - Rewrite README's “Tab-bound session rows” and fresh-managed-tab section to
   say that stable recipient routing limits delivery while explicit
@@ -605,7 +611,7 @@ one exact AgentsView ID ends the demo; no inference fallback is permitted.
 - Keep the archived prototype record historical; add no claim that its CWD
   decision was authoritative product architecture.
 
-### Out of scope
+## Out of scope
 
 Implementing the registrar, sidecar, plugin, hook asset, or tests in ideation;
 global Codex hook installation or mutation; non-Codex provider adapters;
@@ -633,3 +639,18 @@ registration answers “which session and pane,” and fresh native membership
 joins them; the revised packet measures exact cardinality, negative evidence,
 lifecycle, rehydration, and cleanup while leaving implementation to the next
 stage.
+
+## Stage Report: ideation (cycle 3)
+
+- DONE: Canonical Problem, approach, AC, test-plan, and out-of-scope sections contain the accepted cycle-2 identity contract with no competing stale contract.
+  The CWD-bound cycle-1 body now sits under an explicit superseded historical heading, while the accepted identity bridge owns the sole canonical section spine.
+- DONE: The passed real-harness spike and all feedback history remain intact without reopening the chosen hook-time registration mechanism.
+  The real Codex/AgentsView `1, 1, 0` spike, primary-source comparison, and both captain rejection records remain verbatim in the normalized body.
+- DONE: `spacedock status --read managed-tab-safety-session-integration --ac-scan` discovers authoritative AC-O1 through AC-O6 and AC-I1.
+  The live scanner reports all seven accepted criteria from the canonical acceptance section and no superseded cycle-1 criterion.
+
+### Summary
+
+Cycle 3 changes structure only. It makes the accepted explicit
+session-to-live-pane registration contract authoritative and machine-visible,
+while retaining the passed mechanism evidence and complete feedback history.
