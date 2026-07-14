@@ -102,6 +102,13 @@ printf '%s\n' \
 if zaphod_refresh_id_is_in_flight "$ROOT/in-flight.log" 9 5; then
     fail "a completed refresh remained in flight"
 fi
+printf '%s\n' \
+    'zaphod-trace[9]: zaphod-refresh {"event":"start","plugin_id":9,"refresh_id":6,"pane_ids":[7]}' \
+    'zaphod-trace[9]: zaphod-refresh {"event":"abort","plugin_id":9,"refresh_id":6,"pane_ids":[]}' \
+    >> "$ROOT/in-flight.log"
+if zaphod_refresh_id_is_in_flight "$ROOT/in-flight.log" 9 6; then
+    fail "an aborted refresh remained in flight"
+fi
 
 [ "$(zaphod_action_deadline_ms 42000 1)" = 43000 ] ||
     fail "the action deadline was not derived from the pre-send monotonic sample"
