@@ -103,6 +103,10 @@ struct Sidebar {
     // Wedge drill knob (see wedge_poll_secs): seconds each status poll sleeps
     // in place of its get_pane_running_command call. None outside drills.
     wedge_poll_secs: Option<u64>,
+    // Disposable smoke-only barrier. It is accepted only behind debug with
+    // both positive values, and is absent from installed/operator layouts.
+    test_refresh_barrier: Option<(u64, usize)>,
+    refresh_id: u64,
     // Agent sessions and pending gates fed over the agent-event pipe,
     // rendered as the AGENTS/GATES sections below the pane rows. Upserted in
     // arrival order, never expired (grout is one-shot in sprint 0).
@@ -562,6 +566,7 @@ impl ZellijPlugin for Sidebar {
         self.config = configuration;
         self.debug = debug_enabled(&self.config);
         self.wedge_poll_secs = wedge_poll_secs(&self.config);
+        self.test_refresh_barrier = test_refresh_barrier(&self.config);
         subscribe(&[
             EventType::PaneUpdate,
             EventType::TabUpdate,
@@ -1164,6 +1169,22 @@ impl Sidebar {
         let live: std::collections::BTreeSet<u32> = self.rows.iter().map(|r| r.pane_id).collect();
         backoff.retain(|pane_id, _| live.contains(pane_id));
         self.pane_cwds.retain(|pane_id, _| live.contains(pane_id));
+        if self.debug {
+            self.refresh_id = self.refresh_id.wrapping_add(1).max(1);
+        }
+        let refresh_id = self.refresh_id;
+        trace!(
+            self,
+            "zaphod-refresh {{\"event\":\"start\",\"plugin_id\":{},\"refresh_id\":{},\"pane_ids\":{:?}}}",
+            self.plugin_id,
+            refresh_id,
+            live.iter().copied().collect::<Vec<_>>()
+        );
+        if let Some((millis, minimum_panes)) = self.test_refresh_barrier {
+            if self.rows.len() >= minimum_panes {
+                std::thread::sleep(Duration::from_millis(millis));
+            }
+        }
         let mut changed = false;
         let mut completed = true;
         let mut completed_pane_ids = Vec::new();
@@ -1194,6 +1215,13 @@ impl Sidebar {
                     row.pane_id,
                     started.elapsed().as_millis()
                 );
+                trace!(
+                    self,
+                    "zaphod-refresh {{\"event\":\"abort\",\"plugin_id\":{},\"refresh_id\":{},\"pane_ids\":{:?}}}",
+                    self.plugin_id,
+                    refresh_id,
+                    completed_pane_ids
+                );
                 completed = false;
                 break;
             }
@@ -1211,6 +1239,13 @@ impl Sidebar {
                     "status pass aborted: pane {} cwd call wedge-classified after {}ms",
                     row.pane_id,
                     cwd_started.elapsed().as_millis()
+                );
+                trace!(
+                    self,
+                    "zaphod-refresh {{\"event\":\"abort\",\"plugin_id\":{},\"refresh_id\":{},\"pane_ids\":{:?}}}",
+                    self.plugin_id,
+                    refresh_id,
+                    completed_pane_ids
                 );
                 completed = false;
                 break;
@@ -1234,7 +1269,9 @@ impl Sidebar {
         if completed {
             trace!(
                 self,
-                "status refresh complete pane_ids={:?}",
+                "zaphod-refresh {{\"event\":\"complete\",\"plugin_id\":{},\"refresh_id\":{},\"pane_ids\":{:?}}}",
+                self.plugin_id,
+                refresh_id,
                 completed_pane_ids
             );
         }
@@ -1432,6 +1469,15 @@ fn debug_enabled(config: &BTreeMap<String, String>) -> bool {
 // end without waiting to catch a wild one. Absent or unparseable: off.
 fn wedge_poll_secs(config: &BTreeMap<String, String>) -> Option<u64> {
     config.get("wedge_poll_secs").and_then(|value| value.parse().ok())
+}
+
+fn test_refresh_barrier(config: &BTreeMap<String, String>) -> Option<(u64, usize)> {
+    if !debug_enabled(config) {
+        return None;
+    }
+    let millis = config.get("test_refresh_barrier_millis")?.parse().ok()?;
+    let minimum_panes = config.get("test_refresh_barrier_panes")?.parse().ok()?;
+    (millis > 0 && minimum_panes > 0).then_some((millis, minimum_panes))
 }
 
 // Number of timers to skip after a pane's status poll fails: 0, 1, 3, 7, 15,
