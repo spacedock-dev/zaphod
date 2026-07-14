@@ -5,11 +5,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCLIRequiresPrivateSubscribeTarget(t *testing.T) {
@@ -73,20 +75,42 @@ func TestRegisterAgentSessionCLIUsesHookStdinAndInheritedPaneIdentity(t *testing
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	registryRoot := filepath.Join(t.TempDir(), "registry")
+	watchRoot, err := os.MkdirTemp("/tmp", "zwt.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(watchRoot) })
+	listener, _, err := listenWatchSocket(watchRoot, "managed", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	accepted := make(chan WatchRegistration, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		registration, err := acceptWatchRegistration(context.Background(), listener, "managed", "7")
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		accepted <- registration
+	}()
 	const id = "019f5f94-a596-7d92-9928-398653669161"
-	command := exec.Command(bin, "register-agent-session", "--registry-dir", registryRoot)
+	command := exec.Command(bin, "register-agent-session", "--watch-dir", watchRoot)
 	command.Env = append(os.Environ(), "ZELLIJ_SESSION_NAME=managed", "ZELLIJ_PANE_ID=7")
 	command.Stdin = bytes.NewReader(validHook(id))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("register: %v\n%s", err, output)
 	}
-	snapshot, err := (agentRegistryStore{root: registryRoot}).read("managed")
-	if err != nil || len(snapshot.Registrations) != 1 {
-		t.Fatalf("snapshot = %#v, err = %v", snapshot, err)
-	}
-	if got := snapshot.Registrations[0]; got.PaneID != 7 || got.AgentsViewSessionID != "codex:"+id {
-		t.Fatalf("registration = %#v", got)
+	select {
+	case got := <-accepted:
+		if got.PaneID != 7 || got.AgentsViewSessionID != "codex:"+id {
+			t.Fatalf("registration = %#v", got)
+		}
+	case err := <-acceptErr:
+		t.Fatal(err)
+	case <-time.After(time.Second):
+		t.Fatal("hook was not delivered")
 	}
 }
 
@@ -101,43 +125,45 @@ func TestRegisterAgentSessionCLIIsNoopOutsideZellijAndFailsClosedOnBadInput(t *t
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}
-	registryRoot := filepath.Join(t.TempDir(), "registry")
+	watchRoot := filepath.Join(t.TempDir(), "watch")
 
-	outside := exec.Command(bin, "register-agent-session", "--registry-dir", registryRoot)
+	outside := exec.Command(bin, "register-agent-session", "--watch-dir", watchRoot)
 	outside.Env = []string{"PATH=" + os.Getenv("PATH")}
 	outside.Stdin = strings.NewReader("not json")
 	if output, err := outside.CombinedOutput(); err != nil {
 		t.Fatalf("outside Zellij should be a no-op: %v\n%s", err, output)
 	}
-	if _, err := os.Stat(registryRoot); !os.IsNotExist(err) {
-		t.Fatalf("outside-Zellij hook mutated registry: %v", err)
+	if _, err := os.Stat(watchRoot); !os.IsNotExist(err) {
+		t.Fatalf("outside-Zellij hook created a watch root: %v", err)
 	}
 
-	bad := exec.Command(bin, "register-agent-session", "--registry-dir", registryRoot)
+	bad := exec.Command(bin, "register-agent-session", "--watch-dir", watchRoot)
 	bad.Env = append(os.Environ(), "ZELLIJ_SESSION_NAME=managed", "ZELLIJ_PANE_ID=7")
 	bad.Stdin = strings.NewReader(`{"session_id":"newest","hook_event_name":"SessionStart","source":"startup"}`)
 	if exit, ok := bad.Run().(*exec.ExitError); !ok || exit.ExitCode() != 1 {
 		t.Fatalf("bad input exit = %v, want 1", exit)
 	}
-	if _, err := os.Stat(registryRoot); !os.IsNotExist(err) {
-		t.Fatalf("bad hook mutated registry: %v", err)
+	if _, err := os.Stat(watchRoot); !os.IsNotExist(err) {
+		t.Fatalf("bad hook created a watch root: %v", err)
 	}
 }
 
-func TestSubscribeUsesTheSameExplicitRegistryRootAsSessionStart(t *testing.T) {
-	registryDir := filepath.Join(t.TempDir(), "registry")
-	t.Setenv("ZAPHOD_REGISTRY_DIR", registryDir)
-	cfg, err := parseSubscribeArgs([]string{
-		"--server", "http://127.0.0.1:8080", "--zellij-bin", "zellij",
-		"--zellij-config-dir", "/c", "--zellij-config", "/c/config.kdl",
-		"--zellij-data-dir", "/d", "--zellij-session", "managed", "--tab-id", "73",
-		"--rail-url", "file:/candidate.wasm", "--checkout-cwd", "/checkout",
-		"--recipient-token", "token",
-	}, &bytes.Buffer{})
+func TestWatchTabArgsUseOnlyExplicitRouteContext(t *testing.T) {
+	t.Setenv("ZELLIJ_SESSION_NAME", "managed")
+	t.Setenv("ZELLIJ_PANE_ID", "7")
+	t.Setenv("ZAPHOD_RAIL_URL", "file:/candidate.wasm")
+	t.Setenv("ZAPHOD_RECIPIENT_TOKEN", "token")
+	t.Setenv("ZAPHOD_ZELLIJ_CONFIG_DIR", "/c")
+	t.Setenv("ZAPHOD_ZELLIJ_CONFIG_FILE", "/c/config.kdl")
+	t.Setenv("ZAPHOD_ZELLIJ_DATA_DIR", "/d")
+	watchDir := "/tmp/zaphod-watch-test"
+	t.Setenv("ZAPHOD_WATCH_DIR", watchDir)
+	cfg, err := parseWatchTabArgs([]string{"--server", "http://127.0.0.1:8080", "--foreground"}, &bytes.Buffer{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.RegistryDir != registryDir {
-		t.Fatalf("subscriber registry = %q, want hook registry %q", cfg.RegistryDir, registryDir)
+	if cfg.PaneID != 7 || cfg.ZellijSession != "managed" || cfg.RailURL != "file:/candidate.wasm" ||
+		cfg.RecipientToken != "token" || cfg.SocketRoot != watchDir || !cfg.Foreground {
+		t.Fatalf("watch config = %#v", cfg)
 	}
 }
