@@ -100,6 +100,32 @@ func TestRecipientProbeAllowsMoreThanQuarterSecond(t *testing.T) {
 	}
 }
 
+func TestTrustedRailProbeOmitsExpensivePaneMetadata(t *testing.T) {
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "args")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\n"+
+		"cat <<'JSON'\n"+
+		`[{"id":50,"tab_id":73,"is_plugin":true,"is_floating":false,"is_suppressed":false},{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`+"\nJSON\n")
+	railID := uint64(50)
+	snapshot, err := probeTarget(context.Background(), SubscribeConfig{
+		ZellijBin: zellij, ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl",
+		ZellijDataDir: "/d", ZellijSession: "s", TabID: "73",
+		RailURL: "file:/candidate/zellij-sidebar.wasm", trustedRailPaneID: &railID,
+	}, 73)
+	if err != nil || snapshot.railPaneID != railID {
+		t.Fatalf("trusted probe = %#v, %v", snapshot, err)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"--all", "--command", "--geometry"} {
+		if strings.Contains(string(args), forbidden) {
+			t.Fatalf("trusted membership poll requested %s metadata: %s", forbidden, args)
+		}
+	}
+}
+
 func TestRecipientProbeUsesPrivateVersionedPipe(t *testing.T) {
 	dir := t.TempDir()
 	argsPath := filepath.Join(dir, "args")
