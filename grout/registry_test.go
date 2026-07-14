@@ -134,11 +134,42 @@ func TestRegistryConcurrentWritersRemainAtomicAndPrivate(t *testing.T) {
 }
 
 func TestRegistryUpsertStampsTheLockedCommit(t *testing.T) {
-	store := agentRegistryStore{root: t.TempDir()}
+	store := agentRegistryStore{root: t.TempDir(), lockTimeout: 500 * time.Millisecond}
+	if err := store.prepareRoot(); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(store.lockPath("managed"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	locked := true
+	defer func() {
+		if locked {
+			_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+		}
+	}()
+	waiting := make(chan struct{})
+	var once sync.Once
+	store.beforeLockRetry = func() { once.Do(func() { close(waiting) }) }
 	registration := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
 	registration.UpdatedAt = time.Unix(123, 0).UTC().Format(time.RFC3339Nano)
-	started := time.Now().UTC()
-	if err := store.upsert(registration); err != nil {
+	done := make(chan error, 1)
+	go func() { done <- store.upsert(registration) }()
+	select {
+	case <-waiting:
+	case <-time.After(time.Second):
+		t.Fatal("upsert never contended on held registry lock")
+	}
+	releasedAt := time.Now().UTC()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	locked = false
+	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := store.read("managed")
@@ -149,8 +180,8 @@ func TestRegistryUpsertStampsTheLockedCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updatedAt.Before(started) {
-		t.Fatalf("registry commit retained pre-lock timestamp %s before %s", updatedAt, started)
+	if updatedAt.Before(releasedAt) {
+		t.Fatalf("registry timestamp %s predates lock release %s", updatedAt, releasedAt)
 	}
 }
 
@@ -257,13 +288,20 @@ func TestRegistryPruneStaleRemovesOnlyAbsentPanes(t *testing.T) {
 }
 
 func TestRegistryPrunePreservesRegistrationNewerThanPaneSnapshot(t *testing.T) {
-	store := agentRegistryStore{root: t.TempDir()}
+	oldCommit := time.Date(2026, 7, 14, 0, 0, 0, 0, time.UTC)
+	newCommit := oldCommit.Add(2 * time.Second)
+	commitTimes := []time.Time{oldCommit, newCommit}
+	store := agentRegistryStore{root: t.TempDir(), now: func() time.Time {
+		commit := commitTimes[0]
+		commitTimes = commitTimes[1:]
+		return commit
+	}}
 	old := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
 	newer := registrationForTest(t, "019f5f95-bbfd-7993-8620-0d698008217f", "managed", "8")
 	if err := store.upsert(old); err != nil {
 		t.Fatal(err)
 	}
-	cutoff := time.Now().UTC()
+	cutoff := oldCommit.Add(time.Second)
 	if err := store.upsert(newer); err != nil {
 		t.Fatal(err)
 	}
