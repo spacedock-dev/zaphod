@@ -8,12 +8,13 @@ group: release-blocking-hotfix
 sprint-readiness: ready
 started: 2026-07-14T05:54:11Z
 completed: 2026-07-14T11:26:05Z
-verdict: approved
+verdict: passed
 score: 1.0
 worktree: .worktrees/spacedock-ensign-sidebar-scrollback-timeout-congestion
 issue:
 pr:
 mod-block:
+archived: 2026-07-14T11:26:54Z
 ---
 
 ## Problem
