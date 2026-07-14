@@ -98,7 +98,7 @@ func run(cfg Config, stderr io.Writer) error {
 }
 
 func subscribeUsage(stderr io.Writer) {
-	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL --checkout-cwd PATH --recipient-token TOKEN")
+	fmt.Fprintln(stderr, "usage: zaphod subscribe --server URL --zellij-bin PATH --zellij-config-dir DIR --zellij-config FILE --zellij-data-dir DIR --zellij-session NAME --tab-id ID --rail-url URL --checkout-cwd PATH --recipient-token TOKEN [--registry-dir DIR]")
 	fmt.Fprintln(stderr, "       zaphod register-agent-session [--registry-dir DIR]")
 }
 
@@ -151,6 +151,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 	railURL := flags.String("rail-url", "", "canonical sidebar WASM URL")
 	checkoutCWD := flags.String("checkout-cwd", "", "selected checkout root")
 	recipientToken := flags.String("recipient-token", "", "private direct-entry recipient token")
+	registryDir := flags.String("registry-dir", defaultAgentRegistryDir(), "private agent-session registry root")
 	startupFD := flags.Int("startup-fd", -1, "private direct-script stream-ready confirmation fd")
 	if err := flags.Parse(args); err != nil {
 		return SubscribeConfig{}, err
@@ -195,6 +196,7 @@ func parseSubscribeArgs(args []string, stderr io.Writer) (SubscribeConfig, error
 		RailURL:           *railURL,
 		CheckoutCWD:       *checkoutCWD,
 		RecipientToken:    *recipientToken,
+		RegistryDir:       *registryDir,
 		StartupFD:         *startupFD,
 		PipeTimeout:       5 * time.Second,
 		SummaryClampBytes: 512,

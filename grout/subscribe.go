@@ -138,6 +138,9 @@ func (cfg SubscribeConfig) validate() (uint64, error) {
 	if !filepath.IsAbs(cfg.CheckoutCWD) {
 		return 0, fmt.Errorf("subscribe checkout cwd must be absolute")
 	}
+	if cfg.RegistryDir != "" && !filepath.IsAbs(cfg.RegistryDir) {
+		return 0, fmt.Errorf("subscribe registry directory must be absolute")
+	}
 	server, err := url.Parse(cfg.ServerURL)
 	if err != nil || (server.Scheme != "http" && server.Scheme != "https") || server.Host == "" {
 		return 0, fmt.Errorf("invalid AgentsView server URL %q", cfg.ServerURL)
