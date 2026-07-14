@@ -50,4 +50,12 @@ if zaphod_pane_tuple_inventories_equal "$ROOT/before.json" "$ROOT/added.json"; t
     fail "a changed pane tuple inventory was accepted as unchanged"
 fi
 
-echo "PASS: responsive proof preserves full native pane tuples and sidebar identity"
+[ "$(zaphod_action_deadline_ms 42000 1)" = 43000 ] ||
+    fail "the action deadline was not derived from the pre-send monotonic sample"
+zaphod_action_deadline_is_live 43000 42999 ||
+    fail "a pre-deadline action was rejected"
+if zaphod_action_deadline_is_live 43000 43000; then
+    fail "an action at the absolute deadline was accepted"
+fi
+
+echo "PASS: responsive proof preserves native tuples and uses a pre-send absolute deadline"
