@@ -180,17 +180,37 @@ zaphod_render_layout() {
     local template="$1"
     local wasm_url="$2"
     local output="$3"
-    local recipient_token="${4:-}" replacement token_replacement
+    local recipient_token="${4:-}"
+    local debug_enabled="${5:-}"
+    local replacement token_replacement rendered
     replacement="${wasm_url//&/\\&}"
     replacement="${replacement//|/\\|}"
     token_replacement="${recipient_token//&/\\&}"
     token_replacement="${token_replacement//|/\\|}"
+    case "$debug_enabled" in
+        ""|1) ;;
+        *)
+            echo "layout debug fixture must be empty or 1" >&2
+            return 1
+            ;;
+    esac
     if [ -n "$recipient_token" ]; then
         sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
             -e "s|__ZAPHOD_RECIPIENT__|$token_replacement|g" "$template" > "$output"
     else
         sed -e "s|__ZAPHOD_WASM__|$replacement|g" \
             -e '/__ZAPHOD_RECIPIENT__/d' "$template" > "$output"
+    fi
+    if [ "$debug_enabled" = 1 ]; then
+        rendered="$output.debug.$$"
+        awk '
+            { print }
+            /^[[:space:]]*rail[[:space:]]+"1"[[:space:]]*$/ {
+                match($0, /^[[:space:]]*/)
+                print substr($0, 1, RLENGTH) "debug \"1\""
+            }
+        ' "$output" > "$rendered"
+        mv "$rendered" "$output"
     fi
 }
 

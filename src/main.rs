@@ -1165,6 +1165,8 @@ impl Sidebar {
         backoff.retain(|pane_id, _| live.contains(pane_id));
         self.pane_cwds.retain(|pane_id, _| live.contains(pane_id));
         let mut changed = false;
+        let mut completed = true;
+        let mut completed_pane_ids = Vec::new();
         for row in self.rows.iter_mut() {
             let state = backoff.entry(row.pane_id).or_default();
             if !state.due() {
@@ -1192,6 +1194,7 @@ impl Sidebar {
                     row.pane_id,
                     started.elapsed().as_millis()
                 );
+                completed = false;
                 break;
             }
             // The pane's cwd feeds session binding: one more timed call
@@ -1209,6 +1212,7 @@ impl Sidebar {
                     row.pane_id,
                     cwd_started.elapsed().as_millis()
                 );
+                completed = false;
                 break;
             }
             if let Ok(cwd) = cwd {
@@ -1224,8 +1228,16 @@ impl Sidebar {
                 row.agent = enriched;
                 changed = true;
             }
+            completed_pane_ids.push(row.pane_id);
         }
         self.poll_backoff = backoff;
+        if completed {
+            trace!(
+                self,
+                "status refresh complete pane_ids={:?}",
+                completed_pane_ids
+            );
+        }
         changed
     }
     // SCROLLBACK_FREE_PERIODIC_REFRESH_END

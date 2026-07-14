@@ -566,8 +566,8 @@ start_tmux_zellij() {
         printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; printf %q; exit %q' \
             "$release" "injected startup exit $INJECT_STARTUP_EXIT\n" "$INJECT_STARTUP_EXIT"
     else
-        printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; exec env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID HOME=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
-            "$release" "$HOME_DIR" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
+        printf -v command 'while [ ! -e %q ]; do sleep 0.01; done; exec env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID HOME=%q TMPDIR=%q ZELLIJ_SOCKET_DIR=%q %q --config-dir %q --config %q --data-dir %q attach --create %q' \
+            "$release" "$HOME_DIR" "$ROOT/tmp" "$SOCKET_DIR" "$(command -v zellij)" "$CONFIG_DIR" "$CONFIG_FILE" "$DATA_DIR" "$SESSION_NAME"
     fi
     tmux_command new-session -d -x 160 -y 45 -s "$TMUX_SESSION" "$command"
     tmux_command set-option -w -t "$TMUX_SESSION:0" remain-on-exit on
@@ -1075,6 +1075,7 @@ entry_command() {
         ZELLIJ_DATA_DIR="$DATA_DIR" ZELLIJ_SOCKET_DIR="$SOCKET_DIR" TMPDIR="$ROOT/tmp" \
         CARGO_TARGET_DIR="$REPO_ROOT/target" \
         ZAPHOD_TEST_PREBUILT_ARTIFACTS="${ZAPHOD_SMOKE_PREBUILT_ARTIFACTS:-}" \
+        ZAPHOD_TEST_PLUGIN_DEBUG=1 \
         ZAPHOD_SIDECAR_START_TIMEOUT="$ENTRY_START_TIMEOUT" \
         "$REPO_ROOT/scripts/zellij-new-tab.sh" --session "$SESSION_NAME" --name 'Zaphod selected checkout' \
         --agentsview-url "$AGENTSVIEW_URL"
@@ -1092,7 +1093,7 @@ foreground_entry() {
     local attempt
 
     zaphod_render_layout "$REPO_ROOT/layouts/zaphod.kdl" "$WASM_URL" \
-        "$rendered_layout" "$recipient_token"
+        "$rendered_layout" "$recipient_token" 1
     zaphod_validate_layout_identity "$rendered_layout" "$WASM_URL"
     set +e
     zellij_session action new-tab --name 'Zaphod foreground subscriber' \
