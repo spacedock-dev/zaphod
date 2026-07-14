@@ -271,6 +271,8 @@ cleanup() {
     local session_alive_after=0 tmux_alive_after=0 root_exists_after=0
     local session_delete_status=125 session_probe_status_after=125 session_absence_confirmed=0
     local tmux_kill_status=125 tmux_probe_status_after=125 tmux_absence_confirmed=0
+    local tmux_socket_status=125 tmux_socket_path="" tmux_socket_absent_after=0
+    local tmux_server_unreachable_after=0
     local config_after layout_after
     trap - EXIT INT TERM HUP
     set +e
@@ -278,12 +280,18 @@ cleanup() {
     terminate_owned_pid "$ENTRY_PID" "entry process" || cleanup_status=1
     terminate_owned_pid "$SIDECAR_PID" "private sidecar" || cleanup_status=1
     if [ -n "$TMUX_SERVER" ]; then
+        tmux_with_timeout 1 display-message -p '#{socket_path}' \
+            > "$ROOT/tmux-socket-path.stdout" 2> "$ROOT/tmux-socket-path.stderr"
+        tmux_socket_status=$?
+        if [ "$tmux_socket_status" -eq 0 ]; then
+            IFS= read -r tmux_socket_path < "$ROOT/tmux-socket-path.stdout" || true
+        fi
         tmux_with_timeout 2 kill-server > "$ROOT/tmux-kill.stdout" 2> "$ROOT/tmux-kill.stderr"
         tmux_kill_status=$?
         if [ "$INJECT_CLEANUP_PROBE_HANG" = tmux ] || [ "$INJECT_CLEANUP_PROBE_HANG" = both ]; then
             bounded_exec 1 sleep 60 > "$ROOT/tmux-probe.stdout" 2> "$ROOT/tmux-probe.stderr"
         else
-            tmux_with_timeout 1 has-session -t "$TMUX_SESSION" \
+            tmux_with_timeout 1 list-sessions \
                 > "$ROOT/tmux-probe.stdout" 2> "$ROOT/tmux-probe.stderr"
         fi
         tmux_probe_status_after=$?
@@ -293,7 +301,25 @@ cleanup() {
                 tmux_alive_after=1
                 cleanup_status=1
                 ;;
-            1) tmux_absence_confirmed=1 ;;
+            1)
+                if grep -F "$tmux_socket_path" "$ROOT/tmux-probe.stderr" >/dev/null &&
+                    { grep -F 'no server running' "$ROOT/tmux-probe.stderr" >/dev/null ||
+                    { grep -F 'error connecting to ' "$ROOT/tmux-probe.stderr" >/dev/null &&
+                      grep -F 'No such file or directory' "$ROOT/tmux-probe.stderr" >/dev/null; }; }; then
+                    tmux_server_unreachable_after=1
+                    [ -z "$tmux_socket_path" ] || rm -f "$tmux_socket_path"
+                    if [ -n "$tmux_socket_path" ] && [ ! -e "$tmux_socket_path" ]; then
+                        tmux_socket_absent_after=1
+                        tmux_absence_confirmed=1
+                    else
+                        echo "dedicated tmux socket survived unreachable server: $tmux_socket_path" >&2
+                        cleanup_status=1
+                    fi
+                else
+                    echo "dedicated tmux server probe failed without absence evidence" >&2
+                    cleanup_status=1
+                fi
+                ;;
             *)
                 echo "dedicated tmux cleanup probe was inconclusive: status $tmux_probe_status_after" >&2
                 cleanup_status=1
@@ -359,6 +385,10 @@ cleanup() {
                 "$session_delete_status" "$session_probe_status_after" "$session_absence_confirmed"
             printf 'tmux_kill_status=%s\ntmux_probe_status_after=%s\ntmux_absence_confirmed=%s\n' \
                 "$tmux_kill_status" "$tmux_probe_status_after" "$tmux_absence_confirmed"
+            printf 'tmux_probe_command=list-sessions\ntmux_server_unreachable_after=%s\n' \
+                "$tmux_server_unreachable_after"
+            printf 'tmux_socket_status=%s\ntmux_socket_path=%s\ntmux_socket_absent_after=%s\n' \
+                "$tmux_socket_status" "$tmux_socket_path" "$tmux_socket_absent_after"
             printf 'entry_alive_after=%s\n' "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
             printf 'sidecar_alive_after=%s\n' "$(pid_is_alive "$SIDECAR_PID" && echo 1 || echo 0)"
             printf 'agentsview_alive_after=%s\n' "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
