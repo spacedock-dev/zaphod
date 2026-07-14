@@ -127,7 +127,9 @@ trait StatusRefreshHost {
     fn running_command(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
     fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String>;
     #[cfg(test)]
-    fn viewport_trap(&mut self, pane_id: PaneId) -> Result<Vec<String>, String>;
+    fn viewport_trap(&mut self, _pane_id: PaneId) -> Result<Vec<String>, String> {
+        panic!("scrollback trap invoked")
+    }
 }
 
 struct ZellijStatusRefreshHost;
@@ -139,11 +141,6 @@ impl StatusRefreshHost for ZellijStatusRefreshHost {
 
     fn cwd(&mut self, pane_id: PaneId) -> Result<PathBuf, String> {
         get_pane_cwd(pane_id)
-    }
-
-    #[cfg(test)]
-    fn viewport_trap(&mut self, pane_id: PaneId) -> Result<Vec<String>, String> {
-        get_pane_scrollback(pane_id, false).map(|contents| contents.viewport)
     }
 }
 
@@ -1157,6 +1154,7 @@ impl Sidebar {
 
     // Returns whether any row's agent fields or polled cwd changed (i.e. a
     // render is due — a cwd change can flip a session row's binding).
+    // SCROLLBACK_FREE_PERIODIC_REFRESH_BEGIN
     fn refresh_statuses(&mut self) -> bool {
         self.refresh_statuses_with(&mut ZellijStatusRefreshHost)
     }
@@ -1230,6 +1228,7 @@ impl Sidebar {
         self.poll_backoff = backoff;
         changed
     }
+    // SCROLLBACK_FREE_PERIODIC_REFRESH_END
 }
 
 // The persistent configuration binds Alt / to NoOp. Once a tiled rail is
@@ -2968,6 +2967,22 @@ mod tests {
             bind_session("/shared", &sidebar.rows, &sidebar.pane_cwds),
             None,
             "ambiguous CWD must remain unbound"
+        );
+    }
+
+    #[test]
+    fn periodic_refresh_source_boundary_forbids_direct_scrollback_calls() {
+        let source = include_str!("main.rs");
+        let refresh = source
+            .split_once("// SCROLLBACK_FREE_PERIODIC_REFRESH_BEGIN")
+            .unwrap()
+            .1
+            .split_once("// SCROLLBACK_FREE_PERIODIC_REFRESH_END")
+            .unwrap()
+            .0;
+        assert!(
+            !refresh.contains("get_pane_scrollback"),
+            "periodic refresh bypassed the injectable no-scrollback boundary"
         );
     }
 
