@@ -1,6 +1,6 @@
 ---
 title: Integrate managed-tab safety with tab-bound session delivery
-status: validation
+status: implementation
 group: walking-skeleton
 sprint: s1-managed-tab-safety
 sprint-readiness: ready
@@ -334,6 +334,24 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   pane disappears silently may remain until a later lifecycle check or
   explicit cleanup; prompt PID/socket teardown moves to the asynchronous pane
   observation or watcher-automation follow-up.
+
+### Cycle 5 — 2026-07-15 — captain-live watcher startup failed
+
+- Classification: **narrow fix — outcome defect** against AC-O1 and AC-O2.
+  Both watcher launches in the shipped two-tab journey exited before readiness;
+  their private logs report `watch socket path exceeds 103 bytes`.
+- Exact failing boundary: `zellij-new-tab.sh` supplies the default root
+  `/tmp/zaphod-watch-tab-v1-501`, while `watchSocketPath()` appends `watch-`, a
+  64-hex digest, and `.sock`; the resulting path exceeds Darwin's 103-byte Unix
+  socket limit. Unit and native harness roots were shorter and missed the
+  shipped default.
+- Preserve the approved manual-watcher design. Shorten the deterministic socket
+  child name while retaining exact `{zellij_session, pane_id}` derivation, and
+  add a regression that passes the actual shipped default root through the
+  canonical socket-path validator on Darwin's limit.
+- Re-run focused Go tests, the two-rail/lifecycle/congestion packets, exact-head
+  Roborev review, and the same captain-live startup. Do not add a registry,
+  controller, lifecycle supervisor, or alternate proof harness.
 
 ## Problem
 
