@@ -5,6 +5,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -216,5 +217,82 @@ func TestRegistryReadRejectsOverLimitFile(t *testing.T) {
 	}
 	if _, err := store.read("managed"); err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("over-limit registry error = %v", err)
+	}
+}
+
+func TestRegistryReadRejectsMalformedCompleteGeneration(t *testing.T) {
+	valid := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
+	base := AgentRegistryV1{
+		Version: agentRegistryVersion, ZellijSession: "managed",
+		Registrations: []AgentPaneRegistrationV1{valid},
+	}
+	cases := map[string]func() []byte{
+		"duplicate pane": func() []byte {
+			registry := base
+			registry.Registrations = append([]AgentPaneRegistrationV1{}, base.Registrations...)
+			registry.Registrations = append(registry.Registrations, valid)
+			payload, _ := json.Marshal(registry)
+			return payload
+		},
+		"zero pid": func() []byte {
+			registry := base
+			registry.Registrations = append([]AgentPaneRegistrationV1{}, base.Registrations...)
+			registry.Registrations[0].PID = 0
+			payload, _ := json.Marshal(registry)
+			return payload
+		},
+		"noncanonical timestamp": func() []byte {
+			registry := base
+			registry.Registrations = append([]AgentPaneRegistrationV1{}, base.Registrations...)
+			registry.Registrations[0].UpdatedAt = "2026-07-14T00:00:00+00:00"
+			payload, _ := json.Marshal(registry)
+			return payload
+		},
+		"null registrations": func() []byte {
+			registry := base
+			registry.Registrations = nil
+			payload, _ := json.Marshal(registry)
+			return payload
+		},
+		"unknown field": func() []byte {
+			payload, _ := json.Marshal(base)
+			return bytes.Replace(payload, []byte(`"version":1`), []byte(`"version":1,"unknown":true`), 1)
+		},
+	}
+	for name, payload := range cases {
+		t.Run(name, func(t *testing.T) {
+			store := agentRegistryStore{root: t.TempDir()}
+			if err := store.prepareRoot(); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(store.registryPath("managed"), payload(), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.read("managed"); err == nil {
+				t.Fatal("malformed complete registry generation unexpectedly accepted")
+			}
+		})
+	}
+}
+
+func TestRegistryReadRejectsNonPrivateGeneration(t *testing.T) {
+	valid := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
+	payload, err := json.Marshal(AgentRegistryV1{
+		Version: agentRegistryVersion, ZellijSession: "managed",
+		Registrations: []AgentPaneRegistrationV1{valid},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []os.FileMode{0o644, 0o666} {
+		t.Run(mode.String(), func(t *testing.T) {
+			store := agentRegistryStore{root: t.TempDir()}
+			if err := os.WriteFile(store.registryPath("managed"), payload, mode); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.read("managed"); err == nil {
+				t.Fatalf("registry mode %o unexpectedly accepted", mode)
+			}
+		})
 	}
 }
