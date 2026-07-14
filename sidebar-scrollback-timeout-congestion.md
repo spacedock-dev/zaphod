@@ -265,3 +265,65 @@ beyond the pane, tab, switching, and delayed-burst behavior measured above.
 ### Summary
 
 The frozen candidate removes periodic scrollback and passes its offline behavior and cleanup suites without command/CWD redesign or managed reload work. Authoritative review remains blocked on three proof-truth gaps, all classified `MUST FIX NOW`; the convergence gate now requires captain direction before any round four.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Preserve each existing pane's full native tuple across every literal
+  action.
+  Red `db08feb` failed because the tuple predicate did not exist. Green
+  `6c0d2e5` adds focused moved-terminal and replaced-sidebar attacks, preserves
+  `(id, is_plugin, tab_id, plugin_url)` for `Alt p` and `Alt n`, and requires
+  exact tuple-inventory equality for `Alt 1` and `Alt 2`.
+- DONE: Carry one pre-send absolute deadline through key delivery and native
+  observation.
+  Red `4a5951a` failed with `zaphod_action_deadline_ms: command not found`.
+  Green `dec7508` starts each measured one-second deadline before
+  `send_literal`. The full suite later exposed the exact correct new-tab state
+  after the deadline; `6bbcf72` kept the same deadline and collected the two
+  independent native inventories concurrently.
+- DONE: Bind the long-running native fixture to the managed tab and require
+  sidebar and timer acknowledgments before the measured keys.
+  Red `8d526da` failed with `sidebar did not complete a periodic refresh
+  containing tail pane 2`. Green `157addf` asserts the fixture's `TAB_ID`,
+  title, command, and live terminal identity; sees its title in the docked
+  client; and records a debug-gated completed refresh containing its pane ID.
+  The debug gate and Zellij log remain inside the disposable smoke profile.
+- DONE: Run the semantic adversarial pass over the repaired proof.
+  The tuple matrix covers an allowed added terminal, terminal tab movement,
+  sidebar replacement, exact equality, and changed equality. The asynchronous
+  path names the isolated Zellij server as owner, the stable managed tab and
+  terminal pane as recipients, visible receipt and refresh completion as
+  acknowledgments, one absolute action deadline, and conclusive Zellij/tmux
+  cleanup after an injected timeout.
+- DONE: Record frozen-head green evidence.
+  Head `6bbcf721919111d086e5a110b97ff9202134b39c` passes Rust 142/142,
+  `cargo check --tests`, the focused tuple/deadline test, docs, artifact,
+  selected-checkout new-tab, native layout-capture, and the fresh-build
+  responsiveness plus injected-timeout cleanup wrapper. Standing config
+  remains `8ce2a42d...a196`; standing layout remains `f1004741...d6e`.
+- DONE: Clear the exact-tip quick cost gate.
+  `roborev wait HEAD` reviewed `6bbcf72` and reported no issues before the
+  fourth panel launched.
+- FAILED: The single authorized fourth `code_completion` panel did not pass.
+  Synthesis parent `1073` reviewed
+  `a5fc0f3649ac903bc45c737f188e50808a101a71..6bbcf721919111d086e5a110b97ff9202134b39c`
+  with panel `code_completion`. Required members `1070` (`correctness`), `1071`
+  (`journey`), and `1072` (`proof`) each ran once without execution failure and
+  returned FAIL; the authoritative parent returned FAIL.
+- FAILED: Parent `1073` found four surviving Medium proof gaps.
+  The whole-screen title check can match the terminal border; tuple predicates
+  omit exited, suppressed, floating, and selectable sidebar state; the log
+  grep can match the pane number outside `pane_ids`; and the measured actions
+  begin after refresh completion instead of overlapping deterministic refresh
+  work. Each finding needs a captain disposition because the authorized repair
+  round is exhausted.
+- SKIPPED: Captain AC-I1 live `subspace-tui` demonstration.
+  `subspace-tui` remains unavailable, and the failed offline convergence panel
+  blocks validation.
+
+### Summary
+
+The bounded fourth round repaired parent `1001`'s three named gaps and froze a
+green candidate at `6bbcf72`. Parent `1073` nevertheless found four new Medium
+false-positive paths. The branch remains frozen, no fifth panel was launched,
+and implementation returns to the captain for a new convergence decision.
