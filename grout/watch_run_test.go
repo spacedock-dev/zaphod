@@ -210,3 +210,60 @@ func TestWatcherReadinessIncludesSessionStartAcceptedBeforeBoundary(t *testing.T
 		t.Fatal("watcher readiness timed out")
 	}
 }
+
+func TestWatcherCleanupBoundsSlowNativeAuthorityProbe(t *testing.T) {
+	dir := t.TempDir()
+	runtimeRoot, err := os.MkdirTemp("/tmp", "zwt.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeRoot) })
+	hang := filepath.Join(dir, "hang")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \" $* \" in\n"+
+		"  *' list-panes '*) [ ! -e "+hang+" ] || sleep 5; printf '%s\\n' '[{\"id\":50,\"tab_id\":73,\"is_plugin\":true,\"plugin_url\":\"file:/candidate/sidebar.wasm\",\"is_floating\":false,\"is_suppressed\":false},{\"id\":7,\"tab_id\":73,\"is_plugin\":false,\"is_selectable\":true,\"is_suppressed\":false}]' ;;\n"+
+		"  *' pipe '*) case \"$*\" in *-ready*) echo ready ;; *-snapshot*) cat >/dev/null; echo accepted ;; esac ;;\n"+
+		"esac\n")
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/events" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer source.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan WatchReady, 1)
+	errs := make(chan error, 1)
+	go func() {
+		errs <- runWatchTab(ctx, WatchConfig{WatchRoute: WatchRoute{
+			ServerURL: source.URL, ZellijBin: zellij, ZellijConfigDir: "/c",
+			ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d", ZellijSession: "managed",
+			RailURL: "file:/candidate/sidebar.wasm", RecipientToken: "token",
+			PipeTimeout: time.Second, SourceTimeout: time.Second, SummaryClampBytes: 512,
+		}, PaneID: 7, SocketRoot: runtimeRoot, Lease: time.Second, Heartbeat: time.Hour,
+			AuthorityTimeout: 500 * time.Millisecond, Ready: ready}, &bytes.Buffer{})
+	}()
+	select {
+	case <-ready:
+	case err := <-errs:
+		t.Fatalf("watcher failed before ready: %v", err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("watcher readiness timed out")
+	}
+	if err := os.WriteFile(hang, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case err := <-errs:
+		if err != nil {
+			t.Fatalf("watcher cancellation = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("watcher cleanup blocked on slow native authority probe")
+	}
+}

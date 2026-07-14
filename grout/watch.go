@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const watchProtocol = "zaphod-watch-tab-v1"
@@ -443,6 +444,7 @@ func probeWatchTarget(ctx context.Context, cfg WatchRoute, target WatchTarget) e
 func watchNativePanes(ctx context.Context, cfg WatchRoute) ([]zellijPane, error) {
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--state", "--tab")
 	command := exec.CommandContext(ctx, cfg.ZellijBin, args...)
+	command.WaitDelay = 50 * time.Millisecond
 	var stderr strings.Builder
 	command.Stderr = &stderr
 	output, err := command.Output()

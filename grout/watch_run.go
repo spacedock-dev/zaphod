@@ -22,11 +22,12 @@ import (
 
 type WatchConfig struct {
 	WatchRoute
-	PaneID     uint32
-	SocketRoot string
-	Lease      time.Duration
-	Heartbeat  time.Duration
-	Ready      chan<- WatchReady
+	PaneID           uint32
+	SocketRoot       string
+	Lease            time.Duration
+	Heartbeat        time.Duration
+	AuthorityTimeout time.Duration
+	Ready            chan<- WatchReady
 }
 
 type WatchReady struct {
@@ -51,11 +52,16 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	if cfg.SummaryClampBytes <= 0 {
 		cfg.SummaryClampBytes = 512
 	}
+	if cfg.AuthorityTimeout <= 0 {
+		cfg.AuthorityTimeout = 2 * time.Second
+	}
 	if cfg.SocketRoot == "" || cfg.ServerURL == "" || cfg.ZellijBin == "" || cfg.ZellijSession == "" ||
 		cfg.RailURL == "" || cfg.RecipientToken == "" {
 		return fmt.Errorf("watch-tab requires source, Zellij target, rail, recipient, and socket root")
 	}
-	target, err := resolveWatchTarget(ctx, cfg.WatchRoute, cfg.PaneID)
+	resolveCtx, cancelResolve := context.WithTimeout(ctx, cfg.AuthorityTimeout)
+	target, err := resolveWatchTarget(resolveCtx, cfg.WatchRoute, cfg.PaneID)
+	cancelResolve()
 	if err != nil {
 		return err
 	}
@@ -85,8 +91,13 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	}
 	var registration *WatchRegistration
 	rows := make([]SessionRow, 0, 1)
+	probe := func(parent context.Context) error {
+		probeCtx, cancel := context.WithTimeout(parent, cfg.AuthorityTimeout)
+		defer cancel()
+		return probeWatchTarget(probeCtx, cfg.WatchRoute, target)
+	}
 	emit := func() error {
-		if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
+		if err := probe(ctx); err != nil {
 			return err
 		}
 		return EmitLeasedSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
@@ -94,7 +105,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	refreshSource := func() error {
 		nextRows := make([]SessionRow, 0, 1)
 		if registration != nil {
-			if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
+			if err := probe(ctx); err != nil {
 				return err
 			}
 			session, err := fetchExactSession(ctx, client, cfg.ServerURL, registration.AgentsViewSessionID, cfg.SourceTimeout)
@@ -102,7 +113,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 				return err
 			}
 			if err == nil {
-				if err := probeWatchTarget(ctx, cfg.WatchRoute, target); err != nil {
+				if err := probe(ctx); err != nil {
 					return err
 				}
 				nextRows = append(nextRows, BuildRegisteredSessionRow(session, registration.PaneID, time.Now(), cfg.SummaryClampBytes))
@@ -136,7 +147,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		}
 	}
 	defer func() {
-		if probeWatchTarget(context.Background(), cfg.WatchRoute, target) == nil {
+		if probe(context.Background()) == nil {
 			clearCtx, cancel := context.WithTimeout(context.Background(), cfg.PipeTimeout)
 			defer cancel()
 			_ = EmitLeasedSnapshotForTab(clearCtx, cfg.emitConfig(), nil, cfg.TabID, cfg.RecipientToken, generation, 100*time.Millisecond, stderr)
