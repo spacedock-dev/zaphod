@@ -2268,7 +2268,7 @@ mod tests {
     // docs/plan-agent-rail.md), transcribed with grout's exact field sets —
     // fixtures from outside this plugin's source.
     fn session_line() -> &'static str {
-        r#"{"kind":"session","id":"01J9SESS","cwd":"/Users/clkao/git/zaphod","agent":"claude","state":"working","summary":"wiring the rows section","ts":"2026-07-07T05:00:00Z"}"#
+        r#"{"kind":"session","id":"01J9SESS","pane_id":4,"cwd":"/Users/clkao/git/zaphod","agent":"claude","state":"working","summary":"wiring the rows section","ts":"2026-07-07T05:00:00Z"}"#
     }
 
     fn gate_line() -> &'static str {
@@ -2281,6 +2281,7 @@ mod tests {
             parse_agent_event(session_line()).unwrap(),
             AgentEvent::Session(SessionEvent {
                 id: "01J9SESS".to_owned(),
+                pane_id: Some(4),
                 cwd: "/Users/clkao/git/zaphod".to_owned(),
                 agent: "claude".to_owned(),
                 state: "working".to_owned(),
@@ -2385,41 +2386,27 @@ mod tests {
     }
 
     #[test]
-    fn single_match_binds() {
+    fn registered_pane_binds_despite_same_cwd_lookalikes() {
         let rows = [cwd_row(4), cwd_row(8)];
         let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/tmp/elsewhere")]);
         assert_eq!(
-            bind_session("/Users/clkao/git/zaphod", &rows, &cwds),
+			registered_session_pane(&SessionEvent {
+				pane_id: Some(4),
+				cwd: "/deliberately/wrong".to_owned(),
+				..Default::default()
+			}, &rows),
             Some(4)
         );
+		let same_cwd = cwd_map(&[(4, "/same"), (8, "/same")]);
+		assert_eq!(same_cwd.len(), 2);
+		assert_eq!(registered_session_pane(&SessionEvent { pane_id: Some(8), cwd: "/same".to_owned(), ..Default::default() }, &rows), Some(8));
     }
 
     #[test]
-    fn no_match_renders_unbound() {
+    fn absent_or_stale_registered_pane_renders_unbound() {
         let rows = [cwd_row(4)];
-        let cwds = cwd_map(&[(4, "/tmp/elsewhere")]);
-        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
-        // A pane whose cwd was never polled cannot match.
-        assert_eq!(bind_session("/tmp/elsewhere", &[cwd_row(9)], &cwds), None);
-        // A session without a cwd never binds — unbound, not guessed.
-        assert_eq!(bind_session("", &rows, &cwds), None);
-    }
-
-    #[test]
-    fn ambiguous_cwd_renders_unbound() {
-        // Two panes sharing the session's cwd: binding would be a guess.
-        let rows = [cwd_row(4), cwd_row(8)];
-        let cwds = cwd_map(&[(4, "/Users/clkao/git/zaphod"), (8, "/Users/clkao/git/zaphod")]);
-        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
-    }
-
-    #[test]
-    fn stale_cwd_entries_outside_the_row_set_never_bind() {
-        // The cwd map can briefly carry a closed pane between the manifest
-        // rebuild and the next poll's prune; only listed rows may bind.
-        let rows = [cwd_row(4)];
-        let cwds = cwd_map(&[(4, "/tmp/a"), (99, "/Users/clkao/git/zaphod")]);
-        assert_eq!(bind_session("/Users/clkao/git/zaphod", &rows, &cwds), None);
+		assert_eq!(registered_session_pane(&SessionEvent::default(), &rows), None);
+		assert_eq!(registered_session_pane(&SessionEvent { pane_id: Some(99), cwd: "/same".to_owned(), ..Default::default() }, &rows), None);
     }
 
     #[test]
