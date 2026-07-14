@@ -109,6 +109,53 @@ func TestFetchExactSessionRejectsOverLimitCompleteRecord(t *testing.T) {
 	}
 }
 
+func TestRegisteredSessionsForTabOmitsMissingExactRecordAndKeepsValidRow(t *testing.T) {
+	dir := t.TempDir()
+	registryDir := filepath.Join(dir, "registry")
+	store := agentRegistryStore{root: registryDir}
+	const missingID = "019f5f94-a596-7d92-9928-398653669161"
+	const validID = "019f5f95-bbfd-7993-8620-0d698008217f"
+	if err := store.upsert(registrationForTest(t, missingID, "managed", "7")); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.upsert(registrationForTest(t, validID, "managed", "8")); err != nil {
+		t.Fatal(err)
+	}
+	panes := `[
+      {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/zellij-sidebar.wasm","is_floating":false,"is_suppressed":false},
+      {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+      {"id":8,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+    ]`
+	zellij := fakeSubscriberZellij(t, dir, filepath.Join(dir, "pipe.log"), panes)
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		if r.URL.Path == "/api/v1/sessions/codex:"+validID {
+			fmt.Fprintf(w, `{"id":"codex:%s","agent":"codex","first_message":"valid"}`, validID)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	got, err := registeredSessionsForTab(context.Background(), server.Client(), SubscribeConfig{
+		ServerURL: server.URL, ZellijBin: zellij,
+		ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d",
+		ZellijSession: "managed", TabID: "73", RailURL: "file:/candidate/zellij-sidebar.wasm",
+		CheckoutCWD: "/same/cwd", RecipientToken: "token", RegistryDir: registryDir,
+		SourceTimeout: time.Second, PipeTimeout: time.Second,
+	}, 73)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].PaneID != 8 || got[0].Session.ID != "codex:"+validID {
+		t.Fatalf("mixed exact projection = %#v, want only valid pane 8", got)
+	}
+	want := []string{"/api/v1/sessions/codex:" + missingID, "/api/v1/sessions/codex:" + validID}
+	if !reflect.DeepEqual(requests, want) {
+		t.Fatalf("exact requests = %#v, want %#v", requests, want)
+	}
+}
+
 func TestDeliverRegisteredSnapshotRechecksPaneMembershipAfterFetch(t *testing.T) {
 	dir := t.TempDir()
 	panesPath := filepath.Join(dir, "panes.json")

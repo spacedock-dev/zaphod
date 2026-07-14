@@ -185,6 +185,34 @@ func TestRegistryLockContentionHasAnIndependentDeadline(t *testing.T) {
 	}
 }
 
+func TestRegistryLockCannotSucceedAfterDeadline(t *testing.T) {
+	store := agentRegistryStore{root: t.TempDir(), lockTimeout: 20 * time.Millisecond}
+	if err := store.prepareRoot(); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := os.OpenFile(store.lockPath("managed"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	retried := false
+	store.beforeLockRetry = func() {
+		if retried {
+			return
+		}
+		retried = true
+		time.Sleep(30 * time.Millisecond)
+		_ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	}
+	err = store.upsert(registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7"))
+	if err == nil || !strings.Contains(err.Error(), "lock timeout") {
+		t.Fatalf("post-deadline lock release error = %v, want timeout", err)
+	}
+}
+
 func TestRegistryPruneStaleRemovesOnlyAbsentPanes(t *testing.T) {
 	store := agentRegistryStore{root: t.TempDir()}
 	first := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
@@ -195,7 +223,7 @@ func TestRegistryPruneStaleRemovesOnlyAbsentPanes(t *testing.T) {
 	if err := store.upsert(second); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.pruneStale("managed", map[uint32]uint64{7: 73}); err != nil {
+	if err := store.pruneStale("managed", map[uint32]uint64{7: 73}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	snapshot, err := store.read("managed")
@@ -204,6 +232,30 @@ func TestRegistryPruneStaleRemovesOnlyAbsentPanes(t *testing.T) {
 	}
 	if len(snapshot.Registrations) != 1 || snapshot.Registrations[0].PaneID != 7 {
 		t.Fatalf("pruned snapshot = %#v, want only live pane 7", snapshot)
+	}
+}
+
+func TestRegistryPrunePreservesRegistrationNewerThanPaneSnapshot(t *testing.T) {
+	store := agentRegistryStore{root: t.TempDir()}
+	old := registrationForTest(t, "019f5f94-a596-7d92-9928-398653669161", "managed", "7")
+	newer := registrationForTest(t, "019f5f95-bbfd-7993-8620-0d698008217f", "managed", "8")
+	cutoff := time.Now().UTC()
+	newer.UpdatedAt = cutoff.Add(time.Second).Format(time.RFC3339Nano)
+	if err := store.upsert(old); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.upsert(newer); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.pruneStale("managed", map[uint32]uint64{}, cutoff); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := store.read("managed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Registrations) != 1 || snapshot.Registrations[0].PaneID != 8 {
+		t.Fatalf("pruned snapshot = %#v, want only post-snapshot pane 8", snapshot)
 	}
 }
 
