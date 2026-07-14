@@ -21,7 +21,8 @@ jq -e '
 
 PAYLOAD='{"session_id":"019f5f94-a596-7d92-9928-398653669161","transcript_path":null,"cwd":"/same/cwd","hook_event_name":"SessionStart","model":"gpt-5.6","permission_mode":"default","source":"startup"}'
 printf '%s\n' "$PAYLOAD" |
-    ZAPHOD_BIN="$ROOT/not-built" "$REPO_ROOT/scripts/zaphod-codex-session-hook.sh" ||
+    ZAPHOD_BIN="$ROOT/not-built" ZELLIJ_SESSION_NAME= ZELLIJ_PANE_ID= \
+    "$REPO_ROOT/scripts/zaphod-codex-session-hook.sh" ||
     fail "outside-Zellij hook required a built receiver"
 
 cat > "$ROOT/zaphod" <<'EOF'

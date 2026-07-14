@@ -3,6 +3,10 @@
 # ABOUTME: Resolves the native receiver from this exact selected checkout.
 set -euo pipefail
 
+if [ -z "${ZELLIJ_SESSION_NAME:-}" ] && [ -z "${ZELLIJ_PANE_ID:-}" ]; then
+    exit 0
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 ZAPHOD_BIN="${ZAPHOD_BIN:-$SCRIPT_DIR/../target/zaphod}"
 
