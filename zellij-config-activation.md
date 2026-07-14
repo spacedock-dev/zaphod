@@ -687,3 +687,52 @@ Native layout evidence is now complete, identity-bound, atomic, and bounded.
 The lifecycle survives only proven transient wrong-action replies, rejects
 persistent or malformed state, and passes repeated plus concurrent real-Zellij
 verification without changing operator-owned KDL.
+
+## Stage Report: implementation (cycle 7)
+
+- DONE: The lifecycle and stress harnesses emit bounded phase markers and retain a self-contained failure bundle with startup/tmux/Zellij/process evidence while still cleaning every owned live resource.
+  Red `4e65584` failed `stress failure did not report its retained evidence
+  path`; green `acd5ce2` retains case output, phase logs, bounded native replies,
+  tmux pane state, process ownership, and cleanup results outside the smoke root.
+- DONE: Retained output is bounded and useful at size limits.
+  Red `5868747` omitted oversized stderr length; green `4a4467d` caps each case
+  stream at 64 KiB with head/tail, original byte length, and truncation flags.
+- DONE: Preserved evidence explains and fixes the silent 180-second serial hang.
+  Red `3833622` reached the outer watchdog without an inner marker; green
+  `7c9727b` applies a 10-second owner/command deadline to every native tmux and
+  Zellij call, while injected `action list-panes` hangs fail in two seconds
+  with exact command identity and retained cleanup evidence.
+- DONE: Preserved evidence explains and fixes the vanished initial session path.
+  Red `3a384e7` could not report a pane exit; green `95685b9` gates tmux launch,
+  enables `remain-on-exit`, and fails immediately with retained pane status 42
+  instead of looping on `There is no active session!`.
+- DONE: Startup cleanup is race-free and conclusively verified.
+  `8027c6f` stops the attached tmux client before deleting the Zellij session;
+  `6155a9d`, `4d1795c`, and `671c889` require native absence, server-wide tmux
+  unreachability, and bounded exit of the captured tmux server PID.
+- DONE: Cleanup timeouts cannot masquerade as success.
+  Red `5e9e9dc` required injected status-124 probes to remain inconclusive;
+  green records delete/kill/probe statuses and sets cleanup failure unless
+  absence is explicit. Stale-socket remediation is separate from PID proof.
+- DONE: Real retained bundles closed adjacent v0.44 wrong-action replies.
+  Bundle `9HbnuB` isolated a transient missing `pane_command`; `4112bb8`
+  requires an exact settled foreign no-op snapshot. Bundle `kryJFK` captured a
+  zero-byte `list-tabs`; `4a2e0b4` requires a nonempty stable-ID inventory.
+- DONE: Empty absent-state layout replies recover without weakening terminal identity.
+  Bundle `wGRTW0` captured status-0 empty `dump-layout` with authoritative
+  absent panes; red `90f6b06` failed, and green `5113a3a` retries only that
+  bounded empty wrong-action while malformed and persistent replies stay terminal.
+- DONE: From clean state, the FO can obtain two consecutive full serial/concurrent stress passes, and an injected forced failure proves useful retained evidence plus complete cleanup; exact-head quick passes and no code_completion is launched.
+  At exact head `671c889`, two consecutive runs each passed serial-1, serial-2,
+  concurrent foreground, and concurrent automatic; the four-case evidence
+  drill passed phase failure, native hang, startup exit, and inconclusive probes.
+- DONE: Relevant exact-head suites and operator-owned KDL are green.
+  Go test/vet passed; Rust passed 138/138 plus validator 6/6 and both checks;
+  entry passed 14/14; capture and artifact suites passed. Config remains
+  `8ce2a42d...a196` and layout remains `f1004741...d6e`.
+- DONE: Exact-tip quick is clear with all findings dispositioned.
+  Jobs `857`, `864`, `869`, `887`, `891`, and `897` drove conclusive cleanup
+  proof; exact-tip quick `899` passed with no findings. Per dispatch, no
+  `code_completion` panel was launched.
+
+### Summary: Native failures now leave bounded, inert evidence while cleanup remains mandatory; startup exit and command hangs are independently bounded, and final stress passes twice consecutively.
