@@ -76,6 +76,7 @@ TMUX_PANE="$TMUX_SESSION:0.0"
 AGENTSVIEW_PID=""
 AGENTSVIEW_URL=""
 ENTRY_PID=""
+WATCHER_PID=""
 LAYOUT_VALIDATOR=""
 
 bounded_exec() {
@@ -207,6 +208,10 @@ terminate_owned_pid() {
     done
     if pid_is_alive "$pid"; then
         kill -KILL "$pid" 2>/dev/null || true
+        for attempt in $(seq 1 40); do
+            pid_is_alive "$pid" || break
+            sleep 0.05
+        done
     fi
     wait "$pid" 2>/dev/null || true
     if pid_is_alive "$pid"; then
@@ -245,6 +250,7 @@ record_precleanup_evidence() {
         printf 'root=%s\nsession=%s\ntmux_server=%s\ntmux_pane=%s\n' \
             "$ROOT" "$SESSION_NAME" "$TMUX_SERVER" "$TMUX_PANE"
         printf 'entry_pid=%s entry_alive_before=%s\n' "$ENTRY_PID" "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
+        printf 'watcher_pid=%s watcher_alive_before=%s\n' "$WATCHER_PID" "$(pid_is_alive "$WATCHER_PID" && echo 1 || echo 0)"
         printf 'agentsview_pid=%s agentsview_alive_before=%s\n' "$AGENTSVIEW_PID" "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
     } > "$EVIDENCE_DIR/process-ownership.txt"
     if [ -n "$TMUX_SERVER" ]; then
@@ -283,6 +289,7 @@ cleanup() {
     set +e
     record_precleanup_evidence "$status"
     terminate_owned_pid "$ENTRY_PID" "entry process" || cleanup_status=1
+    terminate_owned_pid "$WATCHER_PID" "manual watcher" || cleanup_status=1
     if [ -n "$TMUX_SERVER" ]; then
         tmux_with_timeout 1 display-message -p '#{pid} #{socket_path}' \
             > "$ROOT/tmux-socket-path.stdout" 2> "$ROOT/tmux-socket-path.stderr"
@@ -407,6 +414,7 @@ cleanup() {
             printf 'tmux_socket_status=%s\ntmux_socket_path=%s\ntmux_socket_removed_after=%s\ntmux_socket_absent_after=%s\n' \
                 "$tmux_socket_status" "$tmux_socket_path" "$tmux_socket_removed_after" "$tmux_socket_absent_after"
             printf 'entry_alive_after=%s\n' "$(pid_is_alive "$ENTRY_PID" && echo 1 || echo 0)"
+            printf 'watcher_alive_after=%s\n' "$(pid_is_alive "$WATCHER_PID" && echo 1 || echo 0)"
             printf 'agentsview_alive_after=%s\n' "$(pid_is_alive "$AGENTSVIEW_PID" && echo 1 || echo 0)"
             printf 'root_exists_after=%s\n' "$root_exists_after"
             printf 'standing_config_unchanged=%s\n' "$([ "$config_after" = "$STANDING_CONFIG_BEFORE" ] && echo 1 || echo 0)"
@@ -1205,6 +1213,9 @@ grep -F 'watch-tab ready pid=' "$ROOT/watcher-ready.screen" >/dev/null || {
     sed -n '1,100p' "$ROOT/watcher-ready.screen" >&2 || true
     fail "manual watch-tab command did not become ready"
 }
+WATCHER_PID="$(sed -nE 's/.*watch-tab ready pid=([0-9]+).*/\1/p' "$ROOT/watcher-ready.screen" | tail -1)"
+[[ "$WATCHER_PID" =~ ^[1-9][0-9]*$ ]] || fail "manual watch-tab did not report an owned PID"
+pid_is_alive "$WATCHER_PID" || fail "reported manual watcher PID was not live"
 printf '%s\n' '{"session_id":"019f5f94-a596-7d92-9928-398653669161","transcript_path":null,"cwd":"/deliberately/wrong","hook_event_name":"SessionStart","model":"fixture","permission_mode":"default","source":"startup"}' |
     ZAPHOD_WATCH_DIR="$WATCH_DIR" \
     ZELLIJ_SESSION_NAME="$SESSION_NAME" \

@@ -628,6 +628,44 @@ impl Sidebar {
         false
     }
 
+    fn renew_session_lease_from_args(
+        &mut self,
+        args: &BTreeMap<String, String>,
+        now: Instant,
+    ) -> bool {
+        let expired = self.expire_session_lease(now);
+        let Some(current_generation) = self
+            .session_lease
+            .as_ref()
+            .map(|lease| lease.generation.clone())
+        else {
+            return expired;
+        };
+        let Some(next) = self.session_lease_from_args(args, now) else {
+            return expired;
+        };
+        if next.generation != current_generation {
+            return expired;
+        }
+        let lease_secs = next.deadline.duration_since(now).as_secs_f64();
+        self.session_lease = Some(next);
+        set_timeout(lease_secs);
+        expired
+    }
+
+    fn clear_unbound_session_projection(&mut self) -> bool {
+        if self
+            .sessions
+            .iter()
+            .all(|session| registered_session_pane(session, &self.rows).is_some())
+        {
+            return false;
+        }
+        self.sessions.clear();
+        self.session_lease = None;
+        true
+    }
+
     fn decide_actionable_click(&mut self, line: isize, now: Instant) -> ClickAction {
         self.expire_session_lease(now);
         if matches!(
@@ -763,6 +801,7 @@ impl ZellijPlugin for Sidebar {
                 let old = std::mem::take(&mut self.rows);
                 self.rows = rows_for_own_tab(&manifest, self.plugin_id);
                 preserve_agent_fields(&mut self.rows, &old);
+                let session_projection_changed = self.clear_unbound_session_projection();
                 if let Some(own) = manifest
                     .panes
                     .values()
@@ -796,7 +835,7 @@ impl ZellijPlugin for Sidebar {
                 // PaneUpdate fires constantly in agent-heavy tabs; re-rendering
                 // a pinned overlay on every one makes the underlying panes
                 // flicker. Only render when the derived view changed.
-                self.rows != old || !self.rendered_once
+                self.rows != old || session_projection_changed || !self.rendered_once
             }
             Event::Timer(_) => {
                 let lease_changed = self.expire_session_lease(Instant::now());
@@ -843,6 +882,9 @@ impl ZellijPlugin for Sidebar {
             ) else {
                 return false;
             };
+            if self.clear_unbound_session_projection() {
+                return true;
+            }
             let lease_secs = lease.deadline.duration_since(now).as_secs_f64();
             self.session_lease = Some(lease);
             set_timeout(lease_secs);
@@ -850,6 +892,15 @@ impl ZellijPlugin for Sidebar {
                 cli_pipe_output(pipe_id, "accepted");
             }
             return changed;
+        }
+        if self.private_agent_pipe_name("heartbeat").as_deref() == Some(pipe_message.name.as_str()) {
+            if !self.accepts_agent_event(&pipe_message.args) {
+                return false;
+            }
+            if self.clear_unbound_session_projection() {
+                return true;
+            }
+            return self.renew_session_lease_from_args(&pipe_message.args, Instant::now());
         }
         // Ordinary event callers need no response; Zellij auto-unblocks them
         // after this returns. Only the readiness branch above writes output.
@@ -2743,6 +2794,12 @@ mod tests {
         message
     }
 
+    fn agent_heartbeat(recipient_tab_id: &str) -> PipeMessage {
+        let mut message = agent_snapshot(None, recipient_tab_id);
+        message.name = "zaphod-agent-v1-test-token-heartbeat".to_owned();
+        message
+    }
+
     fn arm_agent_recipient(sidebar: &mut Sidebar, own_position: usize, tabs: &[TabInfo]) {
 		sidebar.config.insert("recipient_token".to_owned(), "test-token".to_owned());
         sidebar.own_tab = Some(own_position);
@@ -2868,6 +2925,7 @@ mod tests {
         let payload = format!("[{},{}]", session_line(), gate_line());
         let mut target = Sidebar::default();
         arm_agent_recipient(&mut target, 1, &tabs);
+        target.rows = vec![cwd_row(4)];
         assert!(target.pipe(agent_snapshot(Some(&payload), "73")));
         assert_eq!(target.sessions.len(), 1);
         assert_eq!(target.gates.len(), 1);
@@ -2954,6 +3012,44 @@ mod tests {
             .insert("watch-generation".to_owned(), "generation-b".to_owned());
         assert!(sidebar.pipe(replacement));
         assert_eq!(sidebar.sessions.len(), 1);
+    }
+
+    #[test]
+    fn watcher_heartbeat_only_renews_the_same_live_generation() {
+        let mut sidebar = Sidebar::default();
+        arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);
+        sidebar.rows = vec![cwd_row(4)];
+        let snapshot = format!("[{}]", session_line());
+        assert!(sidebar.pipe(agent_snapshot(Some(&snapshot), "73")));
+        let first_deadline = sidebar.session_lease.as_ref().unwrap().deadline;
+
+        assert!(!sidebar.pipe(agent_heartbeat("73")));
+        assert!(sidebar.session_lease.as_ref().unwrap().deadline >= first_deadline);
+        assert_eq!(sidebar.sessions.len(), 1);
+
+        let mut wrong = agent_heartbeat("73");
+        wrong
+            .args
+            .insert("watch-generation".to_owned(), "generation-b".to_owned());
+        assert!(!sidebar.pipe(wrong));
+        assert_eq!(sidebar.session_lease.as_ref().unwrap().generation, "generation-a");
+
+        sidebar.rows = vec![cwd_row(8)];
+        assert!(
+            sidebar.pipe(agent_heartbeat("73")),
+            "heartbeat retained a session whose exact pane left the tab"
+        );
+        assert!(sidebar.sessions.is_empty());
+        assert!(sidebar.session_lease.is_none());
+
+        sidebar.rows = vec![cwd_row(4)];
+        assert!(sidebar.pipe(agent_snapshot(Some(&snapshot), "73")));
+
+        sidebar.session_lease.as_mut().unwrap().deadline =
+            Instant::now() - Duration::from_millis(1);
+        assert!(sidebar.pipe(agent_heartbeat("73")), "late heartbeat must clear stale rows");
+        assert!(sidebar.sessions.is_empty());
+        assert!(sidebar.session_lease.is_none());
     }
 
     #[test]

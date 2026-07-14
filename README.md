@@ -159,15 +159,19 @@ Zellij, the hook exits successfully before it requires a built receiver.
 
 The watcher keeps one registration in memory. It fetches only
 `/api/v1/sessions/{codex:<SessionStart session_id>}` and sends leased snapshots
-to the exact recipient tab. Heartbeats renew the cached projection; new hook
-records and AgentsView events trigger exact fetches. A later SessionStart in
-the same terminal replaces the old row. Restart starts empty and requires a
-new SessionStart.
+to the exact recipient tab. Recipient- and generation-checked heartbeats renew
+the cached projection every 1.8 seconds without waiting for plugin output;
+new hook records and AgentsView data changes trigger exact fetches and
+acknowledged snapshots. A later SessionStart in the same terminal replaces
+the old row. Restart starts empty and requires a new SessionStart.
 
-Socket loss, terminal loss, stable-tab loss, original-rail loss, source EOF,
-source failure, or rejected delivery ends the watcher. Rows then expire by
-lease. The watcher never follows a replacement pane or rail, consults the
-global session list, writes durable session authority, or guesses from CWD.
+Socket loss, watcher loss, terminal/tab/rail manifest loss, source failure, or
+rejected delivery makes the row and focus fail closed by lease. Startup,
+SessionStart/data-change delivery, and cleanup revalidate native authority;
+idle heartbeats do not synchronously poll pane metadata. A watcher whose pane
+disappears silently may remain until the next lifecycle check or explicit
+cleanup. It never follows a replacement pane or rail, consults the global
+session list, writes durable session authority, or guesses from CWD.
 Follow the [chat-guided AgentsView demo](docs/zellij-agentsview-live-demo.md)
 for the two-tab journey.
 

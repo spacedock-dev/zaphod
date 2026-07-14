@@ -32,13 +32,19 @@ row.
 Every session snapshot carries the stable recipient token, tab ID, watcher
 generation, and a short lease. The plugin displays and focuses a session row
 only while that lease, recipient, pane, and generation remain valid. Heartbeat
-renewal uses the cached exact record; AgentsView events and new SessionStart
-records trigger exact fetches.
+renewal uses the cached exact record on a 1.8-second cadence. It is a
+recipient- and generation-checked fire-and-forget pipe, so an idle watcher
+does not wait for plugin output. AgentsView data changes and new SessionStart
+records trigger acknowledged snapshots and exact fetches.
 
-Source EOF, source errors, socket loss, terminal loss, tab loss, original rail
-loss, malformed input, over-limit input, exact-ID mismatch, or rejected pipe
-delivery ends the watcher. Native authority probes, HTTP operations, pipe
-children, cleanup, and records have explicit time or size bounds.
+Source EOF, source errors, socket loss, malformed input, over-limit input,
+exact-ID mismatch, or rejected snapshot delivery ends the watcher. The plugin
+uses its exact manifest and lease to clear rows and focus after terminal, tab,
+rail, or watcher loss. Startup, SessionStart/data-change delivery, and cleanup
+run bounded native probes; idle heartbeats do not poll pane metadata. A daemon
+whose pane disappears silently may remain until the next lifecycle check or
+explicit cleanup. HTTP operations, pipe children, cleanup, and records have
+explicit time or size bounds.
 
 The existing `agent-event` protocol carries session and gate rows:
 

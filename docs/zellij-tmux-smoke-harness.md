@@ -47,8 +47,11 @@ top-level row in each tab and no child row.
 It then clicks the target row from a same-CWD spare pane and requires focus on
 the exact watched terminal. Stopping and restarting that watcher must produce
 an empty projection until another SessionStart arrives. Closing the watched
-terminal must stop the watcher and expire the row while the spare terminal
-and original rail remain alive.
+terminal must clear the row while the spare terminal and original rail remain
+alive. Silent terminal loss does not poll native pane state or promise
+immediate daemon exit: the rail clears the unbound projection from its exact
+manifest, and the harness explicitly terminates the owned daemon and verifies
+socket cleanup.
 
 The AgentsView fixture logs every request. Only exact
 `/api/v1/sessions/{codex:<UUID>}` requests pass; list queries and child fetches

@@ -128,6 +128,54 @@ func EmitLeasedSnapshotForTab(
 	return emitAcknowledged(ctx, cfg, "leased-snapshot", args, string(payload), stderr)
 }
 
+// EmitLeaseHeartbeatForTab renews an already-accepted generation without
+// waiting for plugin output. A busy plugin may process the heartbeat late and
+// let the lease expire, but it cannot hold this native client open and
+// multiply congestion for unrelated pane/tab actions.
+func EmitLeaseHeartbeatForTab(
+	ctx context.Context,
+	cfg Config,
+	recipientTabID string,
+	recipientToken string,
+	generation string,
+	lease time.Duration,
+	stderr io.Writer,
+) error {
+	if generation == "" || strings.ContainsAny(generation, ",=") {
+		return fmt.Errorf("invalid watch generation")
+	}
+	leaseMS := lease.Milliseconds()
+	if leaseMS < 100 || leaseMS > 2500 {
+		return fmt.Errorf("watch lease must be between 100ms and 2500ms")
+	}
+	args := []string{
+		"pipe", "--name", privateAgentPipeName(recipientToken, "heartbeat"),
+		"--args", fmt.Sprintf("recipient-tab-id=%s,recipient-token=%s,watch-generation=%s,lease-ms=%d",
+			recipientTabID, recipientToken, generation, leaseMS),
+	}
+	return emitUnacknowledged(ctx, cfg, "lease-heartbeat", args, stderr)
+}
+
+func emitUnacknowledged(
+	ctx context.Context,
+	cfg Config,
+	kind string,
+	pipeArgs []string,
+	stderr io.Writer,
+) error {
+	deliveryCtx, cancel := context.WithTimeout(ctx, cfg.PipeTimeout)
+	defer cancel()
+	args := append(zellijProfileArgs(cfg), pipeArgs...)
+	cmd := exec.CommandContext(deliveryCtx, cfg.ZellijBin, args...)
+	cmd.WaitDelay = 2 * time.Second
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	if deliveryCtx.Err() != nil {
+		return fmt.Errorf("pipe timeout after %s: kind=%s", cfg.PipeTimeout, kind)
+	}
+	return err
+}
+
 func emitAcknowledged(
 	ctx context.Context,
 	cfg Config,

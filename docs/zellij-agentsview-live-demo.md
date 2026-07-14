@@ -97,6 +97,7 @@ Codex session; only that fresh SessionStart may restore the row.
 ```
 
 The native test proves `1/1/0` projection, exact-ID requests, direct pane
-focus, restart-empty behavior, lease expiry, and immediate failure when the
-watched terminal disappears. It also verifies that the watcher writes only
-its private socket and never a durable authority record.
+focus, restart-empty behavior, lease expiry, and immediate row fail-close when
+the watched terminal disappears. The rail clears the row from its exact
+manifest; the harness then explicitly terminates the silently orphaned daemon
+and proves socket cleanup. The watcher writes no durable authority record.

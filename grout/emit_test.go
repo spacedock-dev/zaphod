@@ -49,6 +49,27 @@ func TestLeasedSnapshotCarriesGenerationAndPositiveAcknowledgment(t *testing.T) 
 	}
 }
 
+func TestLeaseHeartbeatIsOneUnacknowledgedNativeMessage(t *testing.T) {
+	dir := t.TempDir()
+	argvLog := filepath.Join(dir, "argv")
+	zellij := writeScript(t, dir, "heartbeat-zellij", "#!/bin/sh\n"+
+		"{ echo \"$#\"; for a in \"$@\"; do printf '%s\\n' \"$a\"; done; } > "+argvLog+"\n")
+	cfg := Config{ZellijBin: zellij, ZellijSession: "managed", PipeTimeout: time.Second}
+	if err := EmitLeaseHeartbeatForTab(context.Background(), cfg, "73", "token", "generation-a", 500*time.Millisecond, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	argv := readInvocations(t, argvLog)
+	if len(argv) != 1 {
+		t.Fatalf("invocations = %d", len(argv))
+	}
+	joined := strings.Join(argv[0], " ")
+	for _, want := range []string{"zaphod-agent-v1-token-heartbeat", "recipient-tab-id=73", "recipient-token=token", "watch-generation=generation-a", "lease-ms=500"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("lease heartbeat argv omitted %q: %q", want, argv[0])
+		}
+	}
+}
+
 func writeScript(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)

@@ -36,12 +36,19 @@ type WatchReady struct {
 	Generation string
 }
 
+type watchSourceEvent uint8
+
+const (
+	watchSourceHeartbeat watchSourceEvent = iota + 1
+	watchSourceDataChanged
+)
+
 func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result error) {
 	if cfg.Lease <= 0 {
 		cfg.Lease = 2500 * time.Millisecond
 	}
 	if cfg.Heartbeat <= 0 {
-		cfg.Heartbeat = time.Second
+		cfg.Heartbeat = 1800 * time.Millisecond
 	}
 	if cfg.PipeTimeout <= 0 {
 		cfg.PipeTimeout = 5 * time.Second
@@ -101,6 +108,9 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 			return err
 		}
 		return EmitLeasedSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
+	}
+	heartbeat := func() error {
+		return EmitLeaseHeartbeatForTab(ctx, cfg.emitConfig(), cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
 	}
 	refreshSource := func() error {
 		nextRows := make([]SessionRow, 0, 1)
@@ -171,8 +181,12 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 			if err := refreshSource(); err != nil {
 				return err
 			}
-		case <-streamEvents:
-			if err := refreshSource(); err != nil {
+		case event := <-streamEvents:
+			if event == watchSourceDataChanged {
+				if err := refreshSource(); err != nil {
+					return err
+				}
+			} else if err := heartbeat(); err != nil {
 				return err
 			}
 		case err := <-streamErrors:
@@ -185,7 +199,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 			if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 {
 				return fmt.Errorf("watch socket lost")
 			}
-			if err := emit(); err != nil {
+			if err := heartbeat(); err != nil {
 				return err
 			}
 		}
@@ -230,7 +244,7 @@ func openWatchEventStream(
 	ctx context.Context,
 	client *http.Client,
 	cfg WatchRoute,
-) (<-chan struct{}, <-chan error, func(), error) {
+) (<-chan watchSourceEvent, <-chan error, func(), error) {
 	endpoint, err := serverEndpoint(cfg.ServerURL, "/api/v1/events")
 	if err != nil {
 		return nil, nil, nil, err
@@ -258,7 +272,7 @@ func openWatchEventStream(
 		cancel()
 		return nil, nil, nil, fmt.Errorf("source stream: expected text/event-stream, found %q", response.Header.Get("Content-Type"))
 	}
-	events := make(chan struct{}, 1)
+	events := make(chan watchSourceEvent, 1)
 	errs := make(chan error, 1)
 	go func() {
 		defer response.Body.Close()
@@ -272,9 +286,15 @@ func openWatchEventStream(
 				continue
 			}
 			if line == "" {
-				if eventName == "data_changed" || eventName == "heartbeat" {
+				if eventName == "data_changed" {
 					select {
-					case events <- struct{}{}:
+					case events <- watchSourceDataChanged:
+					case <-streamCtx.Done():
+						return
+					}
+				} else if eventName == "heartbeat" {
+					select {
+					case events <- watchSourceHeartbeat:
 					default:
 					}
 				}

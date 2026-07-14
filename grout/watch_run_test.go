@@ -48,12 +48,27 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 
 	sessionID := "codex:019f60ff-1111-7222-8333-444455556666"
 	var exactRequests atomic.Int64
+	dataChanged := make(chan struct{}, 1)
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/events":
 			w.Header().Set("Content-Type", "text/event-stream")
-			w.(http.Flusher).Flush()
-			<-r.Context().Done()
+			flusher := w.(http.Flusher)
+			ticker := time.NewTicker(50 * time.Millisecond)
+			defer ticker.Stop()
+			fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
+			flusher.Flush()
+			for {
+				select {
+				case <-r.Context().Done():
+					return
+				case <-dataChanged:
+					fmt.Fprint(w, "event: data_changed\ndata: {}\n\n")
+				case <-ticker.C:
+					fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
+				}
+				flusher.Flush()
+			}
 		case "/api/v1/sessions/" + sessionID:
 			exactRequests.Add(1)
 			fmt.Fprintf(w, `{"id":%q,"agent":"codex","first_message":"KJ_WATCH_ROW"}`, sessionID)
@@ -126,6 +141,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 	}
 
 	writePanes(false)
+	dataChanged <- struct{}{}
 	select {
 	case err := <-errCh:
 		if err == nil || !strings.Contains(err.Error(), "target-lost") {

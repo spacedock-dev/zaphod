@@ -390,7 +390,9 @@ register_session "$TARGET_PANE_ID" 019f5f94-a596-7d92-9928-398653669161
 wait_for_screen_marker 'KJ_TAB_A_ROW' "$ROOT/target-reregistered.screen"
 
 # Closing the exact watched terminal leaves a spare pane and resident rail.
-# The watcher must lose authority, exit, and let its leased row disappear.
+# The plugin's exact manifest must reject renewals and let the leased row
+# disappear without an idle native watcher probe. Silent process teardown is
+# best-effort, so this harness explicitly owns and terminates the daemon.
 zellij_session action close-pane --pane-id "$TARGET_PANE_ID"
 for _attempt in $(seq 1 100); do
 	capture_panes
@@ -400,19 +402,19 @@ done
 jq -e --arg id "$TARGET_PANE_ID" 'all(.[]; .is_plugin or ((.id | tostring) != $id))' "$PANES" >/dev/null ||
 	fail "registered Target terminal survived native close"
 for _attempt in $(seq 1 100); do
-	kill -0 "$TARGET_WATCHER_PID" 2>/dev/null || break
-	sleep 0.05
-done
-! kill -0 "$TARGET_WATCHER_PID" 2>/dev/null || fail "watcher survived exact terminal loss"
-wait "$TARGET_WATCHER_PID" 2>/dev/null || true
-TARGET_WATCHER_PID=""
-for _attempt in $(seq 1 100); do
 	tmux_command capture-pane -p -t "$TMUX_PANE" > "$ROOT/target-after-close.screen"
 	grep -F 'KJ_TAB_A_ROW' "$ROOT/target-after-close.screen" >/dev/null || break
 	sleep 0.05
 done
 grep -F 'KJ_TAB_A_ROW' "$ROOT/target-after-close.screen" >/dev/null &&
 	fail "closed Target pane left a stale registered row"
+kill -0 "$TARGET_WATCHER_PID" 2>/dev/null ||
+	fail "silent terminal loss unexpectedly depended on watcher exit"
+kill -TERM "$TARGET_WATCHER_PID"
+wait "$TARGET_WATCHER_PID" 2>/dev/null || true
+TARGET_WATCHER_PID=""
+[ "$(find "$WATCH_DIR" -type s -print | wc -l | tr -d '[:space:]')" -eq 1 ] ||
+	fail "explicit watcher cleanup left an unexpected socket count"
 [ "$(find "$WATCH_DIR" -type f -print | wc -l | tr -d '[:space:]')" -eq 0 ] ||
 	fail "watcher persisted authority outside its private sockets"
 
@@ -421,4 +423,4 @@ grep -F '019f5f95-cc22-77d2-9c3a-271b1edaabd8' "$ROOT/agentsview-requests.log" >
 [ "$(grep -Fc '/api/v1/sessions/codex:019f5f94-a596-7d92-9928-398653669161' "$ROOT/agentsview-requests.log")" -eq 2 ] || fail "Target exact ID was not fetched once per watcher generation"
 [ "$(grep -Fc '/api/v1/sessions/codex:019f5f95-bbfd-7993-8620-0d698008217f' "$ROOT/agentsview-requests.log")" -eq 1 ] || fail "Bystander exact ID was not fetched once"
 
-echo "PASS: shared-token same-CWD tabs projected 1/1/0, clicked the exact pane, restarted empty, and failed closed on native loss"
+echo "PASS: shared-token same-CWD tabs projected 1/1/0, clicked the exact pane, restarted empty, and lease-failed closed without idle native polling"
