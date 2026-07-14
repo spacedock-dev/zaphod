@@ -352,7 +352,11 @@ func registeredSessionsForTab(
 	if registryDir == "" {
 		registryDir = defaultAgentRegistryDir()
 	}
-	registry, err := (agentRegistryStore{root: registryDir}).read(cfg.ZellijSession)
+	store := agentRegistryStore{root: registryDir}
+	if err := store.pruneStale(cfg.ZellijSession, target.paneTabs); err != nil {
+		return nil, fmt.Errorf("prune agent registry: %w", err)
+	}
+	registry, err := store.read(cfg.ZellijSession)
 	if err != nil {
 		return nil, fmt.Errorf("read agent registry: %w", err)
 	}

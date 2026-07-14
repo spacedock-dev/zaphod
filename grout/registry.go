@@ -273,6 +273,26 @@ func (s agentRegistryStore) upsert(registration AgentPaneRegistrationV1) error {
 	})
 }
 
+func (s agentRegistryStore) pruneStale(zellijSession string, livePaneTabs map[uint32]uint64) error {
+	return s.withLock(zellijSession, true, func() error {
+		registry, err := s.readUnlocked(zellijSession)
+		if err != nil {
+			return err
+		}
+		kept := registry.Registrations[:0]
+		for _, registration := range registry.Registrations {
+			if _, live := livePaneTabs[registration.PaneID]; live {
+				kept = append(kept, registration)
+			}
+		}
+		if len(kept) == len(registry.Registrations) {
+			return nil
+		}
+		registry.Registrations = kept
+		return s.writeAtomic(registry)
+	})
+}
+
 func (s agentRegistryStore) writeAtomic(registry AgentRegistryV1) error {
 	payload, err := json.MarshalIndent(registry, "", "  ")
 	if err != nil {
