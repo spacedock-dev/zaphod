@@ -83,6 +83,14 @@ assert_attempts 2 empty-wrong-action-recovery
 grep -F 'stdout_len=0' "$ROOT/error" >/dev/null || fail "empty recovery omitted bounded provenance"
 
 reset_case
+: > "$ROOT/reply-1.stdout"
+cp "$MISSING" "$ROOT/reply-2.stdout"
+zaphod_capture_validated_layout "$VALIDATOR" "$EXPECTED" absent "$PANES_ABSENT" \
+    "$ROOT/accepted.kdl" fake_dump 2> "$ROOT/error" || fail "absent-state empty wrong-action did not recover"
+assert_attempts 2 absent-empty-wrong-action-recovery
+cmp "$MISSING" "$ROOT/accepted.kdl" || fail "absent-state recovery published the wrong reply"
+
+reset_case
 for attempt in 1 2 3; do cp "$MISSING" "$ROOT/reply-$attempt.stdout"; done
 set +e
 zaphod_capture_validated_layout "$VALIDATOR" "$EXPECTED" present "$PANES_PRESENT" \
