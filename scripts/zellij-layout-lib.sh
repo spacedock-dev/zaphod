@@ -107,9 +107,9 @@ zaphod_panes_prove_layout_expectation() {
 
 # Capture one native dump-layout record, validate its entire KDL syntax and
 # Zaphod identity, then atomically publish it. A valid stale identity or a
-# empty or complete JSON-array wrong-action may retry only when the
-# authoritative pane inventory already proves the exact candidate. All other
-# failures are final.
+# A status-0 empty wrong-action may retry when the authoritative pane inventory
+# proves either requested state. Stale identity and complete JSON wrong-action
+# retries still require the exact candidate. All other failures are final.
 zaphod_capture_validated_layout() {
     local validator="$1"
     local expected_url="$2"
@@ -153,11 +153,13 @@ zaphod_capture_validated_layout() {
             "$command_status" "$attempt_file" "$stderr_file"); \
 $(zaphod_bounded_reply_provenance validator "$validator_status" "$empty_file" "$validator_stderr")"
         retryable=0
-        if [ "$expectation" = present ]; then
+        if [ "$validator_status" -eq 20 ] && [ ! -s "$attempt_file" ]; then
+            retryable=1
+        elif [ "$expectation" = present ]; then
             if [ "$validator_status" -eq 21 ]; then
                 retryable=1
             elif [ "$validator_status" -eq 20 ]; then
-                if [ ! -s "$attempt_file" ] || jq -e 'type == "array"' "$attempt_file" >/dev/null 2>&1; then
+                if jq -e 'type == "array"' "$attempt_file" >/dev/null 2>&1; then
                     retryable=1
                 fi
             fi
