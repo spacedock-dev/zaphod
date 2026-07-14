@@ -1,6 +1,6 @@
 #!/bin/bash
-# ABOUTME: Proves the trusted repo-local Codex hook invokes this checkout's registrar.
-# ABOUTME: Uses an isolated registry and never mutates the operator's Codex configuration.
+# ABOUTME: Proves the repo-local Codex hook is a transparent tab-watcher bridge.
+# ABOUTME: Outside Zellij it is a no-op even before the selected binary exists.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
@@ -12,10 +12,6 @@ fail() {
     exit 1
 }
 
-cd "$REPO_ROOT/grout"
-mkdir -p "$REPO_ROOT/target"
-go build -o "$REPO_ROOT/target/zaphod" .
-
 jq -e '
     .hooks.SessionStart == [{
       "matcher": "startup|resume",
@@ -23,37 +19,36 @@ jq -e '
     }]
 ' "$REPO_ROOT/.codex/hooks.json" >/dev/null || fail "project hook is not the exact startup/resume command"
 
-SESSION_ID=019f5f94-a596-7d92-9928-398653669161
-printf '%s\n' "{\"session_id\":\"$SESSION_ID\",\"transcript_path\":null,\"cwd\":\"/wrong/same/cwd\",\"hook_event_name\":\"SessionStart\",\"model\":\"gpt-5.6\",\"permission_mode\":\"default\",\"source\":\"startup\"}" |
-    ZAPHOD_REGISTRY_DIR="$ROOT/registry" \
-    ZELLIJ_SESSION_NAME=managed \
-    ZELLIJ_PANE_ID=7 \
+PAYLOAD='{"session_id":"019f5f94-a596-7d92-9928-398653669161","transcript_path":null,"cwd":"/same/cwd","hook_event_name":"SessionStart","model":"gpt-5.6","permission_mode":"default","source":"startup"}'
+printf '%s\n' "$PAYLOAD" |
+    ZAPHOD_BIN="$ROOT/not-built" "$REPO_ROOT/scripts/zaphod-codex-session-hook.sh" ||
+    fail "outside-Zellij hook required a built receiver"
+
+cat > "$ROOT/zaphod" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+printf '%s\n' "$@" > "$CAPTURE_ARGS"
+printf '%s\n%s\n' "$ZELLIJ_SESSION_NAME" "$ZELLIJ_PANE_ID" > "$CAPTURE_IDENTITY"
+cat > "$CAPTURE_STDIN"
+EOF
+chmod +x "$ROOT/zaphod"
+
+printf '%s\n' "$PAYLOAD" |
+    CAPTURE_ARGS="$ROOT/args" CAPTURE_IDENTITY="$ROOT/identity" CAPTURE_STDIN="$ROOT/stdin" \
+    ZAPHOD_BIN="$ROOT/zaphod" ZELLIJ_SESSION_NAME=managed ZELLIJ_PANE_ID=7 \
     "$REPO_ROOT/scripts/zaphod-codex-session-hook.sh"
 
-REGISTRY="$(find "$ROOT/registry" -name 'session-*.json' -type f -maxdepth 1)"
-[ -n "$REGISTRY" ] || fail "hook did not create a registry generation"
-jq -e --arg id "$SESSION_ID" '
-    .version == 1 and
-    .zellij_session == "managed" and
-    .registrations == [{
-      "zellij_session": "managed",
-      "pane_id": 7,
-      "agent": "codex",
-      "agent_session_id": $id,
-      "agentsview_session_id": ("codex:" + $id),
-      "pid": .registrations[0].pid,
-      "updated_at": .registrations[0].updated_at
-    }]
-' "$REGISTRY" >/dev/null || fail "hook record did not retain exact provider and pane identity"
+[ "$(cat "$ROOT/args")" = register-agent-session ] || fail "hook did not invoke the watcher registrar"
+[ "$(sed -n '1p' "$ROOT/identity")" = managed ] || fail "hook lost the Zellij session"
+[ "$(sed -n '2p' "$ROOT/identity")" = 7 ] || fail "hook lost the terminal pane"
+[ "$(cat "$ROOT/stdin")" = "$PAYLOAD" ] || fail "hook changed the complete SessionStart record"
 
-before="$(shasum -a 256 "$REGISTRY")"
-printf '%s\n' '{"session_id":"019f5f95-bbfd-7993-8620-0d698008217f","hook_event_name":"SubagentStart","source":"startup"}' |
-    ZAPHOD_REGISTRY_DIR="$ROOT/registry" \
-    ZELLIJ_SESSION_NAME=managed \
-    ZELLIJ_PANE_ID=7 \
-    "$REPO_ROOT/target/zaphod" register-agent-session >/dev/null 2>&1 &&
-    fail "SubagentStart unexpectedly registered"
-after="$(shasum -a 256 "$REGISTRY")"
-[ "$before" = "$after" ] || fail "rejected child input changed the registry"
+set +e
+printf '%s\n' "$PAYLOAD" |
+    ZAPHOD_BIN="$ROOT/not-built" ZELLIJ_SESSION_NAME=managed \
+    "$REPO_ROOT/scripts/zaphod-codex-session-hook.sh" >/dev/null 2>&1
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "partial Zellij identity became an outside-Zellij no-op"
 
-echo "PASS: repo-local Codex hook registered one exact top-level session and rejected child input"
+echo "PASS: Codex hook is an exact watcher bridge and an outside-Zellij no-op"
