@@ -1,7 +1,7 @@
 ---
 id: 441wyy3208egsxq5az3yfzy1
 title: Five-second scrollback lookup must not congest Zellij
-status: ideation
+status: implementation
 source: live nautical-cuckoo diagnosis 2026-07-14
 sprint: s1-managed-tab-safety
 group: release-blocking-hotfix
@@ -10,7 +10,7 @@ started: 2026-07-14T05:54:11Z
 completed:
 verdict:
 score: 1.0
-worktree:
+worktree: .worktrees/spacedock-ensign-sidebar-scrollback-timeout-congestion
 issue:
 pr:
 mod-block:
