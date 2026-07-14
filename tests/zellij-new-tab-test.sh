@@ -37,11 +37,7 @@ write_fake_build() {
         'printf "%s\\n" "$0" > "$BUILD_LOG"' \
         'mkdir -p "$(dirname "$0")/target/wasm32-wasip1/release"' \
         'printf "fixture wasm\\n" > "$(dirname "$0")/target/wasm32-wasip1/release/zellij-sidebar.wasm"' \
-        'if [ "${FAKE_SIDECAR_EXEC_FAILURE:-}" = 1 ]; then' \
-        '    printf "%s\\n" "#!/definitely/missing-zaphod-interpreter" > "$(dirname "$0")/target/zaphod"' \
-        'else' \
-        '    printf "%s\\n" "#!/bin/bash" "set -euo pipefail" "startup_fd=\"\"" "previous=\"\"" "for arg in \"\$@\"; do" "    if [ \"\$previous\" = --startup-fd ]; then startup_fd=\"\$arg\"; fi" "    previous=\"\$arg\"" "done" "[ -n \"\$startup_fd\" ]" "printf '\''%s\\n'\'' \"\$\$\" > \"\$FAKE_SIDECAR_PID_FILE\"" "if [ \"\${FAKE_SIDECAR_HANG_STARTUP:-}\" = 1 ]; then" "    trap '\''exit 0'\'' TERM INT" "    while :; do sleep 1; done" "fi" "printf '\''ready\\n'\'' >&\"\$startup_fd\"" "printf '\''%s\\n'\'' \"\$@\" > \"\$FAKE_SIDECAR_ARGV\"" "trap '\''exit 0'\'' TERM INT" "while :; do sleep 1; done" > "$(dirname "$0")/target/zaphod"' \
-        'fi' \
+        'printf "%s\\n" "#!/bin/bash" "printf '\''%s\\n'\'' \"\$@\" >> \"\$FAKE_ZAPHOD_CALLS\"" "exit 99" > "$(dirname "$0")/target/zaphod"' \
         'chmod +x "$(dirname "$0")/target/zaphod"' \
         > "$fixture/build.sh"
     chmod +x "$fixture/build.sh"
@@ -109,7 +105,7 @@ write_fake_zellij() {
         '            printf "%s\\n" "$name" > "$FAKE_ZELLIJ_NAME"' \
         '            printf "%s" "$2" > "$FAKE_ZELLIJ_LAYOUT"' \
         '            shift 2' \
-        '            [ "${1:-}" = -- ] && [ "$#" -eq 5 ] || exit 64' \
+        '            [ "${1:-}" = -- ] && [ "$#" -ge 4 ] || exit 64' \
         '            [ -z "${FAKE_ZELLIJ_COMMAND:-}" ] || printf "%s\\n" "$@" > "$FAKE_ZELLIJ_COMMAND"' \
         '            count=0' \
         '            [ ! -f "$FAKE_ZELLIJ_NEW_TAB_COUNT" ] || count="$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")"' \
@@ -178,8 +174,7 @@ setup_fixture() {
     FAKE_ZELLIJ_LIST_TABS_COUNT="$root/fake-list-tabs-count"
     FAKE_ZELLIJ_PANES="$root/fake-panes.json"
     FAKE_ZELLIJ_TABS="$root/fake-tabs.json"
-    FAKE_SIDECAR_ARGV="$root/fake-sidecar-argv"
-    FAKE_SIDECAR_PID_FILE="$root/fake-sidecar-pid"
+    FAKE_ZAPHOD_CALLS="$root/fake-zaphod-calls"
 
     mkdir -p "$FIXTURE/scripts" "$FIXTURE/layouts" \
         "$FIXTURE_CONFIG_DIR/layouts" "$(dirname "$FIXTURE_CONFIG_FILE")" \
@@ -212,12 +207,11 @@ run_entry() {
         FAKE_ZELLIJ_LIST_TABS_COUNT="$FAKE_ZELLIJ_LIST_TABS_COUNT" \
         FAKE_ZELLIJ_PANES="$FAKE_ZELLIJ_PANES" \
         FAKE_ZELLIJ_TABS="$FAKE_ZELLIJ_TABS" \
-        FAKE_SIDECAR_ARGV="$FAKE_SIDECAR_ARGV" \
-        FAKE_SIDECAR_PID_FILE="$FAKE_SIDECAR_PID_FILE" \
+        FAKE_ZAPHOD_CALLS="$FAKE_ZAPHOD_CALLS" \
         ZELLIJ_CONFIG_DIR="$FIXTURE_CONFIG_DIR" \
         ZELLIJ_CONFIG_FILE="$FIXTURE_CONFIG_FILE" \
         ZELLIJ_DATA_DIR="$FIXTURE_DATA_DIR" \
-        ZAPHOD_REGISTRY_DIR="$FIXTURE_DATA_DIR/agent-sessions-v1" \
+        ZAPHOD_WATCH_DIR="$FIXTURE_DATA_DIR/watch-tab-v1" \
         SHELL=/bin/sh \
         TMPDIR="$FIXTURE_TMP" \
         "$FIXTURE/scripts/zellij-new-tab.sh" "$@"
@@ -250,37 +244,24 @@ assert_temporary_files_cleaned() {
     fi
 }
 
-assert_private_sidecar_started() {
-    local expected_url="$1" expected="$TEST_ROOT/expected-sidecar-argv" sidecar_pid recipient_token
-    for _attempt in $(seq 1 100); do
-        [ ! -e "$FAKE_SIDECAR_ARGV" ] || break
-        sleep 0.05
-    done
-    [ -f "$FAKE_SIDECAR_ARGV" ] || fail "entry point did not start its private sidecar"
+assert_manual_watcher_route() {
+    local expected_url="$1" recipient_token
     recipient_token="$(sed -n 's/.*recipient_token "\([^"]*\)".*/\1/p' "$FAKE_ZELLIJ_LAYOUT" | head -1)"
     [ -n "$recipient_token" ] || fail "inline layout did not carry a recipient token"
-    printf '%s\n' \
-        subscribe --server http://127.0.0.1:8080 \
-        --zellij-bin zellij \
-        --zellij-config-dir "$FIXTURE_CONFIG_DIR" \
-        --zellij-config "$FIXTURE_CONFIG_FILE" \
-        --zellij-data-dir "$FIXTURE_DATA_DIR" \
-        --zellij-session WORK \
-        --tab-id 73 \
-        --rail-url "$expected_url" \
-        --checkout-cwd "$FIXTURE_PHYSICAL" \
-        --recipient-token "$recipient_token" \
-		--registry-dir "$FIXTURE_DATA_DIR/agent-sessions-v1" \
-        --startup-fd 3 > "$expected"
-    diff -u "$expected" "$FAKE_SIDECAR_ARGV" >&2 ||
-        fail "private sidecar did not receive the exact verified profile/tab/rail tuple"
-    sidecar_pid="$(cat "$FAKE_SIDECAR_PID_FILE")"
-    kill -TERM "$sidecar_pid" 2>/dev/null || true
-    for _attempt in $(seq 1 100); do
-        kill -0 "$sidecar_pid" 2>/dev/null || return 0
-        sleep 0.05
+    for route in \
+        "ZAPHOD_WATCH_DIR=$FIXTURE_DATA_DIR/watch-tab-v1" \
+        "ZAPHOD_AGENTSVIEW_URL=http://127.0.0.1:8080" \
+        "ZAPHOD_RAIL_URL=$expected_url" \
+        "ZAPHOD_RECIPIENT_TOKEN=$recipient_token" \
+        "ZAPHOD_ZELLIJ_CONFIG_DIR=$FIXTURE_CONFIG_DIR" \
+        "ZAPHOD_ZELLIJ_CONFIG_FILE=$FIXTURE_CONFIG_FILE" \
+        "ZAPHOD_ZELLIJ_DATA_DIR=$FIXTURE_DATA_DIR" \
+        "ZELLIJ_BIN=zellij"; do
+        grep -Fx "$route" "$FAKE_ZELLIJ_COMMAND" >/dev/null || fail "managed terminal omitted $route"
     done
-    fail "successful fixture sidecar did not stop after the assertion"
+    [ "$(tail -n 2 "$FAKE_ZELLIJ_COMMAND" | head -n 1)" = /bin/sh ] ||
+        fail "managed terminal did not preserve the selected shell"
+    [ ! -e "$FAKE_ZAPHOD_CALLS" ] || fail "direct entry unexpectedly started a watcher"
 }
 
 test_selected_checkout_creates_one_inline_tab_without_writes() {
@@ -299,20 +280,18 @@ test_selected_checkout_creates_one_inline_tab_without_writes() {
         fail "entry point did not build the selected checkout"
     grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "entry point did not report stable tab ID"
     grep -Fx "WASM_URL=$expected_url" "$FIXTURE_OUTPUT" >/dev/null || fail "entry point did not report selected URL"
-    grep -Eq '^SIDECAR_PID=[1-9][0-9]*$' "$FIXTURE_OUTPUT" || fail "entry point did not report sidecar PID"
+    grep -Fx "WATCH_DIR=$FIXTURE_DATA_DIR/watch-tab-v1" "$FIXTURE_OUTPUT" >/dev/null || fail "entry point did not report watch root"
+    grep -Fx "WATCH_COMMAND=$FIXTURE_PHYSICAL/target/zaphod watch-tab" "$FIXTURE_OUTPUT" >/dev/null || fail "entry point did not report manual watcher command"
     [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = 1 ] || fail "entry point did not create exactly one tab"
     [ "$(cat "$FAKE_ZELLIJ_SESSION")" = WORK ] || fail "new-tab used the wrong session"
     [ "$(cat "$FAKE_ZELLIJ_NAME")" = 'Zaphod fixture' ] || fail "new-tab used the wrong name"
     [ "$(cat "$FAKE_ZELLIJ_CWD")" = "$FIXTURE_PHYSICAL" ] || fail "new-tab used the wrong cwd"
     [ -f "$FAKE_ZELLIJ_COMMAND" ] || fail "new-tab did not pass a managed shell command"
-    sed -n '3p' "$FAKE_ZELLIJ_COMMAND" | grep -Fx "ZAPHOD_REGISTRY_DIR=$FIXTURE_DATA_DIR/agent-sessions-v1" >/dev/null ||
-        fail "managed terminal did not inherit the sidecar registry root"
-    [ "$(sed -n '4p' "$FAKE_ZELLIJ_COMMAND")" = /bin/sh ] || fail "managed terminal did not preserve the selected shell"
-    grep -Fx $'focus-pane-id\tWORK\tplugin_50' "$FAKE_ZELLIJ_CALLS" >/dev/null ||
-        fail "entry point did not expose the exact verified plugin pane"
+    ! grep -F $'focus-pane-id\t' "$FAKE_ZELLIJ_CALLS" >/dev/null ||
+        fail "entry point moved focus away from the selected terminal"
     grep -F "plugin location=\"$expected_url\"" "$FAKE_ZELLIJ_LAYOUT" >/dev/null ||
         fail "inline layout did not contain selected checkout URL"
-    assert_private_sidecar_started "$expected_url"
+    assert_manual_watcher_route "$expected_url"
     assert_standing_kdl_unchanged
     assert_temporary_files_cleaned
     [ ! -e "$FIXTURE/scripts/zellij-config-activate.awk" ] || fail "fixture unexpectedly supplied AWK transformer"
@@ -366,7 +345,7 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged() {
         "FAKE_ZELLIJ_LAYOUT=$FAKE_ZELLIJ_LAYOUT" \
         "FAKE_ZELLIJ_NEW_TAB_COUNT=$FAKE_ZELLIJ_NEW_TAB_COUNT" "FAKE_ZELLIJ_PANES=$FAKE_ZELLIJ_PANES" \
         "FAKE_ZELLIJ_TABS=$FAKE_ZELLIJ_TABS" \
-        "FAKE_SIDECAR_ARGV=$FAKE_SIDECAR_ARGV" "FAKE_ZELLIJ_READY_FILE=$ready" \
+        "FAKE_ZAPHOD_CALLS=$FAKE_ZAPHOD_CALLS" "FAKE_ZELLIJ_READY_FILE=$ready" \
         "FAKE_ZELLIJ_RELEASE_FILE=$release" "ZELLIJ_CONFIG_DIR=$FIXTURE_CONFIG_DIR" \
         "ZELLIJ_CONFIG_FILE=$FIXTURE_CONFIG_FILE" "ZELLIJ_DATA_DIR=$FIXTURE_DATA_DIR" \
         "TMPDIR=$FIXTURE_TMP" "$FIXTURE/scripts/zellij-new-tab.sh" --session WORK \
@@ -390,7 +369,7 @@ test_term_during_new_tab_leaves_standing_kdl_unchanged() {
     echo "PASS: TERM during new-tab leaves standing KDL unchanged"
 }
 
-test_unready_resident_starts_no_sidecar() {
+test_unready_resident_reports_missing_rail() {
     local root status
     root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
     TEST_ROOT="$root"
@@ -401,70 +380,10 @@ test_unready_resident_starts_no_sidecar() {
     status=$?
     set -e
     [ "$status" -ne 0 ] || fail "unready resident unexpectedly succeeded"
-    grep -F 'sidecar-target-unready:' "$FIXTURE_ERROR" >/dev/null || fail "missing unready error"
+    grep -F 'rail-target-unready:' "$FIXTURE_ERROR" >/dev/null || fail "missing unready error"
     [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = 1 ] || fail "unready path changed tab count"
-    [ ! -e "$FAKE_SIDECAR_ARGV" ] || fail "unready path started sidecar"
     assert_standing_kdl_unchanged
-    echo "PASS: unready resident preserves tab and starts no sidecar"
-}
-
-test_sidecar_exec_failure_is_visible() {
-    local root status
-    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
-    TEST_ROOT="$root"
-    setup_fixture "$root"
-    set +e
-    FAKE_SIDECAR_EXEC_FAILURE=1 run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
-    status=$?
-    set -e
-    [ "$status" -ne 0 ] || fail "sidecar exec failure unexpectedly succeeded"
-    grep -F sidecar-start-failed "$FIXTURE_ERROR" >/dev/null || fail "sidecar exec failure was hidden"
-    [ "$(cat "$FAKE_ZELLIJ_NEW_TAB_COUNT")" = 1 ] || fail "sidecar failure changed tab count"
-    assert_standing_kdl_unchanged
-    echo "PASS: sidecar exec failure is visible and preserves standing KDL"
-}
-
-test_sidecar_stream_timeout_reaps_process() {
-    local root status sidecar_pid leaked=0
-    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
-    TEST_ROOT="$root"
-    setup_fixture "$root"
-    set +e
-    FAKE_SIDECAR_HANG_STARTUP=1 ZAPHOD_SIDECAR_START_TIMEOUT=1 \
-        run_entry --session WORK > "$FIXTURE_OUTPUT" 2> "$FIXTURE_ERROR"
-    status=$?
-    set -e
-    [ "$status" -ne 0 ] || fail "sidecar stream timeout unexpectedly succeeded"
-    grep -F 'did not establish the AgentsView stream' "$FIXTURE_ERROR" >/dev/null ||
-        fail "sidecar stream timeout was hidden"
-    sidecar_pid="$(cat "$FAKE_SIDECAR_PID_FILE")"
-    if kill -0 "$sidecar_pid" 2>/dev/null; then
-        leaked=1
-        kill -TERM "$sidecar_pid" 2>/dev/null || true
-    fi
-    [ "$leaked" -eq 0 ] || fail "sidecar stream timeout left process $sidecar_pid running"
-    assert_standing_kdl_unchanged
-    echo "PASS: sidecar stream timeout terminates and reaps its process"
-}
-
-test_failed_tuple_handoff_reaps_ready_sidecar() {
-    local root status sidecar_pid
-    root="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab-test.XXXXXX")"
-    TEST_ROOT="$root"
-    setup_fixture "$root"
-    set +e
-    run_entry --session WORK 1>&- 2> "$FIXTURE_ERROR"
-    status=$?
-    set -e
-    [ "$status" -ne 0 ] || fail "partial tuple handoff unexpectedly succeeded"
-    sidecar_pid="$(cat "$FAKE_SIDECAR_PID_FILE")"
-    for _attempt in $(seq 1 100); do
-        kill -0 "$sidecar_pid" 2>/dev/null || break
-        sleep 0.05
-    done
-    ! kill -0 "$sidecar_pid" 2>/dev/null || fail "failed tuple handoff left process $sidecar_pid running"
-    assert_standing_kdl_unchanged
-    echo "PASS: failed tuple handoff terminates and reaps its ready sidecar"
+    echo "PASS: unready resident preserves tab and reports missing rail"
 }
 
 test_empty_new_tab_stdout_uses_inventory_stable_id() {
@@ -482,7 +401,7 @@ test_empty_new_tab_stdout_uses_inventory_stable_id() {
 
     grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null ||
         fail "inventory discovery did not report stable tab ID 73"
-    assert_private_sidecar_started "$expected_url"
+    assert_manual_watcher_route "$expected_url"
     assert_standing_kdl_unchanged
     assert_temporary_files_cleaned
     echo "PASS: empty new-tab stdout uses stable inventory identity"
@@ -504,7 +423,7 @@ test_empty_initial_tab_inventory_retries_before_creation() {
     [ "$(cat "$FAKE_ZELLIJ_LIST_TABS_COUNT")" -ge 3 ] ||
         fail "empty initial inventory was not retried before post-create discovery"
     grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "inventory retry lost stable tab identity"
-    assert_private_sidecar_started "$expected_url"
+    assert_manual_watcher_route "$expected_url"
     assert_standing_kdl_unchanged
     assert_temporary_files_cleaned
     echo "PASS: empty initial tab inventory retries before creation"
@@ -526,7 +445,7 @@ test_empty_array_initial_tab_inventory_retries_before_creation() {
     [ "$(cat "$FAKE_ZELLIJ_LIST_TABS_COUNT")" -ge 3 ] ||
         fail "empty-array initial inventory was not retried before post-create discovery"
     grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "empty-array retry lost stable tab identity"
-    assert_private_sidecar_started "$expected_url"
+    assert_manual_watcher_route "$expected_url"
     assert_standing_kdl_unchanged
     assert_temporary_files_cleaned
     echo "PASS: empty-array initial tab inventory retries before creation"
@@ -550,7 +469,7 @@ test_inside_caller_identity_is_cleared_before_native_entry_calls() {
     grep -F $'setup\t' "$FAKE_ZELLIJ_CALLS" | grep -F $'client=\tsession=\tpane=' >/dev/null ||
         fail "setup check inherited loaded Zellij client identity"
     grep -Fx 'TAB_ID=73' "$FIXTURE_OUTPUT" >/dev/null || fail "inside caller lost stable tab identity"
-    assert_private_sidecar_started "$expected_url"
+    assert_manual_watcher_route "$expected_url"
     assert_standing_kdl_unchanged
     assert_temporary_files_cleaned
     echo "PASS: inside caller identity is cleared before native entry calls"
@@ -573,7 +492,7 @@ test_ambiguous_tab_discovery_reports_bounded_native_provenance() {
     set -e
 
     [ "$status" -ne 0 ] || fail "ambiguous tab discovery unexpectedly succeeded"
-    grep -F 'sidecar-target-unready: new-tab status=0' "$FIXTURE_ERROR" >/dev/null ||
+    grep -F 'rail-target-unready: new-tab status=0' "$FIXTURE_ERROR" >/dev/null ||
         fail "ambiguous discovery omitted new-tab status provenance"
     grep -F "stdout_len=${#stdout_payload}" "$FIXTURE_ERROR" >/dev/null ||
         fail "ambiguous discovery omitted stdout length"
@@ -626,10 +545,7 @@ test_selected_checkout_creates_one_inline_tab_without_writes
 test_setup_failure_stops_before_new_tab
 test_new_tab_failure_leaves_standing_kdl_unchanged
 test_term_during_new_tab_leaves_standing_kdl_unchanged
-test_unready_resident_starts_no_sidecar
-test_sidecar_exec_failure_is_visible
-test_sidecar_stream_timeout_reaps_process
-test_failed_tuple_handoff_reaps_ready_sidecar
+test_unready_resident_reports_missing_rail
 test_empty_new_tab_stdout_uses_inventory_stable_id
 test_empty_initial_tab_inventory_retries_before_creation
 test_empty_array_initial_tab_inventory_retries_before_creation

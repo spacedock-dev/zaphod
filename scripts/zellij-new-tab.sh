@@ -25,7 +25,6 @@ fail() {
 SESSION_NAME="${ZELLIJ_SESSION_NAME:-}"
 TAB_NAME="Zaphod"
 AGENTSVIEW_URL="${ZAPHOD_AGENTSVIEW_URL:-http://127.0.0.1:8080}"
-SIDECAR_START_TIMEOUT="${ZAPHOD_SIDECAR_START_TIMEOUT:-30}"
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --session)
@@ -53,13 +52,11 @@ while [ "$#" -gt 0 ]; do
 done
 
 # The requested/default session has been resolved. Loaded-pane client identity
-# must not steer version, setup, inventory, creation, or sidecar child calls.
+# must not steer version, setup, inventory, creation, or watcher route injection.
 unset ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID
 
 [ -n "$SESSION_NAME" ] ||
     fail "a Zellij session is required; pass --session NAME or set ZELLIJ_SESSION_NAME"
-[[ "$SIDECAR_START_TIMEOUT" =~ ^[1-9][0-9]*$ ]] ||
-    fail "ZAPHOD_SIDECAR_START_TIMEOUT must be a positive integer"
 
 ZELLIJ_ROOT="${ZELLIJ_CONFIG_DIR:-$HOME/.config/zellij}"
 CONFIG_FILE="${ZELLIJ_CONFIG_FILE:-$ZELLIJ_ROOT/config.kdl}"
@@ -76,16 +73,16 @@ default_zellij_data_dir() {
 
 DATA_DIR="${ZELLIJ_DATA_DIR:-$(default_zellij_data_dir)}"
 ZELLIJ_BIN="${ZELLIJ_BIN:-zellij}"
-if [ -n "${ZAPHOD_REGISTRY_DIR:-}" ]; then
-	REGISTRY_DIR="$ZAPHOD_REGISTRY_DIR"
+if [ -n "${ZAPHOD_WATCH_DIR:-}" ]; then
+	WATCH_DIR="$ZAPHOD_WATCH_DIR"
 elif [ -n "${XDG_RUNTIME_DIR:-}" ]; then
-	REGISTRY_DIR="$XDG_RUNTIME_DIR/zaphod/agent-sessions-v1"
+	WATCH_DIR="$XDG_RUNTIME_DIR/zaphod/watch-tab-v1"
 else
-	REGISTRY_DIR="${TMPDIR:-/tmp}/zaphod-agent-sessions-v1-$(id -u)"
+	WATCH_DIR="/tmp/zaphod-watch-tab-v1-$(id -u)"
 fi
-case "$REGISTRY_DIR" in
+case "$WATCH_DIR" in
     /*) ;;
-    *) fail "ZAPHOD_REGISTRY_DIR must be absolute" ;;
+    *) fail "ZAPHOD_WATCH_DIR must be absolute" ;;
 esac
 MANAGED_SHELL="${SHELL:-/bin/sh}"
 [ -x "$MANAGED_SHELL" ] || fail "managed shell is not executable: $MANAGED_SHELL"
@@ -136,25 +133,12 @@ capture_initial_tab_inventory() {
 
 TEMP_ROOT=""
 RECIPIENT_TOKEN=""
-SIDECAR_PID=""
-SIDECAR_HANDED_OFF=0
-SIDECAR_START_FIFO=""
-SIDECAR_TARGET_PANE_ID=""
-
-stop_unready_sidecar() {
-    [ "$SIDECAR_HANDED_OFF" -eq 0 ] || return 0
-    [ -n "$SIDECAR_PID" ] || return 0
-    kill -TERM "$SIDECAR_PID" 2>/dev/null || true
-    wait "$SIDECAR_PID" 2>/dev/null || true
-}
 
 cleanup() {
     local original_status=$?
     local cleanup_status=0
     trap - EXIT INT TERM HUP
     set +e
-    stop_unready_sidecar
-    [ -z "$SIDECAR_START_FIFO" ] || rm -f "$SIDECAR_START_FIFO" || cleanup_status=1
     [ -z "$TEMP_ROOT" ] || rm -rf "$TEMP_ROOT" || cleanup_status=1
     if [ "$cleanup_status" -ne 0 ]; then
         echo "failed to clean up the temporary Zaphod layout" >&2
@@ -189,12 +173,12 @@ fi
 
 WASM_PATH="$REPO_ROOT/target/wasm32-wasip1/release/zellij-sidebar.wasm"
 [ -f "$WASM_PATH" ] || fail "wasm not found after build: $WASM_PATH"
-SIDECAR_PATH="$REPO_ROOT/target/zaphod"
-[ -x "$SIDECAR_PATH" ] || fail "zaphod sidecar not found after build: $SIDECAR_PATH"
+ZAPHOD_PATH="$REPO_ROOT/target/zaphod"
+[ -x "$ZAPHOD_PATH" ] || fail "zaphod native binary not found after build: $ZAPHOD_PATH"
 WASM_URL="$(zaphod_canonical_file_url "$WASM_PATH")" ||
     fail "could not derive a canonical URL for $WASM_PATH"
 
-sidecar_target_pane_id() {
+rail_target_pane_id() {
     local panes candidate_id
     panes="$(ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
         action list-panes --json --all --command --geometry --state --tab 2>/dev/null)" ||
@@ -217,66 +201,15 @@ sidecar_target_pane_id() {
     esac
 }
 
-wait_for_sidecar_target() {
-    local attempt candidate_id
+wait_for_rail_target() {
+    local attempt
     for attempt in $(seq 1 80); do
-        if candidate_id="$(sidecar_target_pane_id)"; then
-            SIDECAR_TARGET_PANE_ID="$candidate_id"
+        if rail_target_pane_id >/dev/null; then
             return 0
         fi
         sleep 0.05
     done
     return 1
-}
-
-focus_sidecar_target() {
-    [ -n "$SIDECAR_TARGET_PANE_ID" ] || return 1
-    ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" \
-        action focus-pane-id "$SIDECAR_TARGET_PANE_ID"
-}
-
-start_private_sidecar() {
-    local start_status startup_message startup_status
-    mkdir -p "$DATA_DIR" ||
-        fail "sidecar-start-failed: could not create private sidecar directory"
-    SIDECAR_LOG="$(mktemp "$DATA_DIR/zaphod-sidecar.XXXXXX")" ||
-        fail "sidecar-start-failed: could not create private sidecar log"
-    SIDECAR_START_FIFO="$(mktemp "$DATA_DIR/zaphod-sidecar-start.XXXXXX")" ||
-        fail "sidecar-start-failed: could not create private sidecar startup path"
-    rm -f "$SIDECAR_START_FIFO"
-    mkfifo "$SIDECAR_START_FIFO" ||
-        fail "sidecar-start-failed: could not create private sidecar startup path"
-    set +e
-    nohup "$SIDECAR_PATH" subscribe \
-        --server "$AGENTSVIEW_URL" \
-        --zellij-bin "$ZELLIJ_BIN" \
-        --zellij-config-dir "$ZELLIJ_ROOT" \
-        --zellij-config "$CONFIG_FILE" \
-        --zellij-data-dir "$DATA_DIR" \
-        --zellij-session "$SESSION_NAME" \
-        --tab-id "$TAB_ID" \
-        --rail-url "$WASM_URL" \
-        --checkout-cwd "$REPO_ROOT" \
-        --recipient-token "$RECIPIENT_TOKEN" \
-		--registry-dir "$REGISTRY_DIR" \
-        --startup-fd 3 \
-        3>"$SIDECAR_START_FIFO" </dev/null >>"$SIDECAR_LOG" 2>&1 &
-    start_status=$?
-    SIDECAR_PID=$!
-    set -e
-    if [ "$start_status" -ne 0 ]; then
-        fail "sidecar-start-failed: could not launch private zaphod sidecar"
-    fi
-    set +e
-    IFS= read -r -t "$SIDECAR_START_TIMEOUT" startup_message < "$SIDECAR_START_FIFO"
-    startup_status=$?
-    set -e
-    rm -f "$SIDECAR_START_FIFO"
-    SIDECAR_START_FIFO=""
-    if [ "$startup_status" -ne 0 ] || [ "$startup_message" != "ready" ]; then
-        sed -n '1,20p' "$SIDECAR_LOG" >&2 || true
-        fail "sidecar-start-failed: private zaphod sidecar did not establish the AgentsView stream"
-    fi
 }
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/zaphod-new-tab.XXXXXX")" ||
@@ -296,7 +229,16 @@ capture_initial_tab_inventory "$TABS_BEFORE" "$TABS_BEFORE_STDERR" || exit 1
 set +e
 ZELLIJ_SESSION_NAME="$SESSION_NAME" zellij_cmd --session "$SESSION_NAME" action new-tab \
     --name "$TAB_NAME" --cwd "$REPO_ROOT" --layout-string "$(cat "$RENDERED_LAYOUT")" \
-    -- "$ENV_BIN" "ZAPHOD_REGISTRY_DIR=$REGISTRY_DIR" "$MANAGED_SHELL" -l \
+    -- "$ENV_BIN" \
+    "ZAPHOD_WATCH_DIR=$WATCH_DIR" \
+    "ZAPHOD_AGENTSVIEW_URL=$AGENTSVIEW_URL" \
+    "ZAPHOD_RAIL_URL=$WASM_URL" \
+    "ZAPHOD_RECIPIENT_TOKEN=$RECIPIENT_TOKEN" \
+    "ZAPHOD_ZELLIJ_CONFIG_DIR=$ZELLIJ_ROOT" \
+    "ZAPHOD_ZELLIJ_CONFIG_FILE=$CONFIG_FILE" \
+    "ZAPHOD_ZELLIJ_DATA_DIR=$DATA_DIR" \
+    "ZELLIJ_BIN=$ZELLIJ_BIN" \
+    "$MANAGED_SHELL" -l \
     > "$NEW_TAB_STDOUT" 2> "$NEW_TAB_STDERR"
 NEW_TAB_STATUS=$?
 set -e
@@ -322,21 +264,17 @@ for _attempt in $(seq 1 80); do
     sleep 0.05
 done
 if ! [[ "$TAB_ID" =~ ^(0|[1-9][0-9]*)$ ]]; then
-    printf 'sidecar-target-unready: %s; %s\n' \
+    printf 'rail-target-unready: %s; %s\n' \
         "$(zaphod_bounded_reply_provenance new-tab "$NEW_TAB_STATUS" "$NEW_TAB_STDOUT" "$NEW_TAB_STDERR")" \
         "$(zaphod_bounded_reply_provenance list-tabs-after "$TABS_AFTER_STATUS" "$TABS_AFTER" "$TABS_AFTER_STDERR")" >&2
     exit 1
 fi
-if ! wait_for_sidecar_target; then
-    echo "sidecar-target-unready: stable tab $TAB_ID did not expose exactly one candidate rail" >&2
+if ! wait_for_rail_target; then
+    echo "rail-target-unready: stable tab $TAB_ID did not expose exactly one candidate rail" >&2
     exit 1
 fi
-focus_sidecar_target || fail "sidecar-target-unfocusable: could not expose the target rail permission prompt"
-start_private_sidecar
 printf 'TAB_ID=%s\n' "$TAB_ID"
 printf 'WASM_URL=%s\n' "$WASM_URL"
-printf 'SIDECAR_LOG=%s\n' "$SIDECAR_LOG"
-printf 'SIDECAR_PID=%s\n' "$SIDECAR_PID"
-printf 'REGISTRY_DIR=%s\n' "$REGISTRY_DIR"
+printf 'WATCH_DIR=%s\n' "$WATCH_DIR"
 printf 'RECIPIENT_TOKEN=%s\n' "$RECIPIENT_TOKEN"
-SIDECAR_HANDED_OFF=1
+printf 'WATCH_COMMAND=%s watch-tab\n' "$ZAPHOD_PATH"
