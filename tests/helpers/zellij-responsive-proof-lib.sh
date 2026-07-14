@@ -61,7 +61,16 @@ zaphod_fixture_refresh_record_valid() {
             and .is_suppressed == false
             and .is_selectable == true
             and .title == "zaphod-long-running-non-shell"
-            and (.terminal_command | tostring | contains("tail"))
+            and (
+                (.terminal_command |
+                    if type == "array" then map(tostring)
+                    elif type == "string" then split(" ")
+                    else [] end
+                ) as $argv
+                | ($argv | length) == 3
+                  and ($argv[0] == "tail" or ($argv[0] | endswith("/tail")))
+                  and $argv[1:] == ["-f", "/dev/null"]
+            )
         )] as $fixture
         | [.[] | select(
             (.id | tostring) == $sidebar_id
