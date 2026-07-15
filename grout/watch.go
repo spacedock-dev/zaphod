@@ -450,7 +450,7 @@ func watchNativePanes(ctx context.Context, cfg WatchRoute) ([]zellijPane, error)
 	output, err := command.Output()
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("%w: native pane-state probe deadline: %w", ErrTargetLost, ctx.Err())
 		}
 		return nil, fmt.Errorf("%w: native list-panes: %v: %s", ErrTargetLost, err, strings.TrimSpace(stderr.String()))
 	}

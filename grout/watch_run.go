@@ -60,7 +60,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		cfg.SummaryClampBytes = 512
 	}
 	if cfg.AuthorityTimeout <= 0 {
-		cfg.AuthorityTimeout = 2 * time.Second
+		cfg.AuthorityTimeout = 5 * time.Second
 	}
 	if cfg.SocketRoot == "" || cfg.ServerURL == "" || cfg.ZellijBin == "" || cfg.ZellijSession == "" ||
 		cfg.RailURL == "" || cfg.RecipientToken == "" {

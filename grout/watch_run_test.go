@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -281,5 +282,136 @@ func TestWatcherCleanupBoundsSlowNativeAuthorityProbe(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("watcher cleanup blocked on slow native authority probe")
+	}
+}
+
+func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
+	dir := t.TempDir()
+	runtimeRoot, err := os.MkdirTemp("/tmp", "zwt.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(runtimeRoot) })
+	panesPath := filepath.Join(dir, "panes.json")
+	panes := `[
+      {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+      {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+      {"id":60,"tab_id":81,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+      {"id":8,"tab_id":81,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+    ]`
+	if err := os.WriteFile(panesPath, []byte(panes), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lockPath := filepath.Join(dir, "native.lock")
+	snapshotLog := filepath.Join(dir, "snapshots.log")
+	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
+		"case \" $* \" in\n"+
+		"  *' list-panes '*)\n"+
+		"    while ! mkdir "+lockPath+" 2>/dev/null; do sleep 0.01; done\n"+
+		"    trap 'rmdir "+lockPath+"' EXIT\n"+
+		"    sleep 1.1\n"+
+		"    cat "+panesPath+" ;;\n"+
+		"  *' pipe '*)\n"+
+		"    case \"$*\" in\n"+
+		"      *-ready*) echo ready ;;\n"+
+		"      *-snapshot*) cat >/dev/null; printf '%s\\n' \"$*\" >> "+snapshotLog+"; echo accepted ;;\n"+
+		"    esac ;;\n"+
+		"esac\n")
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/events":
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "event: heartbeat\ndata: {}\n\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case "/api/v1/sessions/codex:019f60ff-1111-7222-8333-444455556666",
+			"/api/v1/sessions/codex:019f60ff-1111-7222-8333-444455556667":
+			fmt.Fprintf(w, `{"id":%q,"agent":"codex","first_message":"SERIALIZED_NATIVE_ROW"}`, strings.TrimPrefix(r.URL.Path, "/api/v1/sessions/"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(source.Close)
+
+	type runningWatcher struct {
+		pane   uint32
+		cancel context.CancelFunc
+		errs   chan error
+	}
+	start := func(pane uint32, token string) runningWatcher {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		ready := make(chan WatchReady, 1)
+		errs := make(chan error, 1)
+		go func() {
+			errs <- runWatchTab(ctx, WatchConfig{WatchRoute: WatchRoute{
+				ServerURL: source.URL, ZellijBin: zellij, ZellijConfigDir: "/c",
+				ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d", ZellijSession: "managed",
+				RailURL: "file:/candidate/sidebar.wasm", RecipientToken: token,
+				PipeTimeout: time.Second, SourceTimeout: time.Second, SummaryClampBytes: 512,
+			}, PaneID: pane, SocketRoot: runtimeRoot, Lease: time.Second,
+				Heartbeat: time.Hour, Ready: ready}, &bytes.Buffer{})
+		}()
+		select {
+		case <-ready:
+		case err := <-errs:
+			cancel()
+			t.Fatalf("watcher %d failed before ready: %v", pane, err)
+		case <-time.After(8 * time.Second):
+			cancel()
+			t.Fatalf("watcher %d readiness timed out", pane)
+		}
+		return runningWatcher{pane: pane, cancel: cancel, errs: errs}
+	}
+	a := start(7, "token-a")
+	b := start(8, "token-b")
+	watchers := []runningWatcher{a, b}
+	t.Cleanup(func() {
+		for _, watcher := range watchers {
+			watcher.cancel()
+		}
+	})
+
+	hooks := []struct {
+		pane uint32
+		id   string
+	}{
+		{7, "019f60ff-1111-7222-8333-444455556666"},
+		{8, "019f60ff-1111-7222-8333-444455556667"},
+	}
+	hookErrs := make(chan error, len(hooks))
+	for _, hook := range hooks {
+		hook := hook
+		go func() {
+			payload := []byte(`{"session_id":"` + hook.id + `","hook_event_name":"SessionStart","source":"startup"}`)
+			hookErrs <- sendWatchHook(context.Background(), runtimeRoot, "managed", strconv.FormatUint(uint64(hook.pane), 10), payload)
+		}()
+	}
+	for range hooks {
+		if err := <-hookErrs; err != nil {
+			t.Fatalf("send concurrent hook: %v", err)
+		}
+	}
+
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, watcher := range watchers {
+			select {
+			case err := <-watcher.errs:
+				watcher.cancel()
+				t.Fatalf("watcher %d died under serialized native latency: %v", watcher.pane, err)
+			default:
+			}
+		}
+		contents, _ := os.ReadFile(snapshotLog)
+		if bytes.Count(contents, []byte("\n")) >= 4 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	contents, _ := os.ReadFile(snapshotLog)
+	if bytes.Count(contents, []byte("\n")) < 4 {
+		t.Fatalf("two watchers did not complete their post-hook snapshots: %s", contents)
 	}
 }

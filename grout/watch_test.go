@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,6 +57,19 @@ func TestWatchSocketPathFitsShippedDefaultRoot(t *testing.T) {
 	}
 	if len(path) > 103 {
 		t.Fatalf("socket path length = %d, want at most 103: %q", len(path), path)
+	}
+}
+
+func TestWatchNativePanesNamesAuthorityDeadline(t *testing.T) {
+	zellij := writeScript(t, t.TempDir(), "zellij", "#!/bin/sh\nsleep 1\n")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := watchNativePanes(ctx, WatchRoute{ZellijBin: zellij})
+	if !errors.Is(err, ErrTargetLost) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("native deadline error = %v, want target-lost plus context deadline", err)
+	}
+	if !strings.Contains(err.Error(), "native pane-state probe deadline") {
+		t.Fatalf("native deadline error did not name the failing boundary: %v", err)
 	}
 }
 
