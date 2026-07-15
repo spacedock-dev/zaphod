@@ -1,6 +1,6 @@
 ---
 title: Integrate managed-tab safety with tab-bound session delivery
-status: implementation
+status: ideation
 group: walking-skeleton
 sprint: s1-managed-tab-safety
 sprint-readiness: ready
@@ -390,6 +390,28 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   readiness coverage, and duplicate-native-rail rejection. Preserve the
   manual watcher, in-memory authority, and all cycle-6 live/stale socket rules;
   do not add a registry, supervisor, or alternate proof path.
+
+### Cycle 8 — 2026-07-15 — captain chose startup-only native authority
+
+- Classification: **design reset** after cycle 7 exposed both an outcome
+  defect and an evidence defect in recurring native Zellij calls. The watcher
+  successfully projected one exact Codex row, then later native CLI traffic
+  returned timeouts and malformed ANSI stdout while the session remained
+  active. More timeout, retry, or serialization work is rejected.
+- Keep the smallest walking skeleton: resolve and prove the exact terminal,
+  stable tab, and original rail once during `watch-tab` startup. After ready,
+  perform no native `list-panes` inventory or cleanup probe. AgentsView
+  refreshes deliver through the existing token-bound acknowledged pipe only.
+- The plugin's current `PaneUpdate`, recipient proof, watcher generation, and
+  2.5-second lease own row and focus fail-close. A missing or moved terminal
+  removes its row through the manifest; rail or watcher loss expires the
+  lease. A silently orphaned daemon may remain until manual cleanup or the
+  existing watcher-automation follow-up.
+- Do not add retries, a CLI broker, shared serialization, registry, supervisor,
+  durable recovery, or task-91 metadata architecture. Amend the canonical
+  lifecycle ACs and tests to prove zero post-ready native inventory calls,
+  exact projection, lease expiry, and explicit/manual process cleanup before
+  implementation resumes.
 
 ## Problem
 
