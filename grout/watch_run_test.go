@@ -174,7 +174,7 @@ func TestWatchTabUsesNativeInventoryOnlyBeforeReady(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"watch-generation=", "lease-ms=500", "recipient-tab-id=73", "recipient-token=token"} {
+	for _, want := range []string{"watch-generation=", "lease-ms=500", "recipient-tab-id=73", "recipient-rail-id=50", "recipient-token=token"} {
 		if !strings.Contains(string(args), want) {
 			t.Fatalf("leased snapshot args omitted %q: %s", want, args)
 		}

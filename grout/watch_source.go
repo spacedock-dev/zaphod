@@ -31,6 +31,7 @@ type WatchRoute struct {
 	ZellijDataDir        string
 	ZellijSession        string
 	TabID                string
+	RailID               string
 	RailURL              string
 	RecipientToken       string
 	SourceTimeout        time.Duration
@@ -126,7 +127,7 @@ func waitForRecipient(ctx context.Context, cfg WatchRoute) error {
 	for {
 		probeCtx, cancel := context.WithTimeout(waitCtx, cfg.PipeTimeout)
 		args := cfg.zellijArgs("pipe", "--name", privateAgentPipeName(cfg.RecipientToken, "ready"),
-			"--args", "recipient-tab-id="+cfg.TabID+",recipient-token="+cfg.RecipientToken)
+			"--args", "recipient-tab-id="+cfg.TabID+",recipient-rail-id="+cfg.RailID+",recipient-token="+cfg.RecipientToken)
 		command := exec.CommandContext(probeCtx, cfg.ZellijBin, args...)
 		command.WaitDelay = 50 * time.Millisecond
 		command.Stdin = strings.NewReader("probe")

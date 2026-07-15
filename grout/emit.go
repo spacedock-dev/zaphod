@@ -25,10 +25,10 @@ func privateAgentPipeName(recipientToken, kind string) string {
 // pipeArgsForTab leaves delivery as a named-pipe broadcast while carrying the
 // stable server tab ID for every receiver to verify. It never names a plugin:
 // Zellij would launch an absent plugin for --plugin, which is not delivery.
-func pipeArgsForTab(name, payload, recipientTabID, recipientToken string) []string {
+func pipeArgsForTab(name, payload, recipientTabID, recipientRailID, recipientToken string) []string {
 	return []string{
 		"pipe", "--name", name,
-		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-token=" + recipientToken,
+		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-rail-id=" + recipientRailID + ",recipient-token=" + recipientToken,
 		"--", payload,
 	}
 }
@@ -67,6 +67,7 @@ func EmitRowForTab(
 	kind string,
 	row any,
 	recipientTabID string,
+	recipientRailID string,
 	recipientToken string,
 	stderr io.Writer,
 ) error {
@@ -74,7 +75,7 @@ func EmitRowForTab(
 	if err != nil {
 		return err
 	}
-	args := pipeArgsForTab(privateAgentPipeName(recipientToken, "event"), string(payload), recipientTabID, recipientToken)
+	args := pipeArgsForTab(privateAgentPipeName(recipientToken, "event"), string(payload), recipientTabID, recipientRailID, recipientToken)
 	return emitAcknowledged(ctx, cfg, kind, args, "", stderr)
 }
 
@@ -85,6 +86,7 @@ func EmitSnapshotForTab(
 	cfg Config,
 	rows []SessionRow,
 	recipientTabID string,
+	recipientRailID string,
 	recipientToken string,
 	stderr io.Writer,
 ) error {
@@ -94,7 +96,7 @@ func EmitSnapshotForTab(
 	}
 	args := []string{
 		"pipe", "--name", privateAgentPipeName(recipientToken, "snapshot"),
-		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-token=" + recipientToken,
+		"--args", "recipient-tab-id=" + recipientTabID + ",recipient-rail-id=" + recipientRailID + ",recipient-token=" + recipientToken,
 	}
 	return emitAcknowledged(ctx, cfg, "snapshot", args, string(payload), stderr)
 }
@@ -104,6 +106,7 @@ func EmitLeasedSnapshotForTab(
 	cfg Config,
 	rows []SessionRow,
 	recipientTabID string,
+	recipientRailID string,
 	recipientToken string,
 	generation string,
 	lease time.Duration,
@@ -122,8 +125,8 @@ func EmitLeasedSnapshotForTab(
 	}
 	args := []string{
 		"pipe", "--name", privateAgentPipeName(recipientToken, "snapshot"),
-		"--args", fmt.Sprintf("recipient-tab-id=%s,recipient-token=%s,watch-generation=%s,lease-ms=%d",
-			recipientTabID, recipientToken, generation, leaseMS),
+		"--args", fmt.Sprintf("recipient-tab-id=%s,recipient-rail-id=%s,recipient-token=%s,watch-generation=%s,lease-ms=%d",
+			recipientTabID, recipientRailID, recipientToken, generation, leaseMS),
 	}
 	return emitAcknowledged(ctx, cfg, "leased-snapshot", args, string(payload), stderr)
 }
@@ -136,6 +139,7 @@ func EmitLeaseHeartbeatForTab(
 	ctx context.Context,
 	cfg Config,
 	recipientTabID string,
+	recipientRailID string,
 	recipientToken string,
 	generation string,
 	lease time.Duration,
@@ -150,8 +154,8 @@ func EmitLeaseHeartbeatForTab(
 	}
 	args := []string{
 		"pipe", "--name", privateAgentPipeName(recipientToken, "heartbeat"),
-		"--args", fmt.Sprintf("recipient-tab-id=%s,recipient-token=%s,watch-generation=%s,lease-ms=%d",
-			recipientTabID, recipientToken, generation, leaseMS),
+		"--args", fmt.Sprintf("recipient-tab-id=%s,recipient-rail-id=%s,recipient-token=%s,watch-generation=%s,lease-ms=%d",
+			recipientTabID, recipientRailID, recipientToken, generation, leaseMS),
 	}
 	return emitUnacknowledged(ctx, cfg, "lease-heartbeat", args, stderr)
 }
@@ -248,7 +252,7 @@ func emitRow(
 	defer cancel()
 	args := pipeArgs(cfg.PipeName, string(payload))
 	if recipientTabID != "" {
-		args = pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID, "")
+		args = pipeArgsForTab(cfg.PipeName, string(payload), recipientTabID, "", "")
 	}
 	args = append(zellijProfileArgs(cfg), args...)
 	cmd := exec.CommandContext(ctx, cfg.ZellijBin, args...)

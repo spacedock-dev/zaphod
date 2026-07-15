@@ -27,7 +27,7 @@ func TestLeasedSnapshotCarriesGenerationAndPositiveAcknowledgment(t *testing.T) 
 	cfg := Config{ZellijBin: zellij, ZellijSession: "managed", PipeTimeout: time.Second}
 	paneID := uint32(7)
 	rows := []SessionRow{{Kind: "session", ID: "codex:one", PaneID: &paneID}}
-	if err := EmitLeasedSnapshotForTab(context.Background(), cfg, rows, "73", "token", "generation-a", 500*time.Millisecond, io.Discard); err != nil {
+	if err := EmitLeasedSnapshotForTab(context.Background(), cfg, rows, "73", "50", "token", "generation-a", 500*time.Millisecond, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	argv := readInvocations(t, argvLog)
@@ -35,7 +35,7 @@ func TestLeasedSnapshotCarriesGenerationAndPositiveAcknowledgment(t *testing.T) 
 		t.Fatalf("invocations = %d", len(argv))
 	}
 	joined := strings.Join(argv[0], " ")
-	for _, want := range []string{"zaphod-agent-v1-token-snapshot", "recipient-tab-id=73", "recipient-token=token", "watch-generation=generation-a", "lease-ms=500"} {
+	for _, want := range []string{"zaphod-agent-v1-token-snapshot", "recipient-tab-id=73", "recipient-rail-id=50", "recipient-token=token", "watch-generation=generation-a", "lease-ms=500"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("leased snapshot argv omitted %q: %q", want, argv[0])
 		}
@@ -59,13 +59,13 @@ func TestAcknowledgedEventAndCleanupAcceptDuplicatedRuntimeOutputs(t *testing.T)
 	cfg := Config{ZellijBin: zellij, ZellijSession: "managed", PipeTimeout: 300 * time.Millisecond}
 	paneID := uint32(7)
 	row := SessionRow{Kind: "session", ID: "codex:one", PaneID: &paneID}
-	if err := EmitRowForTab(context.Background(), cfg, "session", row, "73", "token", io.Discard); err != nil {
+	if err := EmitRowForTab(context.Background(), cfg, "session", row, "73", "50", "token", io.Discard); err != nil {
 		t.Fatalf("event rejected duplicated runtime acknowledgments: %v", err)
 	}
-	if err := EmitSnapshotForTab(context.Background(), cfg, []SessionRow{row}, "73", "token", io.Discard); err != nil {
+	if err := EmitSnapshotForTab(context.Background(), cfg, []SessionRow{row}, "73", "50", "token", io.Discard); err != nil {
 		t.Fatalf("snapshot rejected duplicated runtime acknowledgments: %v", err)
 	}
-	if err := EmitLeasedSnapshotForTab(context.Background(), cfg, nil, "73", "token", "generation-a", 100*time.Millisecond, io.Discard); err != nil {
+	if err := EmitLeasedSnapshotForTab(context.Background(), cfg, nil, "73", "50", "token", "generation-a", 100*time.Millisecond, io.Discard); err != nil {
 		t.Fatalf("cleanup snapshot rejected duplicated runtime acknowledgments: %v", err)
 	}
 	count, err := os.ReadFile(countLog)
@@ -80,7 +80,7 @@ func TestLeaseHeartbeatIsOneUnacknowledgedNativeMessage(t *testing.T) {
 	zellij := writeScript(t, dir, "heartbeat-zellij", "#!/bin/sh\n"+
 		"{ echo \"$#\"; for a in \"$@\"; do printf '%s\\n' \"$a\"; done; } > "+argvLog+"\n")
 	cfg := Config{ZellijBin: zellij, ZellijSession: "managed", PipeTimeout: time.Second}
-	if err := EmitLeaseHeartbeatForTab(context.Background(), cfg, "73", "token", "generation-a", 500*time.Millisecond, io.Discard); err != nil {
+	if err := EmitLeaseHeartbeatForTab(context.Background(), cfg, "73", "50", "token", "generation-a", 500*time.Millisecond, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	argv := readInvocations(t, argvLog)
@@ -88,7 +88,7 @@ func TestLeaseHeartbeatIsOneUnacknowledgedNativeMessage(t *testing.T) {
 		t.Fatalf("invocations = %d", len(argv))
 	}
 	joined := strings.Join(argv[0], " ")
-	for _, want := range []string{"zaphod-agent-v1-token-heartbeat", "recipient-tab-id=73", "recipient-token=token", "watch-generation=generation-a", "lease-ms=500"} {
+	for _, want := range []string{"zaphod-agent-v1-token-heartbeat", "recipient-tab-id=73", "recipient-rail-id=50", "recipient-token=token", "watch-generation=generation-a", "lease-ms=500"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("lease heartbeat argv omitted %q: %q", want, argv[0])
 		}

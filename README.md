@@ -178,9 +178,9 @@ for the two-tab journey.
 
 `Alt Shift z` remains a separately configured tab-only shortcut. It opens the
 fixed layout named by the operator's global config; it does not select a
-checkout or launch a watcher. Zellij pipes remain session-wide broadcasts,
-so every snapshot carries the recipient token, stable tab ID, watcher
-generation, and lease.
+checkout or launch a watcher. Zellij pipes remain session-wide broadcasts, so
+every snapshot carries the recipient token, stable tab ID, original rail pane
+ID, watcher generation, and lease.
 
 When a tiled Zaphod rail is visible, approve its `Reconfigure` permission.
 The rail requests a temporary runtime `Alt /` route to its own already-running

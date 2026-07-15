@@ -29,9 +29,10 @@ row.
 
 ## Delivery and failure
 
-Every session snapshot carries the stable recipient token, tab ID, watcher
-generation, and a short lease. The plugin displays and focuses a session row
-only while that lease, recipient, pane, and generation remain valid. Heartbeat
+Every session snapshot carries the stable recipient token, tab ID, original
+rail pane ID, watcher generation, and a short lease. The plugin displays and
+focuses a session row only while that lease, recipient, pane, rail, and
+generation remain valid. Heartbeat
 renewal uses the cached exact record on a 1.4-second cadence. It is a
 recipient- and generation-checked fire-and-forget pipe, so an idle watcher
 does not wait for plugin output. AgentsView data changes and new SessionStart

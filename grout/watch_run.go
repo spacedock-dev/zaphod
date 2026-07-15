@@ -73,6 +73,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		return err
 	}
 	cfg.TabID = strconv.FormatUint(target.TabID, 10)
+	cfg.RailID = strconv.FormatUint(target.RailPaneID, 10)
 	listener, socketPath, err := listenWatchSocket(cfg.SocketRoot, cfg.ZellijSession, strconv.FormatUint(uint64(cfg.PaneID), 10))
 	if err != nil {
 		return err
@@ -99,10 +100,10 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	var registration *WatchRegistration
 	rows := make([]SessionRow, 0, 1)
 	emit := func() error {
-		return EmitLeasedSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
+		return EmitLeasedSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RailID, cfg.RecipientToken, generation, cfg.Lease, stderr)
 	}
 	heartbeat := func() error {
-		return EmitLeaseHeartbeatForTab(ctx, cfg.emitConfig(), cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
+		return EmitLeaseHeartbeatForTab(ctx, cfg.emitConfig(), cfg.TabID, cfg.RailID, cfg.RecipientToken, generation, cfg.Lease, stderr)
 	}
 	refreshSource := func() error {
 		nextRows := make([]SessionRow, 0, 1)

@@ -551,6 +551,17 @@ impl Sidebar {
         value.parse().ok()
     }
 
+    fn recipient_rail_id(args: &BTreeMap<String, String>) -> Option<u32> {
+        let value = args.get("recipient-rail-id")?;
+        if value.is_empty()
+            || !value.as_bytes().iter().all(u8::is_ascii_digit)
+            || (value.len() > 1 && value.starts_with('0'))
+        {
+            return None;
+        }
+        value.parse().ok()
+    }
+
     // `agent-event` is a session-wide named-pipe broadcast. This receiver
     // guard is its only admission rule: no CWD, tab name, URL, pane id, or
     // display position fallback may create a row or a focus binding.
@@ -565,6 +576,7 @@ impl Sidebar {
             && self.own_tab == Some(armed.own_position)
             && armed.manifest_generation == self.agent_manifest_generation
             && Self::recipient_tab_id(args) == Some(armed.stable_tab_id)
+            && Self::recipient_rail_id(args) == Some(self.plugin_id)
             && args.get("recipient-token") == Some(configured_token)
     }
 
@@ -2772,6 +2784,9 @@ mod tests {
             .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
         message
             .args
+            .insert("recipient-rail-id".to_owned(), "0".to_owned());
+        message
+            .args
             .insert("recipient-token".to_owned(), "test-token".to_owned());
         message
     }
@@ -2782,6 +2797,9 @@ mod tests {
         message
             .args
             .insert("recipient-tab-id".to_owned(), recipient_tab_id.to_owned());
+        message
+            .args
+            .insert("recipient-rail-id".to_owned(), "0".to_owned());
         message
             .args
             .insert("recipient-token".to_owned(), "test-token".to_owned());
@@ -2954,6 +2972,33 @@ mod tests {
     }
 
     #[test]
+    fn agent_snapshot_rejects_replacement_or_duplicate_rail_identity() {
+        let tabs = [tab_info(1, 73, true, None, false)];
+        let payload = format!("[{}]", session_line());
+        let mut original = Sidebar::default();
+        original.plugin_id = 50;
+        arm_agent_recipient(&mut original, 1, &tabs);
+        original.rows = vec![cwd_row(4)];
+
+        let mut replacement_delivery = agent_snapshot(Some(&payload), "73");
+        replacement_delivery
+            .args
+            .insert("recipient-rail-id".to_owned(), "51".to_owned());
+        assert!(
+            !original.pipe(replacement_delivery),
+            "the startup watcher followed a replacement or duplicate rail"
+        );
+        assert!(original.sessions.is_empty());
+
+        let mut original_delivery = agent_snapshot(Some(&payload), "73");
+        original_delivery
+            .args
+            .insert("recipient-rail-id".to_owned(), "50".to_owned());
+        assert!(original.pipe(original_delivery));
+        assert_eq!(original.sessions.len(), 1);
+    }
+
+    #[test]
     fn session_snapshot_replaces_stale_rows_and_rejects_duplicate_pane_authority() {
         let mut sessions = vec![SessionEvent {
             id: "stale".to_owned(),
@@ -3067,7 +3112,11 @@ mod tests {
                 vec![sidebar_pane(50, false), pane(4, false, "agent", 1, false)],
             )])));
             sidebar.update(Event::TabUpdate(vec![tab_info(1, 73, true, None, false)]));
-            assert!(sidebar.pipe(agent_snapshot(Some(&snapshot), "73")));
+            let mut delivery = agent_snapshot(Some(&snapshot), "73");
+            delivery
+                .args
+                .insert("recipient-rail-id".to_owned(), "50".to_owned());
+            assert!(sidebar.pipe(delivery));
             assert_eq!(sidebar.sessions.len(), 1);
             assert_eq!(registered_session_pane(&sidebar.sessions[0], &sidebar.rows), Some(4));
             assert!(!session_row_line(&sidebar.sessions[0], true, 28).contains("unbound"));
