@@ -962,3 +962,48 @@ a killed watcher's proven-stale endpoint no longer blocks a normal retry, while
 a live or ambiguous endpoint cannot be evicted. All product-local and exact
 watcher proofs are green at `af7860a`; only the congestion harness remains red
 at the same pre-fix evidence boundary and is reported without scope expansion.
+
+## Stage Report: implementation (cycle 4)
+
+- DONE: Implement only the AC-O1/AC-I1 readiness-cardinality outcome defect
+  on KJ head `af7860a`.
+  Commit `52973da` changes only readiness acknowledgment parsing, immediate
+  native rail cardinality, and their focused tests.
+- DONE: Accept one or more complete concatenated `ready` atoms and reject
+  empty, partial, or foreign output.
+  The parser accepts single, double, and four-runtime acknowledgments while
+  rejecting empty, truncated, prefixed, suffixed, spaced, and newline-split
+  records atomically.
+- DONE: Retain initial exact-one native rail resolution and strengthen
+  immediate pre-delivery authority probing.
+  `probeWatchTarget` now requires the original rail exactly once and exactly
+  one total same-URL tiled, non-suppressed rail in the stable tab.
+- DONE: Add focused duplicated-runtime readiness and duplicate-native-rail
+  rejection tests first.
+  Before the fix, `readyready` timed out and a second matching native rail
+  preserved authority; the full watcher and both focused boundaries now pass.
+- DONE: Preserve manual watcher, in-memory authority, and cycle-6 socket
+  admission behavior.
+  No registry, supervisor, alternate proof path, or socket-admission code
+  changed; the pre-existing checkout-local hook edit remains uncommitted.
+- DONE: Run focused Go/vet, Rust, two-rail, and lifecycle verification.
+  Focused race tests, full Go tests and vet, Rust 145/145 plus check, build,
+  two-rail `1/1/0`, and outside/inside lifecycle packets all pass.
+- DONE: Run one exact-head focused Roborev review.
+  Quick synthesis review 1555 at `52973da` returned `No issues found` and
+  confirmed duplicated complete acknowledgments retain duplicate-pane
+  fail-closed checks.
+- DONE: Prepare the exact captain-live retest without mutating live Zellij.
+  Disposable checkout `/tmp/zaphod-kj-standalone-5d25144` is clean, detached
+  at `52973da`, and rebuilt; tabs 1 and 2 in `kj-final-1784089995` retain their
+  existing route bundles and need only rerun `./target/zaphod watch-tab`.
+- SKIPPED: Run or claim the captain-live AC-I1 observation.
+  The worker sent no pipe and changed no live pane; readiness and one-row-per-
+  tab projection remain the captain's observation.
+
+### Summary
+
+Cycle 7 now treats Zellij's repeated per-client outputs as one logical exact
+rail acknowledgment without weakening physical rail cardinality. All requested
+offline proof is green at `52973da`; the prepared live retest deliberately
+exercises both stale-socket recovery and `readyready` acceptance in place.
