@@ -226,6 +226,9 @@ func acceptWatchHooks(
 			}
 		})
 		if err != nil {
+			if errors.Is(err, errWatchSocketProbe) {
+				continue
+			}
 			select {
 			case errs <- err:
 			case <-ctx.Done():

@@ -8,15 +8,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
 
 func validWatchEnvelope() []byte {
 	return []byte(`{"protocol":"zaphod-watch-tab-v1","zellij_session":"managed","pane_id":7,"provider":"codex","hook":{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}}`)
+}
+
+func shortWatchRoot(t *testing.T) string {
+	t.Helper()
+	root, err := os.MkdirTemp("/tmp", "zwt.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	return root
 }
 
 func TestWatchSocketPathIsExactPrivatePaneIdentity(t *testing.T) {
@@ -57,6 +69,169 @@ func TestWatchSocketPathFitsShippedDefaultRoot(t *testing.T) {
 	}
 	if len(path) > 103 {
 		t.Fatalf("socket path length = %d, want at most 103: %q", len(path), path)
+	}
+}
+
+func TestListenWatchSocketReclaimsProvenStaleSocket(t *testing.T) {
+	root := shortWatchRoot(t)
+	listener, socket, err := listenWatchSocket(root, "managed", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener.SetUnlinkOnClose(false)
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(socket); err != nil || info.Mode()&os.ModeSocket == 0 {
+		t.Fatalf("stale socket missing before retry: info=%v err=%v", info, err)
+	}
+
+	restarted, restartedPath, err := listenWatchSocket(root, "managed", "7")
+	if err != nil {
+		t.Fatalf("retry refused proven stale socket: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = restarted.Close()
+		_ = os.Remove(restartedPath)
+	})
+	if restartedPath != socket {
+		t.Fatalf("restart socket = %q, want %q", restartedPath, socket)
+	}
+}
+
+func TestListenWatchSocketDoesNotEvictLiveWatcher(t *testing.T) {
+	root := shortWatchRoot(t)
+	listener, socket, err := listenWatchSocket(root, "managed", "7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = listener.Close()
+		_ = os.Remove(socket)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	registrations := make(chan WatchRegistration, 1)
+	acceptErrors := make(chan error, 1)
+	go acceptWatchHooks(ctx, listener, "managed", "7", registrations, acceptErrors)
+
+	if replacement, _, err := listenWatchSocket(root, "managed", "7"); err == nil {
+		_ = replacement.Close()
+		t.Fatal("second watcher displaced a live listener")
+	}
+	hook := []byte(`{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}`)
+	if err := sendWatchHook(ctx, root, "managed", "7", hook); err != nil {
+		t.Fatalf("live watcher was no longer reachable: %v", err)
+	}
+	select {
+	case registration := <-registrations:
+		if registration.PaneID != 7 {
+			t.Fatalf("registration after rejected replacement = %#v", registration)
+		}
+	case err := <-acceptErrors:
+		t.Fatalf("replacement probe disrupted live watcher: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+}
+
+func TestListenWatchSocketFailsClosedForAmbiguousEndpoint(t *testing.T) {
+	t.Run("regular file", func(t *testing.T) {
+		root := shortWatchRoot(t)
+		path, err := watchSocketPath(root, "managed", "7")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("not a socket"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if listener, _, err := listenWatchSocket(root, "managed", "7"); err == nil {
+			_ = listener.Close()
+			t.Fatal("ambiguous regular file was replaced")
+		}
+		payload, err := os.ReadFile(path)
+		if err != nil || string(payload) != "not a socket" {
+			t.Fatalf("ambiguous regular file changed: payload=%q err=%v", payload, err)
+		}
+	})
+
+	t.Run("non-private socket", func(t *testing.T) {
+		root := shortWatchRoot(t)
+		listener, path, err := listenWatchSocket(root, "managed", "7")
+		if err != nil {
+			t.Fatal(err)
+		}
+		listener.SetUnlinkOnClose(false)
+		if err := listener.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, 0o660); err != nil {
+			t.Fatal(err)
+		}
+		if replacement, _, err := listenWatchSocket(root, "managed", "7"); err == nil {
+			_ = replacement.Close()
+			t.Fatal("ambiguous non-private socket was replaced")
+		}
+		info, err := os.Lstat(path)
+		if err != nil || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o660 {
+			t.Fatalf("ambiguous socket changed: info=%v err=%v", info, err)
+		}
+	})
+
+	t.Run("foreign owner", func(t *testing.T) {
+		root := shortWatchRoot(t)
+		listener, path, err := listenWatchSocket(root, "managed", "7")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer listener.Close()
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := validateExistingWatchSocket(info, os.Getuid()+1); err == nil || !strings.Contains(err.Error(), "ownership") {
+			t.Fatalf("foreign-owned endpoint was not ambiguous: %v", err)
+		}
+	})
+}
+
+func TestListenWatchSocketWaitsForConcurrentDifferentPaneAdmission(t *testing.T) {
+	root := shortWatchRoot(t)
+	rootHandle, err := os.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rootHandle.Close()
+	if err := syscall.Flock(int(rootHandle.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		listener *net.UnixListener
+		path     string
+		err      error
+	}
+	completed := make(chan result, 1)
+	go func() {
+		listener, path, err := listenWatchSocket(root, "managed", "8")
+		completed <- result{listener: listener, path: path, err: err}
+	}()
+	select {
+	case got := <-completed:
+		t.Fatalf("different-pane admission did not wait for the shared critical section: %v", got.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if err := syscall.Flock(int(rootHandle.Fd()), syscall.LOCK_UN); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-completed:
+		if got.err != nil {
+			t.Fatalf("different-pane admission failed after lock release: %v", got.err)
+		}
+		_ = got.listener.Close()
+		_ = os.Remove(got.path)
+	case <-time.After(time.Second):
+		t.Fatal("different-pane admission did not complete after lock release")
 	}
 }
 

@@ -19,14 +19,19 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 const watchProtocol = "zaphod-watch-tab-v1"
 const maxWatchHookBytes = 1 << 20
 const maxWatchEnvelopeBytes = maxWatchHookBytes + 1024
+const watchSocketProbeTimeout = 100 * time.Millisecond
+const watchSocketAdmissionTimeout = 250 * time.Millisecond
+const watchSocketAdmissionRetry = 2 * time.Millisecond
 
 var codexSessionIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+var errWatchSocketProbe = errors.New("watch socket liveness probe")
 
 type codexSessionStartHook struct {
 	SessionID      string          `json:"session_id"`
@@ -174,14 +179,21 @@ func listenWatchSocket(root, zellijSession, paneValue string) (*net.UnixListener
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != 0o700 {
 		return nil, "", fmt.Errorf("watch root is not a private directory")
 	}
+	rootHandle, err := os.Open(root)
+	if err != nil {
+		return nil, "", fmt.Errorf("open watch root: %w", err)
+	}
+	defer rootHandle.Close()
+	if err := lockWatchRoot(rootHandle); err != nil {
+		return nil, "", err
+	}
+	defer func() { _ = syscall.Flock(int(rootHandle.Fd()), syscall.LOCK_UN) }()
 	path, err := watchSocketPath(root, zellijSession, paneValue)
 	if err != nil {
 		return nil, "", err
 	}
-	if _, err := os.Lstat(path); err == nil {
-		return nil, "", fmt.Errorf("watch socket already exists")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, "", fmt.Errorf("stat watch socket: %w", err)
+	if err := admitWatchSocketPath(path); err != nil {
+		return nil, "", err
 	}
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
 	if err != nil {
@@ -193,6 +205,77 @@ func listenWatchSocket(root, zellijSession, paneValue string) (*net.UnixListener
 		return nil, "", fmt.Errorf("secure watch socket: %w", err)
 	}
 	return listener, path, nil
+}
+
+func lockWatchRoot(rootHandle *os.File) error {
+	deadline := time.Now().Add(watchSocketAdmissionTimeout)
+	for {
+		err := syscall.Flock(int(rootHandle.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			return fmt.Errorf("lock watch socket admission: %w", err)
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("watch socket admission remained busy for %s: %w", watchSocketAdmissionTimeout, err)
+		}
+		if remaining < watchSocketAdmissionRetry {
+			time.Sleep(remaining)
+		} else {
+			time.Sleep(watchSocketAdmissionRetry)
+		}
+	}
+}
+
+func admitWatchSocketPath(path string) error {
+	before, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("stat watch socket: %w", err)
+	}
+	if err := validateExistingWatchSocket(before, os.Getuid()); err != nil {
+		return err
+	}
+
+	probeCtx, cancel := context.WithTimeout(context.Background(), watchSocketProbeTimeout)
+	defer cancel()
+	connection, connectErr := (&net.Dialer{}).DialContext(probeCtx, "unix", path)
+	if connectErr == nil {
+		_ = connection.Close()
+		return fmt.Errorf("watch socket already has a live listener")
+	}
+	if !errors.Is(connectErr, syscall.ECONNREFUSED) {
+		return fmt.Errorf("watch socket ownership is ambiguous after bounded connect: %w", connectErr)
+	}
+	after, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("recheck stale watch socket: %w", err)
+	}
+	if err := validateExistingWatchSocket(after, os.Getuid()); err != nil {
+		return err
+	}
+	if !os.SameFile(before, after) || after.Mode() != before.Mode() {
+		return fmt.Errorf("watch socket changed during stale admission")
+	}
+	if err := os.Remove(path); err != nil {
+		return fmt.Errorf("remove stale watch socket: %w", err)
+	}
+	return nil
+}
+
+func validateExistingWatchSocket(info os.FileInfo, currentUID int) error {
+	if info.Mode()&os.ModeSymlink != 0 || info.Mode()&os.ModeSocket == 0 || info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("existing watch endpoint has ambiguous type or permissions")
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok || uint64(stat.Uid) != uint64(currentUID) {
+		return fmt.Errorf("existing watch endpoint has ambiguous ownership")
+	}
+	return nil
 }
 
 func acceptWatchRegistration(ctx context.Context, listener *net.UnixListener, expectedSession, expectedPane string) (WatchRegistration, error) {
@@ -227,6 +310,9 @@ func acceptWatchRegistrationWithAdmission(
 	}
 	if len(payload) > maxWatchEnvelopeBytes {
 		return WatchRegistration{}, fmt.Errorf("watch envelope exceeds %d bytes", maxWatchEnvelopeBytes)
+	}
+	if len(payload) == 0 {
+		return WatchRegistration{}, errWatchSocketProbe
 	}
 	registration, err := decodeWatchEnvelope(payload, expectedSession, expectedPane)
 	if err != nil {
