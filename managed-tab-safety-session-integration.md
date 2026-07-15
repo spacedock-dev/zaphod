@@ -424,19 +424,31 @@ rehydrate after process restart. Three review rounds found those boundaries
 unsafe or underspecified.
 
 KJ now proves a smaller value: one operator explicitly starts one watcher from
-the terminal that will run the agent. That live process is the authority. It
-inherits `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID`, resolves the exact stable
-tab and original rail, accepts one top-level agent identity over a private
-pane-derived socket, and retains the mapping only in memory. CWD, title,
-prompt, timestamps, child labels, ID prefixes, and newest-session order never
-admit or focus a row.
+the terminal that will run the agent. Before reporting ready, that watcher
+inherits `ZELLIJ_SESSION_NAME` and `ZELLIJ_PANE_ID` and uses one native
+inventory to resolve the exact terminal, stable tab, and original rail. This
+tuple is startup evidence only. After ready, the watcher performs no native
+pane inventory or cleanup probe; it accepts one top-level agent identity over
+a private pane-derived socket and retains the mapping only in memory. CWD,
+title, prompt, timestamps, child labels, ID prefixes, and newest-session order
+never admit or focus a row.
 
-The end state is deliberately non-durable. A missing watcher, socket, terminal,
-tab, original rail, exact AgentsView record, or recipient acknowledgment
-produces no usable row. Watcher restart starts empty and may require agent
-restart or another trusted `SessionStart`. Automation and recovery are filed
-as `tab-local-agent-watcher-automation.md` (task
-`6s0s2704zrms3med9n04mm4y`).
+Post-ready authority is deliberately split at an existing boundary. The
+watcher supplies exact AgentsView snapshots and heartbeat under the injected
+recipient token and one random generation. The plugin's current `PaneUpdate`
+manifest, current recipient proof, generation, and 2.5-second lease decide
+whether a row exists or can focus. A missing or moved terminal is removed by
+the manifest; a missing rail has no rendering surface; watcher or delivery
+loss expires the lease. The daemon is not a post-ready Zellij lifecycle
+supervisor and may remain orphaned until explicit manual cleanup.
+
+The end state remains non-durable. A missing watcher delivery, terminal, rail,
+exact AgentsView record, current recipient proof, or live lease produces no
+usable row. A missing socket prevents a new registration but does not revoke an
+already accepted in-memory identity by itself. Watcher restart starts empty and
+may require agent restart or another trusted `SessionStart`. Automatic launch,
+orphan cleanup, and recovery remain filed as
+`tab-local-agent-watcher-automation.md` (task `6s0s2704zrms3med9n04mm4y`).
 
 ## Reused mechanism and smallest invalidating spike
 
@@ -446,9 +458,9 @@ all use that join; KJ retains it without their durable stores or inference
 fallbacks. Frozen-head exact lookup, stable-recipient delivery, and pane focus
 are already green and remain implementation inputs rather than new inventions.
 
-The new authority shape was spiked first on 2026-07-14 with Zellij 0.44.3,
+The startup authority shape was spiked first on 2026-07-14 with Zellij 0.44.3,
 tmux 3.6a, the candidate WASM, two same-CWD tabs, and disposable
-config/data/socket/HOME roots. No product or standing Zellij file changed.
+config/data/socket/HOME roots. No standing Zellij file changed.
 
 1. A hook attempt in the selected terminal before the watcher existed failed
    closed. The watcher then inherited session `kw12617`, pane `0`, used one
@@ -460,17 +472,22 @@ config/data/socket/HOME roots. No product or standing Zellij file changed.
    runtime root. The socket was mode `0600`. One complete versioned envelope
    carrying the inherited session/pane and a valid `SessionStart` ID was
    accepted; the mapping existed only in watcher memory.
-3. Closing bystander rail `2` left the watcher live. Closing original rail `1`
-   produced `authority-lost-after-registration` and terminated it. The exact
-   result was: `PASS session=kw12617 pane=0 tab=0 rail=1 bystander_rail=2
-   socket_mode=600 missing_daemon=closed exact_registration=accepted
-   rail_loss=closed`.
+3. Later work at `af7860a` proved safe stale-socket admission, and
+   `e1ddbb1` proved that retained per-client plugin runtimes may return repeated
+   complete readiness and snapshot acknowledgments. A real retained-client
+   run then projected exactly one bound Codex row before recurring native CLI
+   probes timed out or returned malformed ANSI while the session remained
+   active. That failure invalidates post-ready native revalidation, not the
+   startup tuple, token-bound delivery, manifest binding, or lease.
 
-This passes the smallest new mechanism. Implementation must preserve the same
-result while adding exact AgentsView projection and the already-proved
-stable-recipient/render path. If a production watcher cannot derive the same
-terminal/tab/rail tuple or cannot clear leased rows after watcher loss, stop;
-do not restore a registry or inference fallback.
+The riskiest remaining combination is therefore explicit: after the one
+startup inventory has returned ready, can current plugin manifest and lease
+mechanisms keep exact projection fail-closed while the watcher makes zero
+further native inventory calls? Implementation must exercise that path first
+with an instrumented native-command boundary across registration, AgentsView
+`data_changed`, heartbeat, terminal close/move, rail loss, and cleanup. Any
+post-ready `list-panes` call or stale actionable row fails the design. No retry,
+broker, registry, supervisor, or task-91 mechanism is an allowed repair.
 
 ## Proposed approach
 
@@ -483,10 +500,12 @@ do not restore a registry or inference fallback.
    original rail; no standing config or global Codex setting changes.
 2. In the terminal that will run Codex, the operator runs
    `target/zaphod watch-tab --server URL`. The command verifies its inherited
-   Zellij session/pane, resolves that pane's stable tab, requires exactly one
-   tiled non-suppressed rail with the injected canonical URL, binds the private
-   socket, and returns only after the background watcher is ready. It prints
-   the watched pane, stable tab, original rail, and watcher PID for debugging.
+   Zellij session/pane from one native inventory, resolves that pane's stable
+   tab, requires exactly one tiled non-suppressed rail with the injected
+   canonical URL, binds the private socket, and proves token-bound recipient
+   delivery before returning ready. It prints the watched pane, stable tab,
+   original rail, and watcher PID for debugging. This is the watcher's only
+   native pane inventory for its lifetime.
 3. The operator starts Codex in that same terminal. The trusted checkout-local
    `SessionStart` hook derives the same socket from inherited session/pane and
    sends one bounded versioned envelope. `SubagentStart`, malformed input,
@@ -494,19 +513,22 @@ do not restore a registry or inference fallback.
 4. The watcher canonicalizes the accepted Codex UUID to `codex:<UUID>`, uses
    only AgentsView's exact `/api/v1/sessions/{id}` endpoint, maintains one
    in-memory registration and source projection, and delivers full leased
-   snapshots through the original stable-tab/recipient-token route.
+   snapshots through the captured stable-tab/recipient-token route. AgentsView
+   `data_changed` refresh, heartbeat, and shutdown use no native pane query;
+   acknowledged snapshots are the only post-ready full-delivery boundary.
 5. The rail renders only that watched session. A click may execute the retained
-   exact-pane focus only while the watcher lease is current and the pane is
-   still in the original stable tab. A later valid top-level `SessionStart` in
-   that terminal replaces the in-memory ID; `Stop` remains a turn state, not
-   deregistration.
-6. Killing the watcher or removing/moving/suppressing its terminal, tab, or
-   original rail revokes visible authority. The plugin's exact manifest clears
-   an unbound projection atomically; heartbeat loss expires the generation
-   within the bounded lease, and focus is disabled immediately. Restarting
-   `watch-tab` creates a new empty generation; no old ID is reconstructed. A
-   silently orphaned daemon may remain until a lifecycle check or explicit
-   cleanup and never grants row or focus authority by its continued existence.
+   exact-pane focus only while the plugin's current manifest still binds that
+   pane in this rail's tab, the current recipient is armed, and the watcher
+   lease is current. A later valid top-level `SessionStart` in that terminal
+   replaces the in-memory ID; `Stop` remains a turn state, not deregistration.
+6. Killing the watcher or losing delivery expires its generation within the
+   bounded lease. Removing, moving, or suppressing its terminal causes the
+   plugin's next current `PaneUpdate` to clear the unbound projection and lease
+   atomically; removing the rail removes the rendering/focus surface itself.
+   Restarting `watch-tab` creates a new empty generation; no old ID is
+   reconstructed. The watcher does not rediscover, retry, or prove those
+   lifecycle changes. A silently orphaned daemon after terminal or rail loss
+   is explicitly acceptable until the operator or test harness kills it.
 
 The documented walking skeleton supports one initial watched terminal per
 managed tab. A later pane is never auto-discovered; an expert may start a
@@ -530,14 +552,22 @@ unknown/duplicate fields and trailing bytes, and accepts only Codex
 `SessionStart` `startup|resume` with a non-empty canonical UUID. The socket is
 an ingress transport, not a store; no registration file is written.
 
-At startup and before each exact fetch/acknowledged full-snapshot delivery,
-the watcher requires: its terminal pane exists exactly once;
-the pane still belongs to the captured stable tab; the original plugin pane ID
-exists exactly once in that tab with the canonical URL and managed shape; and
-recipient-token delivery is acknowledged by that original rail. Native probes
-use no `--command`, `--geometry`, CWD, scrollback, or process metadata. Any
-failure stops source work, attempts an empty acknowledged snapshot when the
-original rail remains reachable, unlinks the socket, and exits.
+Before ready, the watcher performs one native `list-panes` inventory with only
+`--json --all --state --tab` and requires: its terminal pane exists exactly
+once; the pane belongs to one stable tab; and exactly one original plugin pane
+in that tab has the canonical URL and managed tiled shape. This startup probe
+requests no command, geometry, CWD, scrollback, or process metadata. The
+watcher then binds its private socket and proves current recipient-token
+delivery. A startup inventory or recipient failure produces no ready watcher.
+
+After ready, the captured tuple is never revalidated by the daemon. Exact
+AgentsView fetches, acknowledged full snapshots, and unacknowledged lease
+heartbeats use only the captured stable tab, injected recipient token, and
+random watcher generation. There is no post-ready native inventory, no cleanup
+probe, no empty-snapshot teardown attempt, and no retry or serialization layer.
+On ordinary signal/source failure the watcher stops its source work, closes its
+listener, removes its socket, and exits; on terminal or rail loss it may remain
+orphaned until explicit process cleanup.
 
 Idle renewal is different: a recipient- and generation-checked heartbeat runs
 every 1.4 seconds without a native pane query. The plugin accepts it only for
@@ -547,10 +577,23 @@ resurrect an expired generation.
 
 Each full snapshot carries a random watcher-generation nonce and a short
 lease. The plugin replaces its session projection atomically, accepts
-heartbeats only through its existing exact recipient/tab proof, and clears the
-generation when the lease expires. This prevents a killed watcher from leaving
-an actionable row. The watcher owns projection and focus authority; the plugin
-retains rendering and the already-tested native focus execution.
+heartbeats only through its current exact recipient/tab proof, clears an
+unbound session on current `PaneUpdate`, and clears the generation when the
+lease expires. This prevents a killed watcher, missing terminal, or stale
+delivery from leaving an actionable row. After startup the plugin—not daemon
+inventory—owns projection and focus fail-close; the watcher supplies only
+identity, source data, generation, and lease renewal.
+
+The post-ready lifecycle is intentionally small:
+
+| Event | Plugin result | Daemon result | Native inventory after ready |
+| --- | --- | --- | --- |
+| trusted registration / `data_changed` | one row only if current manifest, recipient, and generation agree | exact fetch + acknowledged snapshot | `0` |
+| heartbeat | same generation lease renewed; no new row created | unacknowledged pipe | `0` |
+| terminal missing, moved, or suppressed | current `PaneUpdate` clears row and lease; focus is inert | may remain orphaned | `0` |
+| original rail missing | plugin state and visible surface are gone | may remain orphaned | `0` |
+| watcher or delivery lost | row and focus expire within 2.5 seconds | stopped, failed, or unreachable | `0` |
+| explicit cleanup | no row or focus; no durable recovery state | harness/operator kills owned PID and removes socket | `0` |
 
 ### Frozen-head retain/delete inventory
 
@@ -558,14 +601,18 @@ Retain and adapt: canonical Codex hook decoding and `codex:<UUID>` identity;
 exact AgentsView fetch and typed response bounds; `SessionEvent.pane_id`;
 atomic snapshot replacement; `registered_session_pane`; exact click focus;
 stable tab/recipient token delivery and acknowledgments; target URL checks;
-AgentsView fixtures; same-CWD `1/1/0` and managed-lookalike tests.
+AgentsView fixtures; same-CWD `1/1/0` and managed-lookalike tests; `af7860a`
+safe stale-socket admission; and `e1ddbb1` complete repeated-ack parsing.
 
 Delete from KJ: `AgentRegistryV1`, file/lock/rename/permission code, stale
 pruning, registry timestamps and generations, registry-dir flags and shell
 propagation, registry polling, restart rehydration, and their tests/docs.
 Replace the automatic `subscribe` launch in direct entry with initial-terminal
-route context plus the manual `watch-tab` readiness path. Do not retain the
-trusted-rail shortcut that allowed an absent original rail.
+route context plus the manual `watch-tab` readiness path. Delete every
+post-ready `probeWatchTarget` call and cleanup native probe; do not replace
+them with retries, cached inventory, serialization, a CLI broker, or task-91
+architecture. Do not retain the trusted-rail shortcut that allowed an absent
+original rail at startup.
 
 ## Acceptance criteria
 
@@ -605,42 +652,51 @@ captures, literal mouse input, and independent native focus state. Expected
 row/request counts are exactly one per top-level ID and zero for the child,
 global list endpoint, and wrong tab.
 
-**AC-O4 — loss of live authority fails closed without recovery state.** Killing
-the watcher or closing/moving/suppressing the watched pane, stable tab, or
-original rail clears the session row within the 2.5-second lease and makes
-focus a no-op. Closing a same-WASM rail in another tab changes nothing. A
-restarted watcher begins with zero rows until a new trusted start arrives. A
-daemon left alive by silent pane loss is not authority and may remain only
-until the next lifecycle check or explicit harness cleanup.
+**AC-O4 — plugin manifest and lease fail closed without daemon rediscovery.**
+Closing, moving, or suppressing the watched terminal clears its exact session
+row and lease on the next current `PaneUpdate`; focus is immediately a no-op.
+Watcher or delivery loss clears the row within 2.5 seconds. Removing the rail
+destroys its plugin state, including the lease and row/focus surface; any
+surviving daemon delivery cannot itself render or focus. Closing a same-WASM
+rail in another tab changes nothing. A restarted watcher begins with zero rows
+until a new trusted start arrives. A daemon orphaned by terminal or rail loss
+is explicitly acceptable and grants no authority merely by remaining alive.
 
-Verified by: one native lifecycle matrix with monotonic timestamps, exact
-pane/tab/rail inventories, screens, focus state, explicit owned-process
-cleanup, and socket absence after cleanup. It includes original-rail removal,
-bystander-rail removal, PID kill, and restart-without-hook, and asserts no
-registry file can rehydrate the row.
+Verified by: one plugin/native lifecycle matrix with monotonic timestamps,
+current manifest fixtures, screens, focus state, and lease deadlines. It covers
+terminal close/move/suppress, original-rail and bystander-rail removal, watcher
+kill, restart-without-hook, exact one-row/no-unbound rendering, and explicit
+owned-process cleanup; no assertion depends on prompt daemon self-termination.
 
-**AC-O5 — managed ownership and bounded host calls survive the simplification.**
-Literal `Alt /` still changes only the V3-proved managed rail; a same-WASM
-lookalike remains byte-identical. Idle watchers issue no native pane query;
-their 1.4-second lease heartbeat does not request plugin output. Startup and
-full-snapshot probes omit command, geometry, CWD, scrollback, and process
-metadata and remain bounded. Queued `Alt p`/`Alt n` actions are not delayed
-beyond the no-watcher control by more than 500 ms.
+**AC-O5 — post-ready native inventory count is exactly zero.** Startup uses
+one bounded native inventory containing no command, geometry, CWD, scrollback,
+or process metadata. From the ready signal through registration, AgentsView
+`data_changed`, heartbeat, terminal close/move, rail loss, and cleanup, the
+watcher issues zero `list-panes` or equivalent native inventory calls and zero
+cleanup probes. Full snapshots use only token-bound acknowledged delivery;
+heartbeats request no plugin output. Literal `Alt /` remains managed-only, and
+queued `Alt p`/`Alt n` are delayed no more than 500 ms over a no-watcher control.
 
-Verified by: retained managed-tab smokes plus an argv-recording fake and the
-disposable Zellij latency control. Pane/tab/layout digests and key-action
-timestamps, not watcher logs, determine the result.
+Verified by: an argv-recording real-boundary wrapper marks the ready epoch and
+asserts pre-ready inventory count `1`, post-ready inventory/cleanup count `0`,
+and only the expected pipe calls across the complete lifecycle matrix. Retained
+managed-tab digests and disposable Zellij key-action timestamps independently
+prove managed ownership and responsiveness.
 
-**AC-O6 — failure and cleanup leave no authority artifact.** Exact-ID 404,
-mismatched response ID, SSE/source timeout, socket collision, malformed native
-state, interruption, and normal watcher exit leave no row after lease expiry,
-no focus action, orphan watcher/helper, registration file, tmux server, Zellij
-session, temporary profile/runtime root, or standing-file change.
+**AC-O6 — failure and explicit cleanup leave no durable authority.** Exact-ID
+404, mismatched response ID, SSE/source timeout, socket collision, malformed
+startup inventory, acknowledgment loss, interruption, and normal watcher exit
+leave no actionable row after manifest clearing or lease expiry and write no
+registration or recovery record. The harness explicitly kills any accepted
+orphan daemon and removes its socket, tmux server, Zellij session, temporary
+profile/runtime root, and other owned process state. Prompt automatic teardown
+after terminal or rail loss is not required.
 
-Verified by: injected failures under harness traps, process/socket/native
-absence checks, a forbidden-registration-file scan, and pre/post hashes of the
-standing config/layout. The exact-session request log proves no list or inferred
-fallback was attempted.
+Verified by: injected failures plus a manual-cleanup ledger recording owned
+PIDs before/after cleanup, socket/process/native absence after that explicit
+step, a forbidden-registration-file scan, and pre/post standing config/layout
+hashes. The exact-session request log proves no list or inferred fallback was
+attempted.
 
 ### Captain-live (only after AC-O1 through AC-O6)
 
@@ -648,48 +704,59 @@ fallback was attempted.
 creates two disposable same-CWD managed tabs, manually starts one watcher in
 each chosen terminal, launches one real Codex session per terminal, and asks
 one to spawn a subagent. Each top-level ID appears exactly once in its own rail,
-the child/history appear nowhere, and each row focuses its originating pane.
-Killing one watcher removes only its row within 2.5 seconds; restarting the
-watcher does not resurrect it until Codex emits another trusted start.
+with no `unbound` label; the child/history appear nowhere; and each row focuses
+its originating pane. Moving/closing one watched terminal clears only its row
+through the manifest. Killing one watcher removes only its row within 2.5
+seconds; restarting the watcher does not resurrect it until Codex emits another
+trusted start. The operator may explicitly kill an orphaned watcher during
+cleanup rather than waiting for automatic lifecycle teardown.
 
 Verified by: captain observation plus watcher ready tuples, captured hook IDs,
 exact AgentsView responses, two screen/focus states, kill/restart timestamps,
-and pre/post standing-state hashes. Any need to consult CWD, a registry, or an
-old hook event fails the demo.
+the instrumented zero-post-ready-inventory count, an explicit process-cleanup
+record, and pre/post standing-state hashes. Any need to consult CWD, a registry,
+an old hook event, or a post-ready native inventory fails the demo.
 
 ## Test plan
 
-1. **Riskiest mechanism first — DONE, PASSED.** Preserve the exact disposable
-   result above. Convert it into the smallest native test: missing daemon fails,
-   matching hook registers over a private pane-derived socket, bystander rail
-   removal is inert, and original rail removal terminates authority. If leased
-   row expiry cannot be added without persistence, stop before implementation.
-2. Write failing watcher startup tests for exact tuple resolution, private
-   socket/single listener, full-envelope validation, no-Zellij no-op, and zero
-   registration files; then implement the minimal `watch-tab` and hook client.
-3. Adapt exact AgentsView projection tests from frozen head to one in-memory
-   registration and one watcher generation. Add exact 404/mismatch/source
-   failures and atomic leased snapshot/heartbeat/expiry tests.
-4. Retain Rust exact-pane snapshot/focus and stable-recipient tests; add watcher
-   generation/lease matrices and “test passes while row is stale/actionable”
-   adversarial assertions.
-5. Rewrite the two-tab native smoke around manual watcher commands and exact
-   `1/1/0`; add watcher/pane/tab/original-rail visible-authority loss,
-   bystander rail, restart empty, latency control, explicit daemon cleanup,
-   and no-registry assertions. Silent pane loss must not depend on daemon exit.
-6. Delete registry/pruning/rehydration code and tests, then run Rust/Go/build,
-   hook, entry, managed-tab, subscription, two-rail, latency, and `diff --check`
-   packets. No Zellij case may skip or touch `WORK` or standing KDL.
+1. **Riskiest mechanism first.** Instrument the real watcher/Zellij command
+   boundary, mark the ready signal, and run registration, exact projection,
+   multiple AgentsView `data_changed` refreshes, heartbeats, terminal move and
+   close, original- and bystander-rail loss, watcher kill, and explicit cleanup.
+   Require pre-ready native inventory count `1`, post-ready inventory/cleanup
+   count `0`, exactly one bound row with no `unbound`, manifest/lease removal,
+   and a clean manual process ledger. Stop if any post-ready inventory is needed.
+2. Write the failing watcher tests that expose current post-ready
+   `probeWatchTarget` and cleanup probes, then remove only those calls. Preserve
+   one exact startup resolution, private socket admission, `af7860a` safe stale
+   recovery, and `e1ddbb1` complete repeated-ack validation.
+3. Extend exact AgentsView projection tests for one in-memory registration and
+   generation across repeated `data_changed` refreshes. Add exact
+   404/mismatch/source/ack failures without retry, list fallback, or inventory.
+4. Extend the existing Rust `PaneUpdate`, recipient, generation, snapshot,
+   heartbeat, lease-expiry, and click tests with terminal close/move/suppress and
+   rail-loss matrices. Ask how each test could pass while a stale row remained
+   actionable; assert the exact row count, bound label, and focus no-op.
+5. Update the two-tab native smoke around manual watcher commands and exact
+   `1/1/0`; prove no historical/child/unbound rows, exact focus, terminal and
+   rail visible-authority loss, watcher lease expiry, empty restart, responsive
+   pane/tab keys, and explicit orphan cleanup. Never require daemon self-exit.
+6. Run Rust/Go/build, hook, entry, managed-tab, subscription, two-rail,
+   lifecycle, latency, and `diff --check` packets. No Zellij case may skip,
+   touch `WORK`, mutate standing KDL, or introduce retry/broker/registry/
+   supervisor/task-91 architecture.
 7. Only after offline green, run AC-I1 with real Codex and isolated AgentsView;
-   preserve the IDs/timings/negative evidence and remove every disposable root
-   and process.
+   preserve exact IDs, row/focus screens, zero post-ready inventory evidence,
+   lease timings, and the explicit removal of every disposable root and process.
 
 ## Documentation change
 
 - README's session-row and fresh-tab sections must say that direct entry creates
   the managed tab but the operator explicitly runs `target/zaphod watch-tab`
-  in the agent terminal before starting Codex. Document the ready tuple,
-  one-terminal limit, 2.5-second lease expiry, and restart re-registration.
+  in the agent terminal before starting Codex. Document the one-time startup
+  tuple, zero post-ready native inventory, plugin-manifest/lease fail-close,
+  one-terminal limit, 2.5-second expiry, explicit orphan cleanup, and restart
+  re-registration.
 - Rewrite `docs/zellij-agentsview-live-demo.md` as the exact manual two-tab
   journey, including missing-watcher, child/history, kill, restart-empty, and
   exact-focus observations; remove registry inspection and rehydration claims.
@@ -705,8 +772,11 @@ durable registry/state; registration recovery after watcher/plugin/sidecar
 restart; same-name Zellij incarnation and pane-ID reuse recovery; inferring
 identity from CWD/title/time/prompt/newest; global Codex hook installation;
 non-Codex providers; standing Zellij mutation; gate behavior; and the broader
-hub/controller architecture. Automation, multi-pane support, durability,
-incarnation, and rehydration remain in filed follow-up
+hub/controller architecture. Post-ready native retry, inventory caching, a CLI
+broker or serialization queue, prompt daemon teardown after pane/rail loss, and
+task-91 nonblocking metadata architecture are also excluded. Automation,
+multi-pane support, orphan cleanup, durability, incarnation, and rehydration
+remain in filed follow-up
 `tab-local-agent-watcher-automation.md` (`6s0s2704zrms3med9n04mm4y`).
 
 ## Stage Report: ideation (cycle 2)
@@ -1029,3 +1099,45 @@ Cycle 7 now treats Zellij's repeated per-client outputs as one logical exact
 rail acknowledgment without weakening physical rail cardinality. All requested
 offline proof is green at `52973da`; the prepared live retest deliberately
 exercises both stale-socket recovery and `readyready` acceptance in place.
+
+## Stage Report: ideation (cycle 5)
+
+- DONE: Rewrite the canonical current contract around startup-only native
+  authority.
+  One pre-ready inventory resolves the exact terminal, stable tab, and original
+  rail; the contract requires zero native inventory or cleanup probes afterward.
+- DONE: Assign post-ready row and focus fail-close to existing plugin state.
+  Current `PaneUpdate`, recipient proof, watcher generation, exact pane binding,
+  and the 2.5-second lease now define every actionable projection state.
+- DONE: Replace contradictory AC-O4, AC-O5, and AC-O6 lifecycle obligations.
+  Terminal close/move/suppress clears through the manifest, rail/watcher loss
+  removes or expires authority, and orphan daemons are accepted until explicit
+  manual cleanup rather than required to self-terminate.
+- DONE: Specify the riskiest implementation proof before further code changes.
+  The instrumented matrix requires one pre-ready inventory, zero post-ready
+  inventory across registration/data-change/heartbeat/loss/cleanup, exactly one
+  bound row with no `unbound`, lease expiry, and a clean owned-PID ledger.
+- DONE: Preserve accepted implementation inputs without preserving the failed
+  recurring-probe mechanism.
+  AC-O1, AC-O2, and AC-O3 retain the exact startup/socket/projection evidence;
+  `af7860a` safe stale admission and `e1ddbb1` repeated-ack parsing remain
+  inputs, while post-ready `probeWatchTarget` and cleanup probes do not.
+- DONE: Bound the mechanism to the smallest walking skeleton.
+  Retry, native-inventory caching, CLI broker/serialization, registry,
+  supervisor, durable recovery, and task-91 architecture are explicitly out.
+- DONE: Update the proposed documentation delta and captain-live journey.
+  The docs must teach startup-only inventory, manifest/lease fail-close,
+  exact one-row/no-unbound projection, and explicit orphan cleanup.
+- SKIPPED: Modify or verify product code during ideation.
+  AC-O4, AC-O5, and AC-O6 are intentionally unmet until the first implementation
+  proof; product head `e1ddbb1` remains an input and no product file was changed.
+- SKIPPED: Mutate or claim evidence from captain Zellij sessions.
+  AC-I1 remains unmet; its live drill is gated behind the new offline
+  zero-inventory proof.
+
+### Summary
+
+Cycle 8 removes the unstable post-ready native lifecycle controller while
+keeping exact startup identity, token-bound delivery, manifest binding, and
+lease expiry. The next implementation must first prove that this smaller
+authority split stays exact and fail-closed with zero post-ready inventory.
