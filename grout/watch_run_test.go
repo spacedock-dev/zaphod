@@ -303,6 +303,7 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 		t.Fatal(err)
 	}
 	lockPath := filepath.Join(dir, "native.lock")
+	heartbeatLog := filepath.Join(dir, "heartbeats.log")
 	nativeLog := filepath.Join(dir, "native.log")
 	snapshotLog := filepath.Join(dir, "snapshots.log")
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
@@ -316,6 +317,7 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 		"  *' pipe '*)\n"+
 		"    case \"$*\" in\n"+
 		"      *-ready*) echo ready ;;\n"+
+		"      *-heartbeat*) printf '%s\\n' \"$*\" >> "+heartbeatLog+" ;;\n"+
 		"      *-snapshot*) cat >/dev/null; printf '%s\\n' \"$*\" >> "+snapshotLog+"; echo accepted ;;\n"+
 		"    esac ;;\n"+
 		"esac\n")
@@ -352,7 +354,7 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 				ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d", ZellijSession: "managed",
 				RailURL: "file:/candidate/sidebar.wasm", RecipientToken: token,
 				PipeTimeout: time.Second, SourceTimeout: time.Second, SummaryClampBytes: 512,
-			}, PaneID: pane, SocketRoot: runtimeRoot, Lease: time.Second,
+			}, PaneID: pane, SocketRoot: runtimeRoot, Lease: 2500 * time.Millisecond,
 				Heartbeat: time.Hour, Ready: ready}, &bytes.Buffer{})
 		}()
 		select {
@@ -382,7 +384,17 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 		{7, "019f60ff-1111-7222-8333-444455556666"},
 		{8, "019f60ff-1111-7222-8333-444455556667"},
 	}
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		heartbeats, _ := os.ReadFile(heartbeatLog)
+		if bytes.Count(heartbeats, []byte("\n")) >= 2 {
+			break
+		}
+	}
+	if err := os.Remove(heartbeatLog); err != nil {
+		t.Fatalf("reset startup heartbeat evidence: %v", err)
+	}
 	hookErrs := make(chan error, len(hooks))
+	refreshStarted := time.Now()
 	for _, hook := range hooks {
 		hook := hook
 		go func() {
@@ -415,6 +427,13 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 	contents, _ := os.ReadFile(snapshotLog)
 	if bytes.Count(contents, []byte("\n")) < 4 {
 		t.Fatalf("two watchers did not complete their post-hook snapshots: %s", contents)
+	}
+	if elapsed := time.Since(refreshStarted); elapsed >= 2500*time.Millisecond {
+		t.Fatalf("serialized post-hook refresh took %s, want less than the renewed 2.5s lease", elapsed)
+	}
+	heartbeats, _ := os.ReadFile(heartbeatLog)
+	if got := bytes.Count(heartbeats, []byte("\n")); got != 2 {
+		t.Fatalf("pre-refresh lease renewals = %d, want one per watcher", got)
 	}
 	nativeCalls, _ := os.ReadFile(nativeLog)
 	if got := bytes.Count(nativeCalls, []byte("\n")); got != 6 {

@@ -127,6 +127,12 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		rows = nextRows
 		return emit()
 	}
+	refreshLeasedSource := func() error {
+		if err := heartbeat(); err != nil {
+			return err
+		}
+		return refreshSource()
+	}
 	if err := waitForRecipient(ctx, cfg.WatchRoute); err != nil {
 		return err
 	}
@@ -175,12 +181,12 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		case next := <-registrations:
 			copy := next
 			registration = &copy
-			if err := refreshSource(); err != nil {
+			if err := refreshLeasedSource(); err != nil {
 				return err
 			}
 		case event := <-streamEvents:
 			if event == watchSourceDataChanged {
-				if err := refreshSource(); err != nil {
+				if err := refreshLeasedSource(); err != nil {
 					return err
 				}
 			} else if err := heartbeat(); err != nil {
