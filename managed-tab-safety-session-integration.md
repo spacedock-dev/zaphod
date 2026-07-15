@@ -1141,3 +1141,47 @@ Cycle 8 removes the unstable post-ready native lifecycle controller while
 keeping exact startup identity, token-bound delivery, manifest binding, and
 lease expiry. The next implementation must first prove that this smaller
 authority split stays exact and fail-closed with zero post-ready inventory.
+
+## Stage Report: implementation (cycle 5)
+
+- DONE: Implement the approved startup-only authority contract from `e1ddbb1` without retry, cache,
+  broker, registry, supervisor, durable recovery, or task-91 architecture. Commits `f4873d0` and
+  `bd18165` preserve `af7860a` and repeated-ack behavior while deleting post-ready/cleanup probes.
+- DONE: Prove exactly one native inventory before ready and zero afterward across registration,
+  repeated `data_changed`, heartbeat, close/move/suppress, rail loss, and explicit cleanup.
+- DONE: Keep row and focus fail-close through current manifest state, exact registered pane,
+  recipient, generation, and 2.5-second lease; silent pane/rail loss may leave an orphan daemon.
+- DONE: Bind every ready/snapshot/heartbeat delivery to the startup-resolved original rail ID.
+  NARROW FIX — OUTCOME DEFECT at AC-O4/AC-O5: a replacement same-token rail could accept the
+  orphan watcher; `bd18165` now requires `recipient-rail-id` to equal the receiver plugin ID.
+- DONE: Repair the two-rail harness's inherited-client proof boundary.
+  NARROW FIX — EVIDENCE DEFECT: inherited `ZELLIJ`/session/pane overrode the isolated route and
+  produced “There is no active session”; the harness now clears invoking-client identity.
+- DONE: Update operator/grout docs for startup-only inventory, manifest/lease fail-close,
+  explicit orphan cleanup, and exact original-rail delivery identity.
+- SKIPPED: Run or claim the captain-live AC-I1 observation.
+  No captain session was mutated; the required worker-owned retained-client proof was isolated.
+- FAILED: None. Every authorized implementation and proof item completed.
+
+### TDD and verification evidence
+
+- RED: native counts were `2` not `1` for one watcher and `6` not `2` for two; cleanup added a
+  call. Final tests hold `1`, `2`, and no cleanup increment. Rail REDs omitted ID `50` and accepted
+  replacement ID `51`; both pass after `bd18165`.
+- `go test ./... -count=1`, `go vet ./...`, Rust 147/147, `cargo check --tests`, `build.sh`, and
+  `git diff --check` pass. Two-rail `1/1/0` and outside/inside lifecycle smokes pass.
+- An ordinary detached checkout at exact final SHA
+  `bd181658e06b917964e5697580cd0d198266ac99` passed real AgentsView evidence at
+  `/tmp/kj-retained-bd18165.WZojCX/evidence`: clients `1+3` became `3`; one `list-panes`, four
+  live `data_changed`, six snapshots, 22 quiet seconds, live PID/socket, one bound `codex`, zero
+  `unbound`, and no surviving isolated session.
+- Quick 1644 found the rail gap and was fixed, annotated, and closed. Exact-head quick 1649 passed;
+  three-reviewer `code_completion` 1653 returned “No issues found.”
+- The branch is pushed through `bd18165`. The pre-existing `.codex/hooks.json` edit remains
+  uncommitted and untouched.
+
+### Summary
+
+Cycle 9 completes the startup-only walking skeleton: one admission inventory, exact
+recipient/tab/original-rail/generation/lease projection afterward, and UI fail-close without the
+blocking metadata controller. Offline, native, retained-client, and review evidence is green.
