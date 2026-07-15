@@ -1,6 +1,6 @@
 ---
 title: Integrate managed-tab safety with tab-bound session delivery
-status: implementation
+status: validation
 group: walking-skeleton
 sprint: s1-managed-tab-safety
 sprint-readiness: ready
