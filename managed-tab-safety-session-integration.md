@@ -1185,3 +1185,42 @@ authority split stays exact and fail-closed with zero post-ready inventory.
 Cycle 9 completes the startup-only walking skeleton: one admission inventory, exact
 recipient/tab/original-rail/generation/lease projection afterward, and UI fail-close without the
 blocking metadata controller. Offline, native, retained-client, and review evidence is green.
+
+## Stage Report: validation (cycle 2)
+
+- FAILED: Independently verify frozen SHA `bd18165`, the stored
+  `code_completion` parent, and every offline AC by rerunning its supported
+  proof path.
+  The detached exact-head packet passed AC-O1 through AC-O4 and AC-O6, but
+  `tests/zellij-sidebar-congestion-test.sh` failed twice at literal `Alt n`'s
+  one-second complete-tab deadline, so AC-O5 is refuted. Parent 1653 is a
+  complete PASS panel, but its patch ID `364e099...` covers only commit
+  `bd18165`; the required `9343129..bd18165` range hashes to `6aff3af...`.
+- DONE: Run a throwaway-checkout refutation audit of exact tab/original-rail
+  identity, startup-only native inventory, lease fail-close, and watcher
+  lifecycle without changing the product.
+  Four deliberate mutations went red: session-wide rail matching, post-ready
+  heartbeat inventory, stale-row retention after lease expiry, and listener/
+  socket cleanup removal. Malformed and indexing paths passed. The real caller-
+  impact attack survived at the congestion boundary.
+- DONE: Prepare the smallest captain-live demo and Subspace gate evidence,
+  clearly separating automated proof from the one live observation.
+  `gates/managed-tab-safety-session-integration-validation.md` records the
+  rerun packet, mutations, blockers, and held two-tab script;
+  `gates/managed-tab-safety-session-integration.md` and its decisions JSONL
+  record the cycle-2 rejection recommendation.
+- SKIPPED: Run or claim the AC-I1 captain-live observation.
+  AC-I1 is gated behind AC-O1 through AC-O6. The captain demo remains held
+  until AC-O5 passes and a replacement panel covers the full final range.
+- FAILED: None beyond AC-O5 and the review-range evidence defect above. The
+  implementation worktree remained frozen at `bd18165`; its pre-existing
+  `.codex/hooks.json` edit remained untouched.
+
+### Summary
+
+Validation rejects `bd18165`. Exact identity, `1/1/0`, focus, startup-only
+inventory, lease fail-close, lifecycle, and explicit cleanup evidence pass,
+but the supported native congestion proof fails twice. Stored parent 1653
+also reviews only the final commit rather than the required merge-base range.
+Route the entity to implementation, rerun the congestion proof at the repaired
+SHA, then record a new full-range `code_completion` panel before AC-I1.
