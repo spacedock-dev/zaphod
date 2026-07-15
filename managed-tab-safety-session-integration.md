@@ -1245,3 +1245,54 @@ but the supported native congestion proof fails twice. Stored parent 1653
 also reviews only the final commit rather than the required merge-base range.
 Route the entity to implementation, rerun the congestion proof at the repaired
 SHA, then record a new full-range `code_completion` panel before AC-I1.
+
+## Stage Report: implementation (cycle 6)
+
+- DONE: Classify the validation return at the exact AC-O5 boundary before
+  changing product code. Ordinary Zellij action completion is a valid release
+  outcome, but its repair is not a narrow KJ change under the approved scope.
+- DONE: Reproduce the supported watcher journey at unchanged SHA `bd18165`.
+  A detached tmux/Zellij run reached readiness, rendered `SMOKE_SECOND_ROW`,
+  preserved exact routing, and cleaned up; evidence is in
+  `/tmp/kj-eof-repro.CZaIjF`.
+- FAILED: Satisfy AC-O5's one-second native action deadline with the shipped
+  rail and live 2.5-second lease. Validation twice completed three literal
+  `Alt p` actions, then `Alt n` missed the complete-tab deadline.
+- FAILED: Obtain a stable positive congestion packet at the same head.
+  `/tmp/kj-responsive.dz6Vh5` failed earlier when the post-registration
+  `data_changed` row did not render, before that run reached the action phase.
+- DONE: Compare the boundary with clean main branch `dd5462c`.
+  Main reached the positive responsiveness verdict, then failed the wrapper's
+  injected retained-phase assertion. This separates the pre-existing harness
+  cleanup defect from KJ's live-watcher action failure.
+- DONE: Identify the timing incompatibility rather than tune around it.
+  The rail's debug proof holds its synchronous refresh handler for 1.2 seconds;
+  AC-O5 allows one second, and KJ renews a 2.5-second lease every 1.4 seconds.
+- DONE: Show why cadence changes cannot establish the invariant.
+  Faster renewal increases overlap with the blocked handler; slower renewal
+  can miss fail-close. Either cadence can align a heartbeat with refresh and
+  exceed the one-second action AC.
+- DONE: Recommend the smallest design reset.
+  Move synchronous pane-command and CWD acquisition out of the WASM event
+  handler, or provide an equivalent bounded nonblocking metadata ingress, so
+  rail pipe events and ordinary actions never queue behind metadata lookup.
+- DONE: Preserve all accepted KJ constraints by making no product change.
+  Original-rail identity, one startup inventory, zero post-ready inventory,
+  in-memory registration, lease expiry, manifest fail-close, watcher lifecycle,
+  and explicit orphan cleanup remain unchanged at `bd18165`.
+- SKIPPED: Add retries, cadence heuristics, polling, cache, broker, registry,
+  supervisor, durable recovery, a persistent delivery controller, or task-91
+  architecture. Each would exceed the returned implementation scope.
+- SKIPPED: Rerun a full verification packet or request captain observation.
+  The product SHA did not change; validation's AC-O1 through AC-O4 and AC-O6
+  evidence remains current, and AC-I1 stays gated by AC-O5.
+- SKIPPED: Run a replacement full-range `code_completion` panel.
+  No repaired product SHA exists; parent 1653's commit-only range remains an
+  evidence defect for the reframed implementation.
+
+### Summary
+
+Cycle 10 stops without a cadence workaround or wider controller. KJ's exact
+startup-only projection remains intact. The next task must establish a
+nonblocking pane-metadata boundary before validation reruns congestion and the
+full-range review.
