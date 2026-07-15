@@ -359,6 +359,22 @@ or redefine KJ's registry authority and session-incarnation decision.
 - These requirements strengthen the permanent nonblocking architecture; they
   do not expand task 44 beyond removal of periodic scrollback.
 
+#### KJ AC-O5 dependency — 2026-07-15
+
+- Fresh KJ validation at unchanged SHA `bd18165` reproduced a released-user
+  failure twice: literal `Alt n` missed its one-second complete-tab deadline
+  while the managed rail and manual `watch-tab` watcher were live.
+- KJ's synchronous heartbeat delivery can align with the rail's deliberate
+  1.2-second metadata refresh barrier. Faster renewal increases overlap;
+  slower renewal can violate KJ's 2.5-second watcher-loss fail-close lease.
+  Cadence tuning therefore cannot establish the action-latency invariant.
+- Task 91 must provide the nonblocking metadata boundary before KJ validation
+  resumes. Preserve KJ's exact original-rail identity, startup-only native
+  inventory, lease fail-close, and explicit orphan-cleanup contract; do not
+  reintroduce watcher-side polling, retries, or another controller.
+- After task 91 lands, rerun KJ's native congestion proof and obtain a new
+  full-range `code_completion` parent for KJ before its captain-live AC-I1.
+
 ## Stage Report: ideation
 
 - DONE: Design a bounded cached/event-fed metadata architecture that removes every synchronous pane command, CWD, and scrollback call from the WASM hot path while preserving exact pane authority and degraded stale-state rendering.
