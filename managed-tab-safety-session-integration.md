@@ -1,6 +1,6 @@
 ---
 title: Integrate managed-tab safety with tab-bound session delivery
-status: validation
+status: implementation
 group: walking-skeleton
 sprint: s1-managed-tab-safety
 sprint-readiness: ready
@@ -412,6 +412,27 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   lifecycle ACs and tests to prove zero post-ready native inventory calls,
   exact projection, lease expiry, and explicit/manual process cleanup before
   implementation resumes.
+
+### Cycle 9 — 2026-07-15 — validation rejected the frozen candidate
+
+- Classification: **outcome defect** at AC-O5. The fresh validator ran the
+  supported native congestion proof twice; literal `Alt n` missed the
+  one-second complete-tab deadline both times. The exact failing boundary is
+  ordinary Zellij action completion while the startup-only watcher and rail
+  are live.
+- Independently, the stored Roborev `code_completion` parent is an **evidence
+  defect**: it passed only commit `bd18165`, while validation requires the full
+  `merge-base(main, head)..head` branch range. A replacement full-range panel
+  is required after the final product SHA; this does not authorize product or
+  harness changes.
+- Diagnose AC-O5 against the released manual-watcher journey first. If the
+  supported test validly observes the one-second AC, make the smallest product
+  correction and rerun the exact proof. If its observation boundary is
+  invalid, stop and return a design-reset recommendation; do not repair the
+  harness into another controller.
+- Preserve startup-only native inventory, exact original-rail identity, lease
+  fail-close, and the explicit orphan-cleanup boundary. Do not add retries,
+  polling, caching, a broker, registry, supervisor, or task-91 architecture.
 
 ## Problem
 
