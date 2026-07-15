@@ -41,6 +41,7 @@ type watchSourceEvent uint8
 const (
 	watchSourceHeartbeat watchSourceEvent = iota + 1
 	watchSourceDataChanged
+	cleanupAuthorityTimeout = 500 * time.Millisecond
 )
 
 func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result error) {
@@ -115,17 +116,11 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	refreshSource := func() error {
 		nextRows := make([]SessionRow, 0, 1)
 		if registration != nil {
-			if err := probe(ctx); err != nil {
-				return err
-			}
 			session, err := fetchExactSession(ctx, client, cfg.ServerURL, registration.AgentsViewSessionID, cfg.SourceTimeout)
 			if err != nil && !errors.Is(err, ErrExactSessionNotFound) {
 				return err
 			}
 			if err == nil {
-				if err := probe(ctx); err != nil {
-					return err
-				}
 				nextRows = append(nextRows, BuildRegisteredSessionRow(session, registration.PaneID, time.Now(), cfg.SummaryClampBytes))
 			}
 		}
@@ -157,7 +152,9 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 		}
 	}
 	defer func() {
-		if probe(context.Background()) == nil {
+		cleanupProbeCtx, cancelProbe := context.WithTimeout(context.Background(), cleanupAuthorityTimeout)
+		defer cancelProbe()
+		if probeWatchTarget(cleanupProbeCtx, cfg.WatchRoute, target) == nil {
 			clearCtx, cancel := context.WithTimeout(context.Background(), cfg.PipeTimeout)
 			defer cancel()
 			_ = EmitLeasedSnapshotForTab(clearCtx, cfg.emitConfig(), nil, cfg.TabID, cfg.RecipientToken, generation, 100*time.Millisecond, stderr)

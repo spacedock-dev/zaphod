@@ -262,7 +262,7 @@ func TestWatcherCleanupBoundsSlowNativeAuthorityProbe(t *testing.T) {
 			RailURL: "file:/candidate/sidebar.wasm", RecipientToken: "token",
 			PipeTimeout: time.Second, SourceTimeout: time.Second, SummaryClampBytes: 512,
 		}, PaneID: 7, SocketRoot: runtimeRoot, Lease: time.Second, Heartbeat: time.Hour,
-			AuthorityTimeout: 500 * time.Millisecond, Ready: ready}, &bytes.Buffer{})
+			Ready: ready}, &bytes.Buffer{})
 	}()
 	select {
 	case <-ready:
@@ -303,6 +303,7 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 		t.Fatal(err)
 	}
 	lockPath := filepath.Join(dir, "native.lock")
+	nativeLog := filepath.Join(dir, "native.log")
 	snapshotLog := filepath.Join(dir, "snapshots.log")
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
 		"case \" $* \" in\n"+
@@ -310,6 +311,7 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 		"    while ! mkdir "+lockPath+" 2>/dev/null; do sleep 0.01; done\n"+
 		"    trap 'rmdir "+lockPath+"' EXIT\n"+
 		"    sleep 1.1\n"+
+		"    printf 'probe\\n' >> "+nativeLog+"\n"+
 		"    cat "+panesPath+" ;;\n"+
 		"  *' pipe '*)\n"+
 		"    case \"$*\" in\n"+
@@ -413,5 +415,9 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 	contents, _ := os.ReadFile(snapshotLog)
 	if bytes.Count(contents, []byte("\n")) < 4 {
 		t.Fatalf("two watchers did not complete their post-hook snapshots: %s", contents)
+	}
+	nativeCalls, _ := os.ReadFile(nativeLog)
+	if got := bytes.Count(nativeCalls, []byte("\n")); got != 6 {
+		t.Fatalf("native authority probes = %d, want 6 (resolve+initial delivery per watcher, then one post-hook delivery probe)", got)
 	}
 }
