@@ -353,6 +353,24 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   Roborev review, and the same captain-live startup. Do not add a registry,
   controller, lifecycle supervisor, or alternate proof harness.
 
+### Cycle 6 — 2026-07-15 — captain approved final narrow stale-socket repair
+
+- Classification: **narrow fix — outcome defect** against AC-O6 and AC-I1.
+  The captain's normal first-use retry left a dead watch socket after the
+  readiness parent killed its child; the next watcher refused the stale path
+  and required manual removal before the journey could continue.
+- Exact failing boundary: restart admission in `listenWatchSocket()` treats
+  every existing socket as live. The approved socket contract already permits
+  removing an endpoint only after proving it stale, while requiring a live
+  watcher to remain exclusive and undisplaced.
+- Preserve the manual watcher and in-memory authority design. Implement only
+  safe stale-socket discrimination/removal, prove that a live watcher can
+  never be evicted, and retain fail-closed behavior for ambiguous ownership.
+  Do not add a registry, supervisor, recovery controller, or durable record.
+- This is the captain-authorized final narrow feedback cycle. Re-run the
+  focused socket/lifecycle tests, the exact two-watcher regression, and one
+  focused Roborev review before returning to the fresh two-tab live drill.
+
 ## Problem
 
 The frozen implementation at `2fa8e8424d196465cd00bd091932a65d4ef01107`
