@@ -5,23 +5,23 @@ gate:
   entity: managed-tab-safety-session-integration
   entity-title: Integrate managed-tab safety with tab-bound session delivery
   stage: validation
-  round: 1
+  round: 2
 recommendation:
-  verdict: PENDING-DEMO
-  rationale: "AC-O1 through AC-O6 independently pass at frozen head dec685e8; AC-I1 remains the captain's fresh-session two-tab manual watcher demo."
+  verdict: REJECTED
+  rationale: "AC-O5's native congestion proof failed twice at literal Alt n, and Roborev parent 1653 covers only bd18165 rather than the required 9343129..bd18165 range. AC-I1 is held."
 artifact:
   kind: draft
   path: ./managed-tab-safety-session-integration-validation.md
 criteria:
   bar: |
-    The exact-head code_completion packet, all six offline criteria, and a
-    throwaway adversarial audit must pass before the captain spends time on
-    AC-I1. Approval then requires the captain's direct two-tab observation;
-    offline harness output cannot substitute for that live result.
+    The exact-range code_completion packet and all six offline criteria must
+    pass before the captain runs AC-I1. The real congestion packet must meet
+    its native-state deadline during an in-flight refresh; pure predicates do
+    not replace that caller-impact proof.
   acceptance:
     - id: AC-O1
       text: Manual startup resolves one exact live authority tuple per watched same-CWD tab and none for a foreign shell.
-      evidence: "PASS: native two-rail and lifecycle smokes independently reproduced exact tab/terminal/rail separation."
+      evidence: "PASS: native two-rail and focused startup tests reproduced exact tab, terminal, and original-rail separation."
     - id: AC-O2
       text: The private socket admits only a matching top-level SessionStart and keeps one in-memory registration.
       evidence: "PASS: full-record, socket, over-limit, wrong-authority, child, replacement, and no-registry tests passed."
@@ -30,27 +30,26 @@ criteria:
       evidence: "PASS: native two-rail smoke proved exact requests, child/global-list negatives, screen cardinality, and literal focus."
     - id: AC-O4
       text: Loss of live authority clears rows and focus within the lease without recovery state.
-      evidence: "PASS: watcher/terminal/original-rail loss, bystander, restart-empty, lease, and cleanup matrices passed."
+      evidence: "PASS: manifest, original-rail, bystander, restart-empty, lease, and cleanup matrices passed."
     - id: AC-O5
-      text: Managed ownership remains exact and idle watcher renewal does not delay normal Zellij actions.
-      evidence: "PASS: responsive, congestion, managed-toggle, no-idle-query, and injected-timeout cleanup proofs passed."
+      text: Post-ready native inventory stays zero and managed pane/tab actions remain responsive.
+      evidence: "REFUTED: inventory counts passed, but the native congestion packet failed twice at literal Alt n's one-second complete-tab deadline."
     - id: AC-O6
       text: Failure and cleanup leave no test-owned authority artifact, helper, session, or standing-file change.
-      evidence: "PASS: four stress cases and native cleanup assertions passed; candidate worktree remained clean."
+      evidence: "PASS: four injected stress cases and native cleanup assertions passed."
     - id: AC-I1
       text: The captain can use two manual same-CWD watchers with exact rows/focus, child/history exclusion, lease removal, and restart-empty behavior.
-      evidence: "PENDING: captain-live script is in the artifact; only the captain's reported observation settles it."
+      evidence: "NOT RUN: blocked by AC-O5 and incomplete review-range coverage; the held script is in the artifact."
 ---
 
-Offline validation is green at `dec685e8cf6efbc84ef2b26f60a81e4eda9aacf5`.
-The stored `code_completion` panel covers the exact merge-base range, contains
-correctness, journey, and proof once each with no execution failure, and has a
-passing synthesis verdict. The original removed endpoint was an evidence
-retention defect. At the captain's request, replacement run
-`87a8c780-3160-4389-8ba6-d622296a3278` produced parent 4 and retained both its
-raw JSON and restartable database; no product file or standing configuration
-changed.
+Validation rejects frozen head
+`bd181658e06b917964e5697580cd0d198266ac99`. The detached exact-head packet
+passed Go, Rust 147/147, build, hook, entry, two-rail `1/1/0`, outside/inside
+lifecycle, layout, and four cleanup-stress cases. The real congestion packet
+failed twice at the same literal `Alt n` boundary.
 
-The artifact records the independent command packet, six named adversarial
-attacks, and the exact fresh-session AC-I1 script. Keep this gate pending until
-the captain reports the live row, focus, lease, restart, and cleanup outcomes.
+Stored parent 1653 is structurally complete and PASS, but its patch ID equals
+the final commit alone. The required merge-base range has a different patch
+ID. Route back to implementation for the congestion repair and a replacement
+full-range `code_completion` packet. The captain-live script is prepared but
+must remain held.
