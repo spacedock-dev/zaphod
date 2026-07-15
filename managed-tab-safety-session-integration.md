@@ -371,6 +371,26 @@ to S9/QT; no standing configuration or new lifecycle mechanism is authorized.
   focused socket/lifecycle tests, the exact two-watcher regression, and one
   focused Roborev review before returning to the fresh two-tab live drill.
 
+### Cycle 7 — 2026-07-15 — captain-live readiness cardinality failed
+
+- Classification: **narrow fix — outcome defect** against AC-O1 and AC-I1.
+  In the ordinary attached captain session, the exact rail answered the
+  readiness probe immediately with `readyready`; the watcher required exactly
+  `ready`, retried until its outer deadline, and exited before readiness.
+- Exact failing boundary: Zellij 0.44.3 retains a plugin runtime per client and
+  broadcasts CLI pipes to retained runtimes after attach/detach, concatenating
+  their identical outputs. `list-clients` reports only connected clients, so
+  one visible native rail may legitimately yield repeated acknowledgments.
+- Accept one or more complete `ready` atoms only. Reject empty, partial, or
+  foreign bytes; retain initial exact-one native rail resolution; and
+  strengthen the immediate pre-delivery authority probe to reject any second
+  matching native rail so repeated runtime acknowledgments cannot conceal a
+  duplicate visible recipient.
+- Add focused single/repeated/malformed response tests, duplicated-runtime
+  readiness coverage, and duplicate-native-rail rejection. Preserve the
+  manual watcher, in-memory authority, and all cycle-6 live/stale socket rules;
+  do not add a registry, supervisor, or alternate proof path.
+
 ## Problem
 
 The frozen implementation at `2fa8e8424d196465cd00bd091932a65d4ef01107`
