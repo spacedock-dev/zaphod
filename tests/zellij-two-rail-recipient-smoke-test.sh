@@ -8,6 +8,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 # shellcheck source=scripts/zellij-layout-lib.sh
 source "$REPO_ROOT/scripts/zellij-layout-lib.sh"
 
+# Native control for the disposable server must never inherit the invoking
+# Zellij client's identity. An explicit socket/session is not sufficient:
+# Zellij still gives ZELLIJ_SESSION_NAME precedence in some action paths.
+unset ZELLIJ ZELLIJ_SESSION_NAME ZELLIJ_PANE_ID
+
 fail() {
     echo "FAIL: $*" >&2
     exit 1
@@ -43,12 +48,14 @@ TARGET_WATCHER_PID=""
 BYSTANDER_WATCHER_PID=""
 
 zellij_control() {
-    env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+        ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
         zellij --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
 }
 
 zellij_session() {
-    env ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
+    env -u ZELLIJ -u ZELLIJ_SESSION_NAME -u ZELLIJ_PANE_ID \
+        ZELLIJ_SOCKET_DIR="$SOCKET_DIR" \
         zellij --session "$SESSION_NAME" \
         --config-dir "$CONFIG_DIR" --config "$CONFIG_FILE" --data-dir "$DATA_DIR" "$@"
 }

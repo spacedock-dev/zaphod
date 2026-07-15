@@ -41,7 +41,6 @@ type watchSourceEvent uint8
 const (
 	watchSourceHeartbeat watchSourceEvent = iota + 1
 	watchSourceDataChanged
-	cleanupAuthorityTimeout = 500 * time.Millisecond
 )
 
 func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result error) {
@@ -99,15 +98,7 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 	}
 	var registration *WatchRegistration
 	rows := make([]SessionRow, 0, 1)
-	probe := func(parent context.Context) error {
-		probeCtx, cancel := context.WithTimeout(parent, cfg.AuthorityTimeout)
-		defer cancel()
-		return probeWatchTarget(probeCtx, cfg.WatchRoute, target)
-	}
 	emit := func() error {
-		if err := probe(ctx); err != nil {
-			return err
-		}
 		return EmitLeasedSnapshotForTab(ctx, cfg.emitConfig(), rows, cfg.TabID, cfg.RecipientToken, generation, cfg.Lease, stderr)
 	}
 	heartbeat := func() error {
@@ -157,15 +148,6 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 			return nil
 		}
 	}
-	defer func() {
-		cleanupProbeCtx, cancelProbe := context.WithTimeout(context.Background(), cleanupAuthorityTimeout)
-		defer cancelProbe()
-		if probeWatchTarget(cleanupProbeCtx, cfg.WatchRoute, target) == nil {
-			clearCtx, cancel := context.WithTimeout(context.Background(), cfg.PipeTimeout)
-			defer cancel()
-			_ = EmitLeasedSnapshotForTab(clearCtx, cfg.emitConfig(), nil, cfg.TabID, cfg.RecipientToken, generation, 100*time.Millisecond, stderr)
-		}
-	}()
 
 	ticker := time.NewTicker(cfg.Heartbeat)
 	defer ticker.Stop()
@@ -182,14 +164,23 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 			copy := next
 			registration = &copy
 			if err := refreshLeasedSource(); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
 			}
 		case event := <-streamEvents:
 			if event == watchSourceDataChanged {
 				if err := refreshLeasedSource(); err != nil {
+					if ctx.Err() != nil {
+						return nil
+					}
 					return err
 				}
 			} else if err := heartbeat(); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
 			}
 		case err := <-streamErrors:
@@ -203,6 +194,9 @@ func runWatchTab(ctx context.Context, cfg WatchConfig, stderr io.Writer) (result
 				return fmt.Errorf("watch socket lost")
 			}
 			if err := heartbeat(); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
 				return err
 			}
 		}

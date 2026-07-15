@@ -3053,6 +3053,61 @@ mod tests {
     }
 
     #[test]
+    fn current_manifest_clears_watched_session_after_terminal_close_move_or_suppress() {
+        let mut sidebar = Sidebar::default();
+        sidebar.plugin_id = 50;
+        sidebar
+            .config
+            .insert("recipient_token".to_owned(), "test-token".to_owned());
+        let snapshot = format!("[{}]", session_line());
+
+        let arm = |sidebar: &mut Sidebar| {
+            sidebar.update(Event::PaneUpdate(manifest(vec![(
+                1,
+                vec![sidebar_pane(50, false), pane(4, false, "agent", 1, false)],
+            )])));
+            sidebar.update(Event::TabUpdate(vec![tab_info(1, 73, true, None, false)]));
+            assert!(sidebar.pipe(agent_snapshot(Some(&snapshot), "73")));
+            assert_eq!(sidebar.sessions.len(), 1);
+            assert_eq!(registered_session_pane(&sidebar.sessions[0], &sidebar.rows), Some(4));
+            assert!(!session_row_line(&sidebar.sessions[0], true, 28).contains("unbound"));
+            assert_eq!(
+                sidebar.decide_actionable_click(5, Instant::now()),
+                ClickAction::FocusPane(4)
+            );
+        };
+
+        arm(&mut sidebar);
+        sidebar.update(Event::PaneUpdate(manifest(vec![(
+            1,
+            vec![sidebar_pane(50, false)],
+        )])));
+        assert!(sidebar.sessions.is_empty());
+        assert!(sidebar.session_lease.is_none());
+        assert_eq!(sidebar.decide_actionable_click(5, Instant::now()), ClickAction::None);
+
+        arm(&mut sidebar);
+        sidebar.update(Event::PaneUpdate(manifest(vec![
+            (1, vec![sidebar_pane(50, false)]),
+            (2, vec![pane(4, false, "agent", 1, false)]),
+        ])));
+        assert!(sidebar.sessions.is_empty());
+        assert!(sidebar.session_lease.is_none());
+        assert_eq!(sidebar.decide_actionable_click(5, Instant::now()), ClickAction::None);
+
+        arm(&mut sidebar);
+        let mut suppressed = pane(4, false, "agent", 1, false);
+        suppressed.is_suppressed = true;
+        sidebar.update(Event::PaneUpdate(manifest(vec![(
+            1,
+            vec![sidebar_pane(50, false), suppressed],
+        )])));
+        assert!(sidebar.sessions.is_empty());
+        assert!(sidebar.session_lease.is_none());
+        assert_eq!(sidebar.decide_actionable_click(5, Instant::now()), ClickAction::None);
+    }
+
+    #[test]
     fn watcher_heartbeat_tolerates_one_second_delivery_delay_before_lease_expiry() {
         let mut sidebar = Sidebar::default();
         arm_agent_recipient(&mut sidebar, 1, &[tab_info(1, 73, true, None, false)]);

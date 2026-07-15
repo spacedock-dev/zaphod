@@ -145,11 +145,12 @@ terminal. In that terminal, run:
 ./target/zaphod watch-tab
 ```
 
-The command returns after its background watcher proves the terminal, stable
-tab, original rail, AgentsView event stream, recipient, socket, and initial
-empty lease. It prints the watcher PID and log path. Start AgentsView before
-this command. The default endpoint is `http://127.0.0.1:8080`; direct entry's
-`--agentsview-url URL` selects another endpoint.
+The command uses one native inventory to prove the terminal, stable tab, and
+original rail, then returns after its background watcher proves the AgentsView
+event stream, recipient, socket, and initial empty lease. It prints the watcher
+PID and log path. Start AgentsView before this command. The default endpoint is
+`http://127.0.0.1:8080`; direct entry's `--agentsview-url URL` selects another
+endpoint.
 
 The trusted `.codex/hooks.json` command invokes
 `target/zaphod register-agent-session`. It accepts only Codex `SessionStart`
@@ -166,12 +167,12 @@ acknowledged snapshots. A later SessionStart in the same terminal replaces
 the old row. Restart starts empty and requires a new SessionStart.
 
 Socket loss, watcher loss, terminal/tab/rail manifest loss, source failure, or
-rejected delivery makes the row and focus fail closed by lease. Startup,
-SessionStart/data-change delivery, and cleanup revalidate native authority;
-idle heartbeats do not synchronously poll pane metadata. A watcher whose pane
-disappears silently may remain until the next lifecycle check or explicit
-cleanup. It never follows a replacement pane or rail, consults the global
-session list, writes durable session authority, or guesses from CWD.
+rejected delivery makes the row and focus fail closed through the plugin's
+current manifest and lease. After ready, SessionStart/data-change delivery,
+heartbeats, and cleanup make zero native pane-inventory or cleanup-probe calls.
+A watcher whose pane or rail disappears silently may remain until explicit
+manual cleanup. It never follows a replacement pane or rail, consults the
+global session list, writes durable session authority, or guesses from CWD.
 Follow the [chat-guided AgentsView demo](docs/zellij-agentsview-live-demo.md)
 for the two-tab journey.
 

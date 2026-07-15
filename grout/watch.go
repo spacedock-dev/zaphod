@@ -503,34 +503,6 @@ func resolveWatchTarget(ctx context.Context, cfg WatchRoute, watchedPane uint32)
 	return WatchTarget{TabID: tabID, TerminalPaneID: watchedPane, RailPaneID: railID}, nil
 }
 
-func probeWatchTarget(ctx context.Context, cfg WatchRoute, target WatchTarget) error {
-	panes, err := watchNativePanes(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	terminals := 0
-	originalRails := 0
-	matchingRails := 0
-	for _, pane := range panes {
-		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed &&
-			pane.ID == uint64(target.TerminalPaneID) && pane.TabID == target.TabID {
-			terminals++
-		}
-		if pane.IsPlugin && pane.TabID == target.TabID && pane.PluginURL != nil &&
-			*pane.PluginURL == cfg.RailURL && !pane.IsFloating && !pane.IsSuppressed {
-			matchingRails++
-			if pane.ID == target.RailPaneID {
-				originalRails++
-			}
-		}
-	}
-	if terminals != 1 || originalRails != 1 || matchingRails != 1 {
-		return fmt.Errorf("%w: expected terminal %d, original rail %d, and one total matching rail in stable tab %d, found %d/%d/%d",
-			ErrTargetLost, target.TerminalPaneID, target.RailPaneID, target.TabID, terminals, originalRails, matchingRails)
-	}
-	return nil
-}
-
 func watchNativePanes(ctx context.Context, cfg WatchRoute) ([]zellijPane, error) {
 	args := cfg.zellijArgs("action", "list-panes", "--json", "--all", "--state", "--tab")
 	command := exec.CommandContext(ctx, cfg.ZellijBin, args...)

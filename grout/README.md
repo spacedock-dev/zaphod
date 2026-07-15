@@ -40,11 +40,11 @@ records trigger acknowledged snapshots and exact fetches.
 Source EOF, source errors, socket loss, malformed input, over-limit input,
 exact-ID mismatch, or rejected snapshot delivery ends the watcher. The plugin
 uses its exact manifest and lease to clear rows and focus after terminal, tab,
-rail, or watcher loss. Startup, SessionStart/data-change delivery, and cleanup
-run bounded native probes; idle heartbeats do not poll pane metadata. A daemon
-whose pane disappears silently may remain until the next lifecycle check or
-explicit cleanup. HTTP operations, pipe children, cleanup, and records have
-explicit time or size bounds.
+rail, or watcher loss. Startup performs exactly one bounded native inventory;
+after ready, SessionStart/data-change delivery, heartbeats, and cleanup perform
+zero native pane inventory or cleanup probes. A daemon whose pane or rail
+disappears silently may remain until explicit manual cleanup. HTTP operations,
+pipe children, cleanup, and records have explicit time or size bounds.
 
 The existing `agent-event` protocol carries session and gate rows:
 

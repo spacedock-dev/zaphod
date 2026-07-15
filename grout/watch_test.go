@@ -352,7 +352,7 @@ func TestWatchSocketCarriesOneBoundedInMemoryRegistration(t *testing.T) {
 	}
 }
 
-func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
+func TestWatcherStartupResolvesExactTerminalTabAndRailOnce(t *testing.T) {
 	dir := t.TempDir()
 	panesPath := filepath.Join(dir, "panes.json")
 	argsPath := filepath.Join(dir, "args")
@@ -380,19 +380,15 @@ func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
 	if target.TabID != 73 || target.TerminalPaneID != 7 || target.RailPaneID != 50 {
 		t.Fatalf("target = %#v", target)
 	}
-	if err := probeWatchTarget(context.Background(), cfg, target); err != nil {
-		t.Fatal(err)
-	}
-
 	// Retained per-client runtimes are not extra panes, but a second matching
-	// native rail in the stable tab must still revoke authority.
+	// native rail in the stable tab must prevent startup authority.
 	writePanes(`[
 {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
 {"id":51,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
 {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
 ]`)
-	if err := probeWatchTarget(context.Background(), cfg, target); err == nil {
-		t.Fatal("duplicate matching native rail preserved authority")
+	if _, err := resolveWatchTarget(context.Background(), cfg, 7); err == nil {
+		t.Fatal("duplicate matching native rail granted startup authority")
 	}
 
 	// A same-WASM rail in another tab is not the original authority.
@@ -400,8 +396,12 @@ func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
 {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
 {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
 ]`)
-	if err := probeWatchTarget(context.Background(), cfg, target); err != nil {
-		t.Fatalf("bystander removal revoked target: %v", err)
+	withoutBystander, err := resolveWatchTarget(context.Background(), cfg, 7)
+	if err != nil {
+		t.Fatalf("bystander removal prevented startup authority: %v", err)
+	}
+	if withoutBystander != target {
+		t.Fatalf("startup target changed after bystander removal: %#v", withoutBystander)
 	}
 
 	// Removing the exact original rail fails closed even though an otherwise
@@ -410,8 +410,8 @@ func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
 {"id":60,"tab_id":74,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
 {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
 ]`)
-	if err := probeWatchTarget(context.Background(), cfg, target); err == nil {
-		t.Fatal("replacement same-WASM rail preserved authority")
+	if _, err := resolveWatchTarget(context.Background(), cfg, 7); err == nil {
+		t.Fatal("replacement same-WASM rail granted startup authority")
 	}
 	args, err := os.ReadFile(argsPath)
 	if err != nil {
@@ -420,12 +420,12 @@ func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
 	for _, line := range strings.Split(strings.TrimSpace(string(args)), "\n") {
 		for _, required := range []string{"--all", "--state", "--tab"} {
 			if !strings.Contains(line, required) {
-				t.Fatalf("native authority probe omitted %s: %s", required, line)
+				t.Fatalf("native startup inventory omitted %s: %s", required, line)
 			}
 		}
 		for _, forbidden := range []string{"--command", "--geometry", "--cwd"} {
 			if strings.Contains(line, forbidden) {
-				t.Fatalf("native authority probe requested %s: %s", forbidden, line)
+				t.Fatalf("native startup inventory requested %s: %s", forbidden, line)
 			}
 		}
 	}

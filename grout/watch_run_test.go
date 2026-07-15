@@ -1,5 +1,5 @@
-// ABOUTME: Exercises the manual watcher from ready handshake through authority loss.
-// ABOUTME: Exact SessionStart state stays in memory and every visible row is leased.
+// ABOUTME: Exercises the manual watcher from one startup inventory through leased delivery.
+// ABOUTME: Post-ready lifecycle events never trigger native pane inventory or cleanup probes.
 
 package main
 
@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
+func TestWatchTabUsesNativeInventoryOnlyBeforeReady(t *testing.T) {
 	dir := t.TempDir()
 	runtimeRoot, err := os.MkdirTemp("/tmp", "zwt.")
 	if err != nil {
@@ -28,28 +28,33 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 	panesPath := filepath.Join(dir, "panes.json")
 	snapshotPath := filepath.Join(dir, "snapshot.json")
 	argvPath := filepath.Join(dir, "snapshot.args")
-	writePanes := func(withRail bool) {
+	nativePath := filepath.Join(dir, "native.calls")
+	heartbeatPath := filepath.Join(dir, "heartbeat.calls")
+	writePanes := func(value string) {
 		t.Helper()
-		rail := ""
-		if withRail {
-			rail = `{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},`
-		}
-		value := "[" + rail + `{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`
 		if err := os.WriteFile(panesPath, []byte(value), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	writePanes(true)
+	writePanes(`[
+      {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+      {"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},
+      {"id":60,"tab_id":74,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false}
+    ]`)
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
 		"case \" $* \" in\n"+
-		"  *' list-panes '*) cat "+panesPath+" ;;\n"+
+		"  *' list-panes '*) printf 'inventory\\n' >> "+nativePath+"; cat "+panesPath+" ;;\n"+
 		"  *' pipe '*)\n"+
-		"    case \"$*\" in *-ready*) printf readyready ;; *-snapshot*) printf '%s\\n' \"$*\" >> "+argvPath+"; cat > "+snapshotPath+"; printf acceptedaccepted ;; esac ;;\n"+
+		"    case \"$*\" in\n"+
+		"      *-ready*) printf readyready ;;\n"+
+		"      *-heartbeat*) printf 'heartbeat\\n' >> "+heartbeatPath+" ;;\n"+
+		"      *-snapshot*) printf '%s\\n' \"$*\" >> "+argvPath+"; cat > "+snapshotPath+"; printf acceptedaccepted ;;\n"+
+		"    esac ;;\n"+
 		"esac\n")
 
 	sessionID := "codex:019f60ff-1111-7222-8333-444455556666"
 	var exactRequests atomic.Int64
-	dataChanged := make(chan struct{}, 1)
+	dataChanged := make(chan struct{}, 8)
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/events":
@@ -107,6 +112,14 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 	if started.Target != (WatchTarget{TabID: 73, TerminalPaneID: 7, RailPaneID: 50}) {
 		t.Fatalf("ready target = %#v", started.Target)
 	}
+	assertNativeCount := func(want int) {
+		t.Helper()
+		calls, _ := os.ReadFile(nativePath)
+		if got := bytes.Count(calls, []byte("\n")); got != want {
+			t.Fatalf("native inventory calls = %d, want %d: %s", got, want, calls)
+		}
+	}
+	assertNativeCount(1)
 	hook := []byte(`{"session_id":"019f60ff-1111-7222-8333-444455556666","hook_event_name":"SessionStart","source":"startup"}`)
 	if err := sendWatchHook(ctx, runtimeRoot, "managed", "7", hook); err != nil {
 		t.Fatal(err)
@@ -121,9 +134,41 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 	if err != nil || !strings.Contains(string(payload), "KJ_WATCH_ROW") {
 		t.Fatalf("exact session was not projected: %v %s", err, payload)
 	}
-	time.Sleep(350 * time.Millisecond)
-	if got := exactRequests.Load(); got != 1 {
-		t.Fatalf("heartbeat multiplied exact source fetches: got %d, want 1", got)
+	assertNativeCount(1)
+
+	lifecycle := []struct {
+		name  string
+		panes string
+	}{
+		{"terminal-close", `[{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false}]`},
+		{"terminal-move", `[{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},{"id":7,"tab_id":74,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`},
+		{"terminal-suppress", `[{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":true}]`},
+		{"original-rail-loss", `[{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false},{"id":60,"tab_id":74,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false}]`},
+		{"bystander-rail-loss", `[{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}]`},
+	}
+	for i, event := range lifecycle {
+		writePanes(event.panes)
+		dataChanged <- struct{}{}
+		wantRequests := int64(i + 2)
+		for deadline := time.Now().Add(2 * time.Second); exactRequests.Load() < wantRequests && time.Now().Before(deadline); {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := exactRequests.Load(); got != wantRequests {
+			t.Fatalf("%s exact requests = %d, want %d", event.name, got, wantRequests)
+		}
+		select {
+		case err := <-errCh:
+			t.Fatalf("%s stopped startup-authorized watcher: %v", event.name, err)
+		default:
+		}
+		assertNativeCount(1)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if got := exactRequests.Load(); got != int64(len(lifecycle)+1) {
+		t.Fatalf("heartbeat multiplied exact source fetches: got %d, want %d", got, len(lifecycle)+1)
+	}
+	if heartbeats, _ := os.ReadFile(heartbeatPath); len(heartbeats) == 0 {
+		t.Fatal("watcher did not exercise post-ready heartbeats")
 	}
 	args, err := os.ReadFile(argvPath)
 	if err != nil {
@@ -142,18 +187,18 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 		t.Fatalf("watcher wrote durable authority: %v", entries)
 	}
 
-	writePanes(false)
-	dataChanged <- struct{}{}
+	cancel()
 	select {
 	case err := <-errCh:
-		if err == nil || !strings.Contains(err.Error(), "target-lost") {
-			t.Fatalf("rail loss error = %v", err)
+		if err != nil {
+			t.Fatalf("watcher cancellation = %v", err)
 		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("original rail loss did not stop watcher")
+	case <-time.After(time.Second):
+		t.Fatal("watcher cleanup did not finish")
 	}
+	assertNativeCount(1)
 	if _, err := os.Lstat(started.SocketPath); !os.IsNotExist(err) {
-		t.Fatalf("watch socket survived authority loss: %v", err)
+		t.Fatalf("watch socket survived explicit cleanup: %v", err)
 	}
 }
 
@@ -229,18 +274,19 @@ func TestWatcherReadinessIncludesSessionStartAcceptedBeforeBoundary(t *testing.T
 	}
 }
 
-func TestWatcherCleanupBoundsSlowNativeAuthorityProbe(t *testing.T) {
+func TestWatcherCleanupUsesNoNativeInventoryOrSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	runtimeRoot, err := os.MkdirTemp("/tmp", "zwt.")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(runtimeRoot) })
-	hang := filepath.Join(dir, "hang")
+	nativeLog := filepath.Join(dir, "native.log")
+	snapshotLog := filepath.Join(dir, "snapshot.log")
 	zellij := writeScript(t, dir, "zellij", "#!/bin/sh\n"+
 		"case \" $* \" in\n"+
-		"  *' list-panes '*) [ ! -e "+hang+" ] || sleep 5; printf '%s\\n' '[{\"id\":50,\"tab_id\":73,\"is_plugin\":true,\"plugin_url\":\"file:/candidate/sidebar.wasm\",\"is_floating\":false,\"is_suppressed\":false},{\"id\":7,\"tab_id\":73,\"is_plugin\":false,\"is_selectable\":true,\"is_suppressed\":false}]' ;;\n"+
-		"  *' pipe '*) case \"$*\" in *-ready*) echo ready ;; *-snapshot*) cat >/dev/null; echo accepted ;; esac ;;\n"+
+		"  *' list-panes '*) printf 'inventory\\n' >> "+nativeLog+"; printf '%s\\n' '[{\"id\":50,\"tab_id\":73,\"is_plugin\":true,\"plugin_url\":\"file:/candidate/sidebar.wasm\",\"is_floating\":false,\"is_suppressed\":false},{\"id\":7,\"tab_id\":73,\"is_plugin\":false,\"is_selectable\":true,\"is_suppressed\":false}]' ;;\n"+
+		"  *' pipe '*) case \"$*\" in *-ready*) echo ready ;; *-snapshot*) cat >/dev/null; printf 'snapshot\\n' >> "+snapshotLog+"; echo accepted ;; esac ;;\n"+
 		"esac\n")
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/events" {
@@ -254,6 +300,7 @@ func TestWatcherCleanupBoundsSlowNativeAuthorityProbe(t *testing.T) {
 	defer source.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	ready := make(chan WatchReady, 1)
 	errs := make(chan error, 1)
 	go func() {
@@ -272,8 +319,15 @@ func TestWatcherCleanupBoundsSlowNativeAuthorityProbe(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("watcher readiness timed out")
 	}
-	if err := os.WriteFile(hang, nil, 0o600); err != nil {
-		t.Fatal(err)
+	countLines := func(path string) int {
+		contents, _ := os.ReadFile(path)
+		return bytes.Count(contents, []byte("\n"))
+	}
+	if got := countLines(nativeLog); got != 1 {
+		t.Fatalf("pre-ready native inventory calls = %d, want 1", got)
+	}
+	if got := countLines(snapshotLog); got != 1 {
+		t.Fatalf("pre-ready snapshots = %d, want 1", got)
 	}
 	cancel()
 	select {
@@ -282,11 +336,17 @@ func TestWatcherCleanupBoundsSlowNativeAuthorityProbe(t *testing.T) {
 			t.Fatalf("watcher cancellation = %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("watcher cleanup blocked on slow native authority probe")
+		t.Fatal("watcher cleanup did not finish")
+	}
+	if got := countLines(nativeLog); got != 1 {
+		t.Fatalf("cleanup native inventory calls changed count to %d, want 1", got)
+	}
+	if got := countLines(snapshotLog); got != 1 {
+		t.Fatalf("cleanup emitted snapshot count %d, want 1", got)
 	}
 }
 
-func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
+func TestTwoWatchersUseNativeInventoryOnlyForStartup(t *testing.T) {
 	dir := t.TempDir()
 	runtimeRoot, err := os.MkdirTemp("/tmp", "zwt.")
 	if err != nil {
@@ -415,7 +475,7 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 			select {
 			case err := <-watcher.errs:
 				watcher.cancel()
-				t.Fatalf("watcher %d died under serialized native latency: %v", watcher.pane, err)
+				t.Fatalf("watcher %d died after startup inventory: %v", watcher.pane, err)
 			default:
 			}
 		}
@@ -437,7 +497,22 @@ func TestTwoWatchersSurviveSerializedNativeAuthorityLatency(t *testing.T) {
 		t.Fatalf("pre-refresh lease renewals = %d, want one per watcher", got)
 	}
 	nativeCalls, _ := os.ReadFile(nativeLog)
-	if got := bytes.Count(nativeCalls, []byte("\n")); got != 6 {
-		t.Fatalf("native authority probes = %d, want 6 (resolve+initial delivery per watcher, then one post-hook delivery probe)", got)
+	if got := bytes.Count(nativeCalls, []byte("\n")); got != 2 {
+		t.Fatalf("native inventory calls = %d, want one startup call per watcher", got)
+	}
+	for _, watcher := range watchers {
+		watcher.cancel()
+		select {
+		case err := <-watcher.errs:
+			if err != nil {
+				t.Fatalf("watcher %d cleanup = %v", watcher.pane, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("watcher %d cleanup timed out", watcher.pane)
+		}
+	}
+	nativeCalls, _ = os.ReadFile(nativeLog)
+	if got := bytes.Count(nativeCalls, []byte("\n")); got != 2 {
+		t.Fatalf("cleanup changed native inventory count to %d, want 2", got)
 	}
 }
