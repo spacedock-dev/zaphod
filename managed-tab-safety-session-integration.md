@@ -897,3 +897,48 @@ replacement exact-head panel whose exported parent JSON and restartable
 database remain available; no product file or standing configuration changed.
 The gate is ready for the captain's two-tab manual watcher demo, after which
 its Subspace decision log will record the live outcome.
+
+## Stage Report: implementation (cycle 3)
+
+- DONE: Implement only the AC-O6/AC-I1 stale-socket restart-admission outcome
+  defect on KJ worktree head `3f44626`.
+  Commit `af7860a` changes only watcher socket admission and its focused tests;
+  the manual watcher and in-memory authority design remain unchanged.
+- DONE: Safely prove stale before removal; a live watcher remains exclusive
+  and ambiguous ownership fails closed.
+  Admission requires a mode-0600 current-UID socket, a failed 100 ms connect,
+  and unchanged inode/mode before unlink; live, foreign, wrong-mode, and
+  wrong-type endpoints are preserved.
+- DONE: Add focused stale/live/ambiguous socket tests first and keep the Go
+  package compiling.
+  The initial stale-restart test failed with `watch socket already exists`;
+  stale restart, live reachability, ambiguity, and bounded concurrent
+  different-pane admission now pass for 50 consecutive focused runs.
+- DONE: Run focused socket/lifecycle tests and the exact two-watcher
+  regression.
+  Full Go tests and vet pass; watcher lifecycle passes outside and inside;
+  the two-rail packet passes `1/1/0`, exact focus, empty restart, lease expiry,
+  and no idle native polling.
+- DONE: Run Rust and build verification as proportional cross-language proof.
+  `cargo test -q` passes 145/145, `cargo check --tests` passes, `build.sh`
+  passes, and `git diff --check` is clean.
+- FAILED: Produce a green congestion packet from the current host.
+  The candidate failed the unchanged native `new-tab` one-second deadline
+  three times; exact pre-fix `3f44626` content failed at the identical boundary,
+  classifying this as an evidence defect outside the authorized socket fix.
+- DONE: Return the commit plus a focused Roborev handoff.
+  Review 1496 found the nonblocking shared-lock regression; `af7860a` added a
+  bounded wait and deterministic different-pane test, review 1496 was closed,
+  and replacement exact-head review 1499 returned `No issues found.`
+- SKIPPED: Run or claim the captain-live AC-I1 observation.
+  No captain Zellij session was mutated; the fresh two-tab drill remains the
+  captain's next observation after the FO accepts the baseline congestion
+  evidence classification.
+
+### Summary
+
+Cycle-6 feedback is implemented as the final narrow socket-admission repair:
+a killed watcher's proven-stale endpoint no longer blocks a normal retry, while
+a live or ambiguous endpoint cannot be evicted. All product-local and exact
+watcher proofs are green at `af7860a`; only the congestion harness remains red
+at the same pre-fix evidence boundary and is reported without scope expansion.
