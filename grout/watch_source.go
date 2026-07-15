@@ -132,7 +132,7 @@ func waitForRecipient(ctx context.Context, cfg WatchRoute) error {
 		command.Stdin = strings.NewReader("probe")
 		output, err := command.Output()
 		cancel()
-		if err == nil && strings.TrimSpace(string(output)) == "ready" {
+		if err == nil && completeReadyAtoms(output) {
 			return nil
 		}
 		select {
@@ -146,4 +146,19 @@ func waitForRecipient(ctx context.Context, cfg WatchRoute) error {
 		case <-time.After(50 * time.Millisecond):
 		}
 	}
+}
+
+func completeReadyAtoms(output []byte) bool {
+	const atom = "ready"
+	value := strings.TrimSpace(string(output))
+	if value == "" || len(value)%len(atom) != 0 {
+		return false
+	}
+	for value != "" {
+		if !strings.HasPrefix(value, atom) {
+			return false
+		}
+		value = value[len(atom):]
+	}
+	return true
 }

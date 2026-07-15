@@ -509,20 +509,24 @@ func probeWatchTarget(ctx context.Context, cfg WatchRoute, target WatchTarget) e
 		return err
 	}
 	terminals := 0
-	rails := 0
+	originalRails := 0
+	matchingRails := 0
 	for _, pane := range panes {
 		if !pane.IsPlugin && pane.IsSelectable && !pane.IsSuppressed &&
 			pane.ID == uint64(target.TerminalPaneID) && pane.TabID == target.TabID {
 			terminals++
 		}
-		if pane.IsPlugin && pane.ID == target.RailPaneID && pane.TabID == target.TabID &&
-			pane.PluginURL != nil && *pane.PluginURL == cfg.RailURL && !pane.IsFloating && !pane.IsSuppressed {
-			rails++
+		if pane.IsPlugin && pane.TabID == target.TabID && pane.PluginURL != nil &&
+			*pane.PluginURL == cfg.RailURL && !pane.IsFloating && !pane.IsSuppressed {
+			matchingRails++
+			if pane.ID == target.RailPaneID {
+				originalRails++
+			}
 		}
 	}
-	if terminals != 1 || rails != 1 {
-		return fmt.Errorf("%w: expected terminal %d and original rail %d once in stable tab %d, found %d/%d",
-			ErrTargetLost, target.TerminalPaneID, target.RailPaneID, target.TabID, terminals, rails)
+	if terminals != 1 || originalRails != 1 || matchingRails != 1 {
+		return fmt.Errorf("%w: expected terminal %d, original rail %d, and one total matching rail in stable tab %d, found %d/%d/%d",
+			ErrTargetLost, target.TerminalPaneID, target.RailPaneID, target.TabID, terminals, originalRails, matchingRails)
 	}
 	return nil
 }

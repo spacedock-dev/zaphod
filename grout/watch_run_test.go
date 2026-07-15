@@ -44,7 +44,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 		"case \" $* \" in\n"+
 		"  *' list-panes '*) cat "+panesPath+" ;;\n"+
 		"  *' pipe '*)\n"+
-		"    case \"$*\" in *-ready*) echo ready ;; *-snapshot*) printf '%s\\n' \"$*\" >> "+argvPath+"; cat > "+snapshotPath+"; echo accepted ;; esac ;;\n"+
+		"    case \"$*\" in *-ready*) printf readyready ;; *-snapshot*) printf '%s\\n' \"$*\" >> "+argvPath+"; cat > "+snapshotPath+"; echo accepted ;; esac ;;\n"+
 		"esac\n")
 
 	sessionID := "codex:019f60ff-1111-7222-8333-444455556666"
@@ -90,6 +90,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 				ZellijConfigDir: "/c", ZellijConfigFile: "/c/config.kdl", ZellijDataDir: "/d",
 				ZellijSession: "managed", RailURL: "file:/candidate/sidebar.wasm", RecipientToken: "token",
 				PipeTimeout: time.Second, SourceTimeout: time.Second, SummaryClampBytes: 512,
+				recipientWaitTimeout: 500 * time.Millisecond,
 			},
 			PaneID: 7, SocketRoot: runtimeRoot, Lease: 500 * time.Millisecond,
 			Heartbeat: 100 * time.Millisecond, Ready: ready,

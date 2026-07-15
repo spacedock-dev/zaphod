@@ -384,6 +384,17 @@ func TestWatcherContinuouslyProvesOriginalTerminalTabAndRail(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Retained per-client runtimes are not extra panes, but a second matching
+	// native rail in the stable tab must still revoke authority.
+	writePanes(`[
+{"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+{"id":51,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
+{"id":7,"tab_id":73,"is_plugin":false,"is_selectable":true,"is_suppressed":false}
+]`)
+	if err := probeWatchTarget(context.Background(), cfg, target); err == nil {
+		t.Fatal("duplicate matching native rail preserved authority")
+	}
+
 	// A same-WASM rail in another tab is not the original authority.
 	writePanes(`[
 {"id":50,"tab_id":73,"is_plugin":true,"plugin_url":"file:/candidate/sidebar.wasm","is_floating":false,"is_suppressed":false},
