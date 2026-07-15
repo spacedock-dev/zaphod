@@ -23,7 +23,7 @@ func TestLeasedSnapshotCarriesGenerationAndPositiveAcknowledgment(t *testing.T) 
 	stdinLog := filepath.Join(dir, "stdin")
 	zellij := writeScript(t, dir, "leased-zellij", "#!/bin/sh\n"+
 		"{ echo \"$#\"; for a in \"$@\"; do printf '%s\\n' \"$a\"; done; } > "+argvLog+"\n"+
-		"cat > "+stdinLog+"\necho accepted\n")
+		"cat > "+stdinLog+"\nprintf acceptedaccepted\n")
 	cfg := Config{ZellijBin: zellij, ZellijSession: "managed", PipeTimeout: time.Second}
 	paneID := uint32(7)
 	rows := []SessionRow{{Kind: "session", ID: "codex:one", PaneID: &paneID}}
@@ -46,6 +46,31 @@ func TestLeasedSnapshotCarriesGenerationAndPositiveAcknowledgment(t *testing.T) 
 	}
 	if !bytes.Contains(payload, []byte(`"pane_id":7`)) {
 		t.Fatalf("leased snapshot payload = %s", payload)
+	}
+}
+
+func TestAcknowledgedEventAndCleanupAcceptDuplicatedRuntimeOutputs(t *testing.T) {
+	dir := t.TempDir()
+	countLog := filepath.Join(dir, "count")
+	zellij := writeScript(t, dir, "duplicated-zellij", "#!/bin/sh\n"+
+		"printf 'call\\n' >> "+countLog+"\n"+
+		"cat >/dev/null\n"+
+		"printf acceptedaccepted\n")
+	cfg := Config{ZellijBin: zellij, ZellijSession: "managed", PipeTimeout: 300 * time.Millisecond}
+	paneID := uint32(7)
+	row := SessionRow{Kind: "session", ID: "codex:one", PaneID: &paneID}
+	if err := EmitRowForTab(context.Background(), cfg, "session", row, "73", "token", io.Discard); err != nil {
+		t.Fatalf("event rejected duplicated runtime acknowledgments: %v", err)
+	}
+	if err := EmitSnapshotForTab(context.Background(), cfg, []SessionRow{row}, "73", "token", io.Discard); err != nil {
+		t.Fatalf("snapshot rejected duplicated runtime acknowledgments: %v", err)
+	}
+	if err := EmitLeasedSnapshotForTab(context.Background(), cfg, nil, "73", "token", "generation-a", 100*time.Millisecond, io.Discard); err != nil {
+		t.Fatalf("cleanup snapshot rejected duplicated runtime acknowledgments: %v", err)
+	}
+	count, err := os.ReadFile(countLog)
+	if err != nil || bytes.Count(count, []byte("call\n")) != 3 {
+		t.Fatalf("acknowledged phases retried after exact duplicated output: calls=%q err=%v", count, err)
 	}
 }
 

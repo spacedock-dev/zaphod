@@ -197,7 +197,7 @@ func emitAcknowledged(
 		cmd.Stdout = &stdout
 		cmd.Stderr = stderr
 		err := cmd.Run()
-		if err == nil && strings.TrimSpace(stdout.String()) == "accepted" {
+		if err == nil && completeAcknowledgmentAtoms(stdout.Bytes(), "accepted") {
 			return nil
 		}
 		if deliveryCtx.Err() != nil {
@@ -214,6 +214,23 @@ func emitAcknowledged(
 		case <-retry.C:
 		}
 	}
+}
+
+func completeAcknowledgmentAtoms(output []byte, expected string) bool {
+	if expected == "" {
+		return false
+	}
+	value := strings.TrimSpace(string(output))
+	if value == "" || len(value)%len(expected) != 0 {
+		return false
+	}
+	for value != "" {
+		if !strings.HasPrefix(value, expected) {
+			return false
+		}
+		value = value[len(expected):]
+	}
+	return true
 }
 
 func emitRow(

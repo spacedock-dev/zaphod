@@ -44,7 +44,7 @@ func TestWatchTabProjectsOneLeasedExactSessionAndFailsClosed(t *testing.T) {
 		"case \" $* \" in\n"+
 		"  *' list-panes '*) cat "+panesPath+" ;;\n"+
 		"  *' pipe '*)\n"+
-		"    case \"$*\" in *-ready*) printf readyready ;; *-snapshot*) printf '%s\\n' \"$*\" >> "+argvPath+"; cat > "+snapshotPath+"; echo accepted ;; esac ;;\n"+
+		"    case \"$*\" in *-ready*) printf readyready ;; *-snapshot*) printf '%s\\n' \"$*\" >> "+argvPath+"; cat > "+snapshotPath+"; printf acceptedaccepted ;; esac ;;\n"+
 		"esac\n")
 
 	sessionID := "codex:019f60ff-1111-7222-8333-444455556666"

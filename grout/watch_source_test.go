@@ -10,6 +10,32 @@ import (
 	"time"
 )
 
+func TestCompleteAcknowledgmentAtomsAreExactAndParameterized(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		expected string
+		output   string
+		valid    bool
+	}{
+		{name: "ready single", expected: "ready", output: "ready", valid: true},
+		{name: "ready repeated", expected: "ready", output: "readyreadyready", valid: true},
+		{name: "accepted single", expected: "accepted", output: "accepted", valid: true},
+		{name: "accepted repeated", expected: "accepted", output: "acceptedacceptedaccepted", valid: true},
+		{name: "empty expected", expected: "", output: "accepted", valid: false},
+		{name: "empty output", expected: "accepted", output: "", valid: false},
+		{name: "partial", expected: "accepted", output: "acceptedaccept", valid: false},
+		{name: "foreign", expected: "accepted", output: "acceptedforeign", valid: false},
+		{name: "wrong atom", expected: "accepted", output: "readyready", valid: false},
+		{name: "separated", expected: "accepted", output: "accepted accepted", valid: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := completeAcknowledgmentAtoms([]byte(test.output), test.expected); got != test.valid {
+				t.Fatalf("completeAcknowledgmentAtoms(%q, %q) = %v, want %v", test.output, test.expected, got, test.valid)
+			}
+		})
+	}
+}
+
 func TestWaitForRecipientAcceptsOnlyCompleteReadyAtoms(t *testing.T) {
 	cases := []struct {
 		name   string
