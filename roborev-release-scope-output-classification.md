@@ -1,11 +1,11 @@
 ---
 title: Classify Roborev findings by release scope in review output
-status: backlog
+status: ideation
 source: captain request 2026-07-15
 sprint: s1-managed-tab-safety
 group: review-policy
 sprint-readiness: ready
-started:
+started: 2026-07-15T13:13:12Z
 completed:
 verdict:
 score: 0.95
