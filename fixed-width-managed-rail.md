@@ -127,3 +127,24 @@ The design removes layout mutation from the rail's steady state: one 28-column b
 ### Summary
 
 The fixed 28-column product and offline runtime journey are implemented and green at `d9872d4`, including native terminal/rail fullscreen and layout-inert former inputs. Implementation cannot advance because the third authoritative completion panel identified two remaining O2 proof gaps; the frozen-head convergence gate recommends two bounded test-only fixes before a captain-authorized replacement review.
+
+## Implementation Convergence Continuation
+
+- Captain approved exactly the two test-only O2 repairs and one replacement exact-head review; product behavior and scope remained frozen.
+- `73a6852` strengthens `stale_keybind_toggle_is_inert_for_granted_active_tiled_resident`: the source is `PipeSource::Keybind`, permissions are granted, and the resident is active, tiled, and state-stable after the stale pipe.
+- The RED for that evidence slice is authoritative parent `25`'s proof finding: the prior unauthorized/default-sidebar unit plus CLI smoke would not fail against the retired dangerous keybind route.
+- `cargo test stale_keybind_toggle_is_inert_for_granted_active_tiled_resident -- --nocapture` passed 1 test with 88 filtered out; `cargo check --tests` passed.
+- `d1d84b5` adds a same-path raw-SGR positive control: choose an exact non-focused native pane ID, map it to the sorted rendered rail row, observe focus move, click the original row, and require the full native/layout baseline to return before the negative header assertion.
+- RED: the first positive-control run of `bash tests/zellij-tmux-smoke-test.sh` sent the row click to SGR row 3 and failed `pane 1 did not become the focused target through the supported path`.
+- GREEN: mapping the first pane row to SGR row 4 made the positive focus/restore control pass, and both pregranted and `ZAPHOD_PERMISSION_FIXTURE=upgrade` complete smoke journeys passed.
+- Verification at `d1d84b5`: shared-target `cargo test` passed 89; `cargo check --tests`, new-tab, layout-capture, docs scrollback, and two-rail recipient tests passed.
+- Exact-head quick parent `29`, panel `quick`, reviewed `d1d84b5fc1f0ce79c6beaf45da3ed1b7c3ea22e5`; required member `28` PASS and parent verdict PASS with no issues.
+- Captain-authorized replacement parent `38`, panel `code_completion`, reviewed exact range `ac0ae2a5c301052daadc2c5cca89c2bbfbf6fdcc..d1d84b5fc1f0ce79c6beaf45da3ed1b7c3ea22e5` and returned FAIL.
+- Required members executed exactly once: correctness `35` PASS, journey `36` FAIL, proof `37` PASS.
+- Remaining Medium is an O2 evidence defect: the negative FIXED assertion uses SGR row 3, while the visually rendered header at zero-based `pane_y=1` occupies one-based screen row 2; row 3 is the first rendered pane row.
+- Proposed `must fix now` disposition remains test-only: derive the visual header row as `rail.pane_y + 1`, retain the positive row-click round trip and exact header before/after comparison, then run a newly authorized exact-head quick and exact-range completion panel.
+- Frozen clean head is `d1d84b5`; no correction or additional panel was launched because the captain authorized only one replacement review.
+
+### Continuation Summary
+
+Both captain-approved proof gaps were addressed without product changes, and all focused/runtime checks are green. The single authorized replacement panel exposed one final visual-coordinate error in the inert-header assertion; implementation is paused at `d1d84b5` pending authorization for the bounded row-2 test correction and another exact-range review.
