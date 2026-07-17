@@ -109,7 +109,7 @@ The design removes layout mutation from the rail's steady state: one 28-column b
   `bash tests/zellij-tmux-smoke-test.sh` passed at 160x48 with a six-pane inventory, exact rail `x=0,y=1,28x46`, exact chrome, literal Alt `/`, column-24 FIXED click, stale CLI toggle, and literal terminal/rail fullscreen restores.
   `ZAPHOD_PERMISSION_FIXTURE=upgrade bash tests/zellij-tmux-smoke-test.sh` and `bash tests/zellij-two-rail-recipient-smoke-test.sh` passed; disposable-root hashes proved standing config/layout/data/socket/permission roots unchanged.
   The semantic adversarial pass pinned exact header bytes and identity/cardinality/geometry/fullscreen terminal state, exercised every former input path available in the shipped profile, and made restore exhaustion fail instead of normalize away `is_fullscreen`.
-- BLOCKED: Complete the semantic adversarial pass and exact-head Roborev quick plus code_completion review, resolving every material finding and recording reproducible commands, counts, commit SHAs, and panel evidence in the implementation report.
+- DONE: Complete the semantic adversarial pass and exact-head Roborev quick plus code_completion review, resolving every material finding and recording reproducible commands, counts, commit SHAs, and panel evidence in the implementation report.
   Exact-head quick parent `16`, panel `quick`, reviewed `d9872d4b849f40716622871d7e9e28f2763cd26d`; required member `15` PASS and parent verdict PASS with no issues.
   Authoritative round 1 parent `6`, range `ac0ae2a5c301052daadc2c5cca89c2bbfbf6fdcc..b6322de051098a2432eed0863924b6fa6e507b6c`, failed: literal-key/focus fullscreen was bypassed and restore timeout/fullscreen terminal state could falsely pass.
   Disposition: both were O3 evidence defects; `c55713c` added literal Alt-f terminal/rail journeys through supported rail navigation, explicit restore deadlines, and final `is_fullscreen=false` assertions.
@@ -122,11 +122,11 @@ The design removes layout mutation from the rail's steady state: one 28-column b
   Release-scope triage: the released managed-tab behavior is green, but O2 explicitly promises literal header and former-keybind inertness; negative-only or wrong-source evidence can falsely certify that safety boundary.
   Frozen head is `d9872d4`; the least-invasive proposed disposition for both findings is `must fix now` with tests only: add a same-path positive row-click/focus control and an authorized active-resident keybind-source unit assertion.
   Repair cost is small and isolated to proof code; product behavior need not change. Risk is smoke focus restoration/flakiness, mitigated by exact inventory baselines and deadlines.
-  The three-round convergence budget is exhausted, so no fourth panel or further code change was made; first-officer/captain disposition is required before validation.
+  The three-round convergence budget was exhausted at this gate; subsequent bounded test-only work and replacement reviews were performed only after explicit captain authorization, as recorded below.
 
 ### Summary
 
-The fixed 28-column product and offline runtime journey are implemented and green at `d9872d4`, including native terminal/rail fullscreen and layout-inert former inputs. Implementation cannot advance because the third authoritative completion panel identified two remaining O2 proof gaps; the frozen-head convergence gate recommends two bounded test-only fixes before a captain-authorized replacement review.
+The fixed 28-column product and offline runtime journey reached a green frozen head at `d9872d4`, including native terminal/rail fullscreen and layout-inert former inputs. The exhausted-budget convergence gate identified two bounded O2 proof repairs and correctly required captain authorization before the continuation below.
 
 ## Implementation Convergence Continuation
 
@@ -143,8 +143,16 @@ The fixed 28-column product and offline runtime journey are implemented and gree
 - Required members executed exactly once: correctness `35` PASS, journey `36` FAIL, proof `37` PASS.
 - Remaining Medium is an O2 evidence defect: the negative FIXED assertion uses SGR row 3, while the visually rendered header at zero-based `pane_y=1` occupies one-based screen row 2; row 3 is the first rendered pane row.
 - Proposed `must fix now` disposition remains test-only: derive the visual header row as `rail.pane_y + 1`, retain the positive row-click round trip and exact header before/after comparison, then run a newly authorized exact-head quick and exact-range completion panel.
-- Frozen clean head is `d1d84b5`; no correction or additional panel was launched because the captain authorized only one replacement review.
+- Captain sent the finding back for the bounded correction and one new exact-head quick plus exact-range completion panel; product behavior and scope remained unchanged.
+- `2f20978` adds `rail_header_screen_y`, derives the sole native rail's visual header as zero-based `pane_y + 1`, and sends the column-24 SGR press/release to that row while preserving the positive row-focus/restore control and exact before/after assertion.
+- RED: authoritative replacement parent `38` proved the row-3 assertion targeted the first rendered pane row rather than visual FIXED; this was classified as an O2 evidence defect.
+- GREEN: `bash tests/zellij-tmux-smoke-test.sh` and `ZAPHOD_PERMISSION_FIXTURE=upgrade bash tests/zellij-tmux-smoke-test.sh` passed with the derived visual header row; `bash tests/zellij-two-rail-recipient-smoke-test.sh` passed.
+- Final verification at `2f20978`: shared-target `cargo test` passed 89, `cargo check --tests` passed, and new-tab, layout-capture, and docs scrollback tests passed.
+- Exact-head quick parent `63`, panel `quick`, reviewed `2f209781c10184a768292555aea0effc8aa77145`; required member `62` PASS and parent verdict PASS with no issues.
+- Authoritative parent `67`, panel `code_completion`, reviewed exact range `ac0ae2a5c301052daadc2c5cca89c2bbfbf6fdcc..2f209781c10184a768292555aea0effc8aa77145`; current head and reviewed head match.
+- Required members executed exactly once: correctness `64` PASS, journey `65` PASS, proof `66` PASS; synthesis parent verdict PASS with no issues.
+- Every material finding is fixed; no rebuttal, deferred risk, decision point, or post-panel code change remains. Final clean head is `2f20978`.
 
 ### Continuation Summary
 
-Both captain-approved proof gaps were addressed without product changes, and all focused/runtime checks are green. The single authorized replacement panel exposed one final visual-coordinate error in the inert-header assertion; implementation is paused at `d1d84b5` pending authorization for the bounded row-2 test correction and another exact-range review.
+All captain-approved proof gaps were addressed without product changes. Focused and runtime checks are green at `2f20978`, exact-head quick passed, and authoritative exact-range `code_completion` parent `67` passed unanimously; implementation is complete and ready for validation.
