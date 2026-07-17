@@ -1,14 +1,14 @@
 ---
 id: tjj3aqdq4c4at5wrke8cmk0v
 title: Keep the managed rail at one fixed width without blocking native fullscreen
-status: validation
+status: implementation
 source: captain direction after live dirty-tab layout corruption investigation, 2026-07-17
 sprint: s1-managed-tab-safety
 group: layout-stability
 sprint-readiness: ready
 started: 2026-07-17T10:10:10Z
 completed:
-verdict:
+verdict: REJECTED
 score: 0.98
 worktree: .worktrees/spacedock-ensign-fixed-width-managed-rail
 issue:
@@ -179,6 +179,13 @@ The fixed-width behavior and native fullscreen journey passed independent O1-O3 
 - Outcome defect, O4: the isolated tmux smoke sets `ZELLIJ_SOCKET_DIR` but leaves Zellij logging/cache resolution on host-default roots. A detached candidate wrote its lifecycle and exact candidate WASM path to `$TMPDIR/zellij-501/zellij-log/zellij.log` and attempted the standing session-info cache. Repair the supported harness so every Zellij process resolves logs, cache, socket, data, config, layout, and permission state only inside disposable roots, and prove standing-root hashes/records remain unchanged.
 - Evidence defect, fullscreen restore oracle: one of five responsiveness-enabled reproductions changed only `cursor_coordinates_in_pane` from `[8,2]` to `[8,1]` while geometry, chrome, identity, and fullscreen terminal state remained stable. Classify volatile cursor state explicitly and replace the flaky comparison with an oracle that still fails on layout/fullscreen drift without treating benign cursor motion as product failure.
 - Keep the fixed-width product behavior and O1-O3 contract unchanged. Implement the two findings as separate red/green slices, obtain replacement exact-head review evidence, then re-run the same validation reviewer against the frozen repaired head.
+
+#### Cycle 2 — validation → implementation
+
+- Verdict: `REJECTED`; feedback target: `implementation`.
+- Outcome defect, O4: the repaired main tmux smoke is fully contained, but the separate passing two-rail recipient smoke still launches the detached candidate without disposable `TMPDIR`/XDG coverage. Validation observed the candidate-path count in host `$TMPDIR/zellij-501/zellij-log/zellij.log` change from `0` to `1`.
+- Repair only `tests/zellij-two-rail-recipient-smoke-test.sh` and its direct helpers so every server, client, version/control call, and sidecar inherits the complete disposable environment. Prove the recipient journey still passes and produces zero candidate-attributable host log/cache/socket/data/permission records.
+- Keep product behavior, the main-smoke repair, and the cursor oracle unchanged. The implementation review budget remains exhausted: obtain the exact-head quick result, then stop at a convergence gate before launching any new authoritative `code_completion` panel.
 
 ## Validation Feedback Cycle 1 Repair
 
