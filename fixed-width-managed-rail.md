@@ -225,3 +225,21 @@ Validation's O4 leak is contained at process launch and proved with candidate-sc
 ### Summary
 
 Cycle 2 validates the main harness repair and cursor-only fullscreen oracle at clean `b9568fc`, including five consecutive responsiveness attacks. The unchanged recipient harness still writes its candidate lifecycle to the standing Zellij log, so O4 remains red and the gate returns to implementation without spending captain time on I1-I2.
+
+## Validation Feedback Cycle 2 Repair and Convergence Gate
+
+- DONE: Contain the two-rail recipient harness without changing product behavior, the repaired main smoke, or the cursor-only fullscreen oracle.
+  RED: the pre-repair `bash tests/zellij-two-rail-recipient-smoke-test.sh` journey passed while the candidate-WASM count in host `$TMPDIR/zellij-501/zellij-log/zellij.log` changed from `4` to `5`, independently reproducing validation's remaining O4 outcome defect.
+  `c269b31bd9ada398cebb79e839580bb4f2a6b0d8` gives the version probe, setup/control calls, tmux-hosted server, session clients, cleanup probes, and rail-launched children one complete disposable `HOME`, `TMPDIR`, XDG cache/config/data/runtime, config/layout, data, socket, lifecycle-log, session-info, and permission environment. Inherited Zellij client identity is removed before the first probe.
+  The harness snapshots candidate-specific standing log lines, permission records, session-info, socket, and data paths before launch and requires the same digest both before cleanup and after the disposable root is removed. It also verifies that the live lifecycle log, socket, permission cache, and any materialized session-info path resolve only beneath the disposable root.
+- DONE: Preserve the exact two-rail stable-tab/token isolation journey and establish no regression in the already-contained main harness.
+  GREEN: two post-repair recipient runs passed `stable-tab recipient delivers only to the target rail with zero host-default candidate records`; the independently counted host candidate path stayed `5 → 5` on both final checks.
+  `bash -n tests/zellij-two-rail-recipient-smoke-test.sh` and `git diff --check` passed. The final-head normal `bash tests/zellij-tmux-smoke-test.sh` also passed its fixed-input, terminal/rail fullscreen, entry, subscriber, routing, and cleanup journey unchanged.
+  Exact-head quick parent `132`, panel `quick`, reviewed `c269b31bd9ada398cebb79e839580bb4f2a6b0d8`; required member `131` PASS and synthesis PASS with no issues.
+- DECISION REQUIRED: Authoritative implementation-review convergence remains exhausted.
+  Clean implementation head is `c269b31bd9ada398cebb79e839580bb4f2a6b0d8`. The only cycle-2 change is the bounded recipient-harness O4 containment slice; no product file or other proof path changed.
+  Per the dispatch gate, no new `code_completion` panel was launched. Captain authorization is required before spending another authoritative replacement review and returning the frozen head to validation for O1-O4 and I1-I2.
+
+### Repair Summary
+
+The remaining recipient-smoke leak is reproduced red and contained green while exact stable-tab/token routing remains intact. The main harness remains green, exact-head quick review passes, and clean head `c269b31` is stopped at the required convergence gate awaiting the captain's review-budget decision.
