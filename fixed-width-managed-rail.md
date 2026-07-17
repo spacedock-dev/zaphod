@@ -156,3 +156,17 @@ The fixed 28-column product and offline runtime journey reached a green frozen h
 ### Continuation Summary
 
 All captain-approved proof gaps were addressed without product changes. Focused and runtime checks are green at `2f20978`, exact-head quick passed, and authoritative exact-range `code_completion` parent `67` passed unanimously; implementation is complete and ready for validation.
+
+## Stage Report: validation
+
+- DONE: Verify that authoritative code_completion parent 67 covers the frozen merge-base(main, 2f20978)..2f20978 range, that every required member executed exactly once and passed, and that no later code change invalidates it.
+  Parent `67` names `code_completion`, exact range `ac0ae2a..2f20978`, and PASS; correctness `64`, journey `65`, and proof `66` each appear once with `done`, PASS, and zero retries; clean `HEAD` remains `2f20978`.
+- FAILED: Independently reproduce every offline O1-O4 proof and perform the required adversarial refutation audit from a throwaway checkout, including false-positive mouse coordinates, keybind-source authority, fullscreen terminal state, identity, geometry, chrome, and standing-root isolation.
+  O1-O3 passed in both permission modes, Rust passed `89/89`, entry `14/14`, and recipient isolation passed; O4 is REFUTED because the detached candidate's server lifecycle was written to host `$TMPDIR/zellij-501/zellij-log/zellij.log`.
+  Mouse row/column, positive delivery control, granted active-tiled Keybind source, exact identity/cardinality/geometry/chrome, and terminal/rail fullscreen attacks survived; one of five extra responsiveness runs also failed on cursor `[8,2] -> [8,1]`, exposing an intermittent restore-oracle defect.
+- DONE: Prepare the exact captain demo for interactive I1-I2 and the required subspace gate artifact plus decisions log, reporting per-AC verdicts and any surviving attack rather than modifying the implementation.
+  `gates/fixed-width-managed-rail-validation.md` contains the post-fix I1-I2 script and per-AC evidence; sibling brief and `.decisions.jsonl` recommend REJECTED, and the captain demo was correctly not run while O4 is red.
+
+### Summary
+
+The fixed-width behavior and native fullscreen journey passed independent O1-O3 reproduction at clean `2f20978`, and authoritative panel `67` is current. Validation rejects the gate on a concrete O4 standing-root write plus an intermittent cursor-snapshot proof failure; implementation code was not changed, and I1-I2 remain for the captain only after repair and replacement review.
