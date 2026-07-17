@@ -89,3 +89,41 @@ Implementation should extend the existing pure seams `permissions_for_config` an
 ### Summary
 
 The design removes layout mutation from the rail's steady state: one 28-column birth-layout rail, inert former toggle inputs, and native fullscreen as the temporary space-reclamation mechanism. A disposable host-level probe validated the riskiest fullscreen assumption, while the implementation acceptance proof intentionally repeats it with the real Zaphod WASM and captain interaction.
+
+## Stage Report: implementation
+
+- DONE: Ship the approved fixed-28-column managed layout with former toggle inputs inert, remove the whole-tab override/swap/runtime-route machinery, preserve row behavior, and update every approved user-facing document through red-then-green behavior slices.
+  Commits `fdd6c2b`, `67fced9`, `a259e40`, `1acd034`, `b6322de`, `c55713c`, and `d9872d4` deliver the fixed rail, documentation, exact-byte header, literal fullscreen journey, and corrected FIXED click coordinate.
+  `src/main.rs` no longer requests `Reconfigure`, installs a runtime `MessagePluginId` toggle, or retains toggle/swap/override/pending-steer machinery; header clicks return `None`, stale toggle pipes are unknown and inert, and row actions are unchanged.
+  `layouts/zaphod.kdl` owns exactly one 28-column rail, one children region, and native tab/status bars; no swap layouts remain.
+  README, SPEC, roadmap, workspace architecture, and smoke-harness documentation now describe the fixed safety boundary and gate future resizing on a safe upstream exact-width/retained API.
+  RED: `cargo test cli_pipe_permission_is_reserved_for_token_bound_entry -- --nocapture` observed `Reconfigure` in the permission set; green after removal.
+  RED: `cargo test fixed_header_clicks_are_inert_without_changing_row_behavior -- --nocapture` observed `ToggleDock` instead of `None`; green after the click change.
+  RED: `bash tests/zellij-new-tab-test.sh` reported that the tokenless installed layout did not contain exactly one rail; green after removing swap layouts.
+  RED: the focused header-byte test failed to compile because `fixed_header_line` did not exist; green with exact 28-, 13-, and 8-column Unicode/ANSI byte assertions.
+  Native test count changed from 143 before retired-toggle removal to 88 after removal, then 89 after adding the fixed-header byte seam.
+- DONE: Make the offline acceptance proof green: exact populated-tab rail/chrome geometry, byte-stable layout under Alt /, FIXED-header click and stale toggle pipe, native fullscreen round-trips for terminal and rail, entry/recipient isolation, and unchanged standing roots.
+  Resolved shared native target: `/Users/clkao/git/zaphod/target`; native commands used `RUSTC_WRAPPER=sccache` and `SCCACHE_DIR=/Users/clkao/git/zaphod/target/sccache`.
+  `cargo test` passed 89 tests and `cargo check --tests` passed with the shared target; `env -u CARGO_TARGET_DIR ./build.sh` produced the isolated candidate WASM.
+  `bash tests/zellij-new-tab-test.sh`, `bash tests/zellij-layout-capture-test.sh`, `bash tests/zellij-install-profile-test.sh`, and the docs scrollback test passed.
+  `bash tests/zellij-tmux-smoke-test.sh` passed at 160x48 with a six-pane inventory, exact rail `x=0,y=1,28x46`, exact chrome, literal Alt `/`, column-24 FIXED click, stale CLI toggle, and literal terminal/rail fullscreen restores.
+  `ZAPHOD_PERMISSION_FIXTURE=upgrade bash tests/zellij-tmux-smoke-test.sh` and `bash tests/zellij-two-rail-recipient-smoke-test.sh` passed; disposable-root hashes proved standing config/layout/data/socket/permission roots unchanged.
+  The semantic adversarial pass pinned exact header bytes and identity/cardinality/geometry/fullscreen terminal state, exercised every former input path available in the shipped profile, and made restore exhaustion fail instead of normalize away `is_fullscreen`.
+- BLOCKED: Complete the semantic adversarial pass and exact-head Roborev quick plus code_completion review, resolving every material finding and recording reproducible commands, counts, commit SHAs, and panel evidence in the implementation report.
+  Exact-head quick parent `16`, panel `quick`, reviewed `d9872d4b849f40716622871d7e9e28f2763cd26d`; required member `15` PASS and parent verdict PASS with no issues.
+  Authoritative round 1 parent `6`, range `ac0ae2a5c301052daadc2c5cca89c2bbfbf6fdcc..b6322de051098a2432eed0863924b6fa6e507b6c`, failed: literal-key/focus fullscreen was bypassed and restore timeout/fullscreen terminal state could falsely pass.
+  Disposition: both were O3 evidence defects; `c55713c` added literal Alt-f terminal/rail journeys through supported rail navigation, explicit restore deadlines, and final `is_fullscreen=false` assertions.
+  Authoritative round 2 parent `14`, range `ac0ae2a5c301052daadc2c5cca89c2bbfbf6fdcc..c55713c720198acb0feb5941be96830cf7af3aa9`, failed because column 5 clicked PANES rather than FIXED.
+  Disposition: O2 evidence defect; `d9872d4` moved the raw SGR click to column 24 and the complete smoke passed.
+  A non-authoritative over-wide range audit parent `21` passed all three required members; it is not exit evidence because its stored range begins at the merge-base parent.
+  Authoritative round 3 parent `25`, panel `code_completion`, exact required range `ac0ae2a5c301052daadc2c5cca89c2bbfbf6fdcc..d9872d4b849f40716622871d7e9e28f2763cd26d`, current head `d9872d4`, returned FAIL.
+  Required members executed exactly once: correctness `22` FAIL, journey `23` PASS, proof `24` FAIL; synthesis verdict FAIL.
+  Surviving Medium findings are O2 evidence defects: the inert FIXED click lacks a positive raw-mouse delivery control, and stale toggle coverage does not exercise `PipeSource::Keybind` against a permission-granted active tiled resident.
+  Release-scope triage: the released managed-tab behavior is green, but O2 explicitly promises literal header and former-keybind inertness; negative-only or wrong-source evidence can falsely certify that safety boundary.
+  Frozen head is `d9872d4`; the least-invasive proposed disposition for both findings is `must fix now` with tests only: add a same-path positive row-click/focus control and an authorized active-resident keybind-source unit assertion.
+  Repair cost is small and isolated to proof code; product behavior need not change. Risk is smoke focus restoration/flakiness, mitigated by exact inventory baselines and deadlines.
+  The three-round convergence budget is exhausted, so no fourth panel or further code change was made; first-officer/captain disposition is required before validation.
+
+### Summary
+
+The fixed 28-column product and offline runtime journey are implemented and green at `d9872d4`, including native terminal/rail fullscreen and layout-inert former inputs. Implementation cannot advance because the third authoritative completion panel identified two remaining O2 proof gaps; the frozen-head convergence gate recommends two bounded test-only fixes before a captain-authorized replacement review.
