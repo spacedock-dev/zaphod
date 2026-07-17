@@ -5,10 +5,10 @@ gate:
   entity: fixed-width-managed-rail
   entity-title: Keep the managed rail at one fixed width without blocking native fullscreen
   stage: validation
-  round: 1
+  round: 2
 recommendation:
   verdict: REJECTED
-  rationale: "O1-O3 pass, but O4 is refuted because the isolated smoke writes its candidate-bearing server log under the host default Zellij socket/log root; an extra responsiveness run also exposed intermittent cursor-state proof drift."
+  rationale: "The main smoke repair passes normal, upgrade, and five responsiveness runs with complete disposable roots, but O4 remains refuted because the unchanged recipient smoke writes its exact detached candidate path to the host default Zellij log."
 artifact:
   kind: draft
   path: ./fixed-width-managed-rail-validation.md
@@ -20,16 +20,16 @@ criteria:
   acceptance:
     - id: O1
       text: "A populated managed tab has one stable fixed rail and intact chrome."
-      evidence: "PASS: both permission modes reached the exact six-pane 160x48 inventory with one canonical 28x46 rail and two exact chrome rows."
+      evidence: "PASS: normal, upgrade, and five responsiveness runs reached the exact six-pane 160x48 inventory with one canonical 28x46 rail and two exact chrome rows."
     - id: O2
       text: "Former toggle inputs cannot mutate pane layout."
       evidence: "PASS: literal Alt /, the delivered FIXED click, stale CLI pipe, and granted active-tiled Keybind-source toggle were inert."
     - id: O3
       text: "Native fullscreen round-trips both pane kinds without layout loss."
-      evidence: "PASS in the required packet; one of five extra responsiveness runs failed only on terminal cursor coordinates, exposing proof instability."
+      evidence: "PASS: seven main runs, including five responsiveness attacks, preserved every stable identity/geometry/chrome/command/fullscreen field while normalizing only focus and cursor."
     - id: O4
       text: "Entry, row interaction, permission behavior, recipient isolation, and standing-root isolation do not regress."
-      evidence: "REFUTED: the host default $TMPDIR/zellij-501/zellij-log/zellij.log records the detached candidate's smoke server lifecycle."
+      evidence: "REFUTED: the repaired main harness is isolated, but the passing two-rail recipient smoke changed its exact candidate-path count in the host default Zellij log from 0 to 1."
     - id: I1
       text: "Extra panes remain arranged after former toggle inputs in WORK."
       evidence: "NOT RUN: exact captain script is in the artifact; offline rejection blocks the live demo."
@@ -38,12 +38,12 @@ criteria:
       evidence: "NOT RUN: exact captain script is in the artifact; offline rejection blocks the live demo."
 ---
 
-Validation at `2f209781c10184a768292555aea0effc8aa77145` rejects the
-gate. Product behavior passed O1-O3 in the required runtime packet, but O4's
-standing-root promise is false for the current harness: Zellij control calls
-redirect socket/data/config while leaving `HOME` and `TMPDIR` standing, and the
-host default Zellij log contains the detached candidate's server lifecycle.
+Validation cycle 2 at `b9568fc8645646c15bb31878827cb86e4f1fff28`
+rejects the gate. The repaired main harness passes O1-O3 and complete root
+isolation across normal, upgrade, and five responsiveness runs. O4's standing-
+root promise remains false for the unchanged recipient harness, whose passing
+server appended the detached candidate identity to the host default Zellij log.
 
 The detailed artifact contains the exact review evidence, per-AC commands,
-named adversarial probes, intermittent cursor-snapshot finding, and the
-captain-driven I1-I2 script to run only after offline isolation is repaired.
+named adversarial probes, the repaired cursor-normalizer attacks, and the
+captain-driven I1-I2 script to run only after recipient isolation is repaired.

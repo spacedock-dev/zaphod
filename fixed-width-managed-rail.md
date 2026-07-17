@@ -204,3 +204,17 @@ The fixed-width behavior and native fullscreen journey passed independent O1-O3 
 ### Repair Summary
 
 Validation's O4 leak is contained at process launch and proved with candidate-scoped standing-state attribution. The fullscreen oracle ignores only volatile cursor position while preserving all layout, identity, chrome, command, suppression, and fullscreen terminal state. Final quick and captain-accepted completion reviews pass at clean head `b9568fc`; the repaired head is ready for validation to repeat O1-O4 and then present I1-I2 to the captain.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: Verify clean repaired head b9568fc and the captain-accepted parent 130/member 127-129 PASS record, confirming no post-panel code change and explicitly carrying the accepted inclusive-range exception rather than rerunning Roborev.
+  Clean `HEAD` is `b9568fc`; parent `130` and correctness `127`, journey `128`, proof `129` are `done`, PASS, zero-retry, exactly once. Its accepted `c5ecf0c..b9568fc` range includes all 15 task commits plus base `ac0ae2a`; no rerun was made.
+- FAILED: Independently rerun O1-O4 from a detached throwaway checkout, with special attacks against host log/cache/socket/data/permission leakage and at least five responsiveness fullscreen round trips proving the cursor-only normalization cannot mask geometry, chrome, identity, or fullscreen terminal-state drift.
+  Rust passed `89/89`, new-tab `14/14`, normal/upgrade main smoke `2/2`, and responsiveness `5/5`; synthetic stable-field mutations all remained detectable and every main cleanup proved disposable roots plus zero host candidate records.
+  O4 is REFUTED: the passing two-rail recipient smoke changed the detached candidate-path count in host `$TMPDIR/zellij-501/zellij-log/zellij.log` from `0` to `1`; `tests/zellij-two-rail-recipient-smoke-test.sh:42-50,99,167-170` lack the complete disposable environment.
+- DONE: Update the validation gate artifact, brief, decisions log, and exact I1-I2 captain demo from reproduced evidence; recommend PASSED only if every offline AC survives, otherwise report the concrete surviving attack without modifying implementation.
+  Gate round 2 remains REJECTED; the detailed artifact records per-AC evidence, the exact leaked log line, and a post-repair captain script. I1-I2 were correctly not run, and implementation code stayed untouched.
+
+### Summary
+
+Cycle 2 validates the main harness repair and cursor-only fullscreen oracle at clean `b9568fc`, including five consecutive responsiveness attacks. The unchanged recipient harness still writes its candidate lifecycle to the standing Zellij log, so O4 remains red and the gate returns to implementation without spending captain time on I1-I2.

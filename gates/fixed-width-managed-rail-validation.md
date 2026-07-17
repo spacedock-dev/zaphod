@@ -1,14 +1,20 @@
 # Validation: Keep the managed rail at one fixed width without blocking native fullscreen
 
+Current cycle: `2`  
+Current repaired SHA: `b9568fc8645646c15bb31878827cb86e4f1fff28`  
+Current recommendation: **REJECTED** — the repaired main smoke is isolated, but
+the unchanged recipient smoke still writes the candidate lifecycle to the host
+default Zellij log. Cycle 1 is preserved below; cycle 2 is appended at the end.
+
 Entity: `fixed-width-managed-rail.md`  
 Implementation worktree: `.worktrees/spacedock-ensign-fixed-width-managed-rail`  
-Raw implementation SHA: `2f209781c10184a768292555aea0effc8aa77145`  
-Validation checkout: detached throwaway clone of that SHA, nested under the assigned worktree
+Cycle-1 raw implementation SHA: `2f209781c10184a768292555aea0effc8aa77145`  
+Cycle-1 validation checkout: detached throwaway clone of that SHA, nested under the assigned worktree
 
 The implementation worktree was clean at the checked SHA before validation.
 No implementation file was changed during validation.
 
-## Gate recommendation
+## Cycle 1 gate recommendation
 
 **REJECTED.** O1 through O3 pass, and the stored Roborev panel is current and
 unanimous, but O4 is refuted: the supposedly isolated Zellij smoke writes its
@@ -189,3 +195,186 @@ layout, data, socket/log, and permission/cache paths remain unchanged. Keep the
 product code frozen. Also decide whether cursor coordinates belong in O3's
 canonical restore snapshot; whichever contract is chosen must be deterministic
 under repeated responsiveness-mode runs.
+
+## Validation cycle 2
+
+Repaired implementation SHA: `b9568fc8645646c15bb31878827cb86e4f1fff28`  
+Validation checkout: detached throwaway clone of that SHA, nested under the
+assigned worktree. The implementation worktree was clean before and after the
+cycle; no implementation file was changed.
+
+### Cycle 2 recommendation
+
+**REJECTED.** The cycle-1 main-smoke root leak and cursor-oracle flake are
+repaired: normal and upgrade smokes passed, and five consecutive
+responsiveness smokes preserved every stable fullscreen field while leaving
+zero candidate records in host defaults. O4 remains refuted because the
+unchanged two-rail recipient smoke writes its exact detached candidate path to
+the host default `$TMPDIR/zellij-501/zellij-log/zellij.log`.
+
+### Captain-accepted review evidence
+
+- Clean code `HEAD` and current head are
+  `b9568fc8645646c15bb31878827cb86e4f1fff28`; there is no post-panel commit or
+  worktree change.
+- `main` and `merge-base(main, b9568fc)` are both
+  `ac0ae2a5c301052daadc2c5cca89c2bbfbf6fdcc`; the frozen task range contains
+  15 commits.
+- `roborev show --job 130 --json` names `code_completion`, status `done`,
+  synthesis verdict `P`, and zero retries. Correctness `127`, journey `128`,
+  and proof `129` each appear exactly once with `done`, PASS, and zero retries.
+- Parent `130` stores `c5ecf0c..b9568fc`, a 16-commit inclusive range that
+  contains the full frozen task and one extra base commit `ac0ae2a`. The
+  captain explicitly accepted that over-wide evidence. Validation carried the
+  exception and did not rerun Roborev. Exact-head quick parent `126` also PASSed.
+
+### Cycle 2 offline AC verdicts
+
+| AC | Verdict | Independently reproduced evidence |
+|---|---|---|
+| O1 — stable fixed rail and intact chrome | **PASS** | Normal, upgrade, and five responsiveness smokes all reached `candidate-settled`. Each required the exact six-pane 160x48 inventory: one canonical candidate rail at `x=0,y=1,28x46`, three terminals, tab bar `160x1@y=0`, and status bar `160x1@y=47`. |
+| O2 — former toggle inputs are layout-inert | **PASS** | All seven smokes reached `fixed-inputs-inert`: literal `Alt /`, the delivered column-24 visual-header click, and stale toggle pipe preserved native JSON and normalized KDL. Rust `89/89` includes the granted active-tiled `PipeSource::Keybind`, inert header, permission, and row-action controls. |
+| O3 — native fullscreen round-trips both pane kinds | **PASS** | All seven smokes reached `native-fullscreen-roundtrips-complete`; five responsiveness runs also completed refresh deadlines and the six-second stable post-close window. Only `is_focused` and `cursor_coordinates_in_pane` are removed. Synthetic mutations of identity, pane geometry, content geometry, chrome URL, fullscreen, command, suppression, selectability, and exited state all remained detectable after normalization. |
+| O4 — entry, rows, permissions, recipient, and standing-root isolation | **REFUTED** | Rust `89/89`, new-tab `14/14`, main smoke `7/7`, and stable-tab recipient delivery passed. Every main-smoke cleanup reported config/layout/candidate records unchanged and resolved log/socket/session-info/permission roots under `/tmp/zs.*`. The recipient smoke then changed the detached-path count in the host default log from `0` to `1`, despite reporting PASS. |
+
+### Cycle 2 commands and results
+
+```bash
+env -u CARGO_TARGET_DIR cargo test
+bash tests/zellij-new-tab-test.sh
+ZAPHOD_SMOKE_EVIDENCE_DIR="$PWD/.validation-evidence/pregranted" \
+  bash tests/zellij-tmux-smoke-test.sh
+ZAPHOD_PERMISSION_FIXTURE=upgrade \
+  ZAPHOD_SMOKE_EVIDENCE_DIR="$PWD/.validation-evidence/upgrade" \
+  bash tests/zellij-tmux-smoke-test.sh
+
+for run in 1 2 3 4 5; do
+  ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 \
+  ZAPHOD_SMOKE_RESPONSIVENESS_CHECK=1 \
+  ZAPHOD_SMOKE_EVIDENCE_DIR="$PWD/.validation-evidence/responsiveness-$run" \
+    bash tests/zellij-tmux-smoke-test.sh
+done
+
+bash tests/zellij-two-rail-recipient-smoke-test.sh
+```
+
+Results: Rust `89/89`; new-tab `14/14`; main smoke normal and upgrade `2/2`;
+responsiveness `5/5`; recipient delivery PASS. All seven main cleanup records
+had `original_status=0`, `cleanup_status=0`, `root_exists_after=0`, and
+`standing_config_unchanged=1`, `standing_layout_unchanged=1`,
+`standing_candidate_records_unchanged=1`. The resolved main roots were all
+under `/tmp/zs.*`, including log, socket, session-info, and permission cache.
+
+The recipient attack bracketed its run with an exact fixed-string count of the
+detached checkout path in the standing log. Count `0` became `1`; the new line
+was:
+
+```text
+4356:INFO |zellij_server::plugins::p| 2026-07-17 23:37:50.868 ... Loaded plugin '/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-fixed-width-managed-rail/.validation-audit-b9568fc/target/wasm32-wasip1/release/zaphod.wasm'
+```
+
+No candidate record appeared in the standing permission file, session-info
+cache, data tree, or surviving socket names. One candidate-attributable host
+log write is sufficient to refute O4's no-standing-root-write contract.
+
+### Cycle 2 refutation audit
+
+- **Main log/cache/socket/data/permission containment — SURVIVES.** Seven real
+  main smokes resolved every writable root below `/tmp/zs.*`; candidate record
+  counts remained zero in host defaults, and cleanup removed all owned roots,
+  sockets, sessions, and processes.
+- **Recipient host-root containment — REFUTED.** The two-rail script's control
+  helpers provide only socket/config/data (`tests/zellij-two-rail-recipient-smoke-test.sh:42-50`),
+  its version probe precedes containment (`:99`), and its server command sets
+  `HOME` but not `TMPDIR` or XDG roots (`:167-170`). Its passing real server
+  appended the exact candidate WASM identity to the host default Zellij log.
+- **Cursor-only normalization — SURVIVES.** Five responsiveness runs passed.
+  An independent synthetic attack proved focus/cursor mutations normalize
+  equal while identity, outer/content geometry, chrome, fullscreen, command,
+  suppression, selectability, and exited mutations remain unequal.
+- **Fullscreen terminal state — SURVIVES.** Each run required the exact target
+  ID at `160x46` with `is_fullscreen=true`, then all managed flags false and
+  byte-identical stable normalized inventory/layout on restore.
+- **Mouse/keybind/identity false positives — SURVIVES.** The same-path positive
+  row click changed and restored the exact focused pane before the derived
+  visual-header negative assertion; Keybind-source toggle remained inert;
+  rail cardinality, URL, stable tab ID, chrome, terminal count, and geometry
+  stayed exact.
+- **Panic/indexing, caller impact, semantic drift — SURVIVES.** Rust `89/89`,
+  new-tab `14/14`, all main journeys, and recipient stable-tab behavior passed;
+  helpers retain explicit cardinality errors and bounded waits.
+
+### Cycle 2 captain demo for I1 and I2
+
+Do not run while O4 is red. After the recipient harness is contained and the
+replacement offline packet/review passes, CL should drive this exact script
+from an ordinary pane inside `WORK`:
+
+```bash
+set -euo pipefail
+WT=/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-fixed-width-managed-rail
+cd "$WT"
+test "$(git rev-parse HEAD)" = b9568fc8645646c15bb31878827cb86e4f1fff28
+test "$(zellij --version)" = 'zellij 0.44.3'
+rg -n 'bind "Alt /" \{ NoOp; \}|bind "f" \{ ToggleFocusFullscreen;' \
+  /Users/clkao/.config/zellij/config.kdl
+cargo test fixed_header_clicks_are_inert_without_changing_row_behavior -- --nocapture
+./build.sh
+./scripts/zellij-new-tab.sh --session WORK --name 'Fixed rail validation cycle 2'
+```
+
+Copy the printed tab ID and create the I1 baseline:
+
+```bash
+TAB_ID=<printed-tab-id>
+DEMO=/tmp/fixed-rail-cycle-2-$TAB_ID
+zellij --session WORK action new-pane --tab-id "$TAB_ID" --direction right \
+  --cwd "$WT" --name fixed-demo-right
+zellij --session WORK action new-pane --tab-id "$TAB_ID" --direction down \
+  --cwd "$WT" --name fixed-demo-down
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.before.json"
+zellij --session WORK action dump-layout > "$DEMO.before.kdl"
+```
+
+CL confirms one 28-column rail, three arranged terminals, and both chrome rows;
+presses literal `Alt /`; and clicks the visible word `FIXED`. Nothing moves,
+stacks, disappears, changes width, or prompts. Capture the result:
+
+```bash
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.after-inputs.json"
+zellij --session WORK action dump-layout > "$DEMO.after-inputs.kdl"
+```
+
+For I2, CL focuses an ordinary pane and uses the current native sequence
+`Ctrl-p`, then `f`; the terminal must fill the content rectangle. CL presses
+the same sequence to restore and confirms the I1 split/chrome baseline. Then:
+
+```bash
+zellij --session WORK pipe --name navigate -- ""
+# CL observes rail focus and presses Ctrl-p then f.
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.rail-fullscreen.json"
+# CL presses Ctrl-p then f again, then Esc to exit rail navigation.
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.restored.json"
+zellij --session WORK action dump-layout > "$DEMO.restored.kdl"
+```
+
+The rail must fill the same content rectangle with `is_fullscreen=true` and
+restore with every managed fullscreen flag false, the 28-column rail, original
+terminal split, and both chrome rows. No permission prompt or new pane appears.
+
+### Cycle 2 demo outcome
+
+Not run. O4 remains refuted, so I1 and I2 stay pending for CL.
+
+### Cycle 2 return-to-implementation finding
+
+Apply the main smoke's complete disposable environment and candidate-scoped
+standing-root attribution to `tests/zellij-two-rail-recipient-smoke-test.sh`,
+including its version probe, control/session helpers, attached server, and
+cleanup. Keep product code and the repaired cursor oracle frozen. Re-run the
+recipient behavior plus host-root attack, obtain a replacement exact-head and
+completion review, then return to validation.
