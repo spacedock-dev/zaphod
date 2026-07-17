@@ -1,12 +1,12 @@
 ---
 id: tjj3aqdq4c4at5wrke8cmk0v
 title: Keep the managed rail at one fixed width without blocking native fullscreen
-status: backlog
+status: ideation
 source: captain direction after live dirty-tab layout corruption investigation, 2026-07-17
 sprint: s1-managed-tab-safety
 group: layout-stability
 sprint-readiness: ready
-started:
+started: 2026-07-17T10:10:10Z
 completed:
 verdict:
 score: 0.98
