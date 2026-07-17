@@ -1,14 +1,14 @@
 ---
 id: tjj3aqdq4c4at5wrke8cmk0v
 title: Keep the managed rail at one fixed width without blocking native fullscreen
-status: validation
+status: implementation
 source: captain direction after live dirty-tab layout corruption investigation, 2026-07-17
 sprint: s1-managed-tab-safety
 group: layout-stability
 sprint-readiness: ready
 started: 2026-07-17T10:10:10Z
 completed:
-verdict:
+verdict: REJECTED
 score: 0.98
 worktree: .worktrees/spacedock-ensign-fixed-width-managed-rail
 issue:
@@ -170,3 +170,12 @@ All captain-approved proof gaps were addressed without product changes. Focused 
 ### Summary
 
 The fixed-width behavior and native fullscreen journey passed independent O1-O3 reproduction at clean `2f20978`, and authoritative panel `67` is current. Validation rejects the gate on a concrete O4 standing-root write plus an intermittent cursor-snapshot proof failure; implementation code was not changed, and I1-I2 remain for the captain only after repair and replacement review.
+
+### Feedback Cycles
+
+#### Cycle 1 — validation → implementation
+
+- Verdict: `REJECTED`; feedback target: `implementation`.
+- Outcome defect, O4: the isolated tmux smoke sets `ZELLIJ_SOCKET_DIR` but leaves Zellij logging/cache resolution on host-default roots. A detached candidate wrote its lifecycle and exact candidate WASM path to `$TMPDIR/zellij-501/zellij-log/zellij.log` and attempted the standing session-info cache. Repair the supported harness so every Zellij process resolves logs, cache, socket, data, config, layout, and permission state only inside disposable roots, and prove standing-root hashes/records remain unchanged.
+- Evidence defect, fullscreen restore oracle: one of five responsiveness-enabled reproductions changed only `cursor_coordinates_in_pane` from `[8,2]` to `[8,1]` while geometry, chrome, identity, and fullscreen terminal state remained stable. Classify volatile cursor state explicitly and replace the flaky comparison with an oracle that still fails on layout/fullscreen drift without treating benign cursor motion as product failure.
+- Keep the fixed-width product behavior and O1-O3 contract unchanged. Implement the two findings as separate red/green slices, obtain replacement exact-head review evidence, then re-run the same validation reviewer against the frozen repaired head.
