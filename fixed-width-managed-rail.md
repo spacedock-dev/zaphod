@@ -1,14 +1,14 @@
 ---
 id: tjj3aqdq4c4at5wrke8cmk0v
 title: Keep the managed rail at one fixed width without blocking native fullscreen
-status: implementation
+status: validation
 source: captain direction after live dirty-tab layout corruption investigation, 2026-07-17
 sprint: s1-managed-tab-safety
 group: layout-stability
 sprint-readiness: ready
 started: 2026-07-17T10:10:10Z
 completed:
-verdict: REJECTED
+verdict:
 score: 0.98
 worktree: .worktrees/spacedock-ensign-fixed-width-managed-rail
 issue:
@@ -186,6 +186,7 @@ The fixed-width behavior and native fullscreen journey passed independent O1-O3 
 - Outcome defect, O4: the repaired main tmux smoke is fully contained, but the separate passing two-rail recipient smoke still launches the detached candidate without disposable `TMPDIR`/XDG coverage. Validation observed the candidate-path count in host `$TMPDIR/zellij-501/zellij-log/zellij.log` change from `0` to `1`.
 - Repair only `tests/zellij-two-rail-recipient-smoke-test.sh` and its direct helpers so every server, client, version/control call, and sidecar inherits the complete disposable environment. Prove the recipient journey still passes and produces zero candidate-attributable host log/cache/socket/data/permission records.
 - Keep product behavior, the main-smoke repair, and the cursor oracle unchanged. The implementation review budget remains exhausted: obtain the exact-head quick result, then stop at a convergence gate before launching any new authoritative `code_completion` panel.
+- Captain disposition after the convergence report: no additional authoritative review is required for the bounded recipient-harness-only correction at `c269b31`; exact-head quick parent `132` is accepted as sufficient review evidence. Proceed directly to same-reviewer O1-O4 revalidation without running Roborev.
 
 ## Validation Feedback Cycle 1 Repair
 
