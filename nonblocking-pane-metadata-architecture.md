@@ -615,3 +615,21 @@ head `45719f4`, including the fixed-width usable journey, exact per-tab
 restart-empty authority, deadlines, fail-close behavior, and complete owned
 cleanup. The gate packet is ready for the captain's real Subspace/Codex AC-I1
 walkthrough; product code and standing Zellij configuration were unchanged.
+
+## Stage Report: validation (cycle 2)
+
+- DONE: Run the exact frozen-head AC-I1 preflight at 45719f4 and stop with concrete evidence if any required build or congestion check is not green.
+  Head `45719f4`, merge base `999ba8a`, Zellij 0.44.3, `build.sh`, and `zellij-pane-metadata-congestion-test.sh` all passed; the congestion wrapper again reported responsive native actions and quiet cleanup.
+- DONE: Prepare the disposable live environment: services healthy, fresh managed tab launched, standing KDL hashes captured, and exact tab/permission/watcher commands recorded without changing standing configuration.
+  Disposable AgentsView v0.37.5 is healthy; tab `4`, rail `plugin_33` at 28 columns, terminal `26`, entry record, exact commands, native JSON, layout, and identical before/after standing KDL hashes are retained.
+- DONE: Stop at the first captain-only keypress or visual observation, provide one concise action cue, and retain native-state instrumentation without claiming AC-I1 until the captain reports the observation.
+  The gate artifact asks the captain only to inspect `Task 91 captain live`, report the fixed rail/terminal view and permission-prompt presence, and not approve or start the watcher; AC-I1 remains pending.
+- SKIPPED: Approve a permission prompt, start the manual watcher, send captain keypresses, or claim visual results.
+  Those actions and observations belong to the captain; setup stopped at the prescribed boundary.
+
+### Summary
+
+The exact offline preflight is green and a disposable live AC-I1 environment
+is ready at stable tab `4` with unchanged standing KDL bytes. Native setup
+evidence and route commands are retained, while the first visual check and all
+later keypresses remain explicitly captain-driven and unclaimed.

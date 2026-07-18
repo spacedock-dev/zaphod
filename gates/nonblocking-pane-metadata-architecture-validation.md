@@ -210,3 +210,34 @@ helper remains. Standing `~/.config/zellij/config.kdl` and
 
 **PENDING CAPTAIN.** AC-I1 has not been run or claimed by this validator. The
 offline packet is green and the exact live script is ready for the captain.
+
+## Live setup checkpoint — 2026-07-18
+
+The captain authorized setup through the first human observation. Validation
+reran the exact frozen-head preflight: head `45719f4`, merge base `999ba8a`,
+Zellij `0.44.3`, `build.sh` PASS, and the full metadata-congestion wrapper
+PASS.
+
+Because the standing default AgentsView path was inaccessible to this worker,
+the validator started v0.37.5 with the explicit disposable data root
+`$WT/.task91-agentsview`; its initial 2,620-session sync completed and
+`http://127.0.0.1:8080/api/v1/sessions?limit=1` is healthy. No standing
+AgentsView path was changed.
+
+Fresh managed stable tab `4` is named `Task 91 captain live`. Native setup
+state is retained at `/tmp/task91-captain-native-before.json` and records
+candidate rail pane `plugin_33` at `x=0,y=1,28x58`, selected terminal pane
+`26` at `x=28,y=1,210x58`, and intact `238x1` tab/status bars. Entry output is
+at `/tmp/task91-captain-entry.out`; it records recipient token
+`zaphod-24730-169-1784385683`, watcher root
+`/tmp/zaphod-watch-tab-v1-501`, the exact permission command targeting
+`plugin_33`, and the candidate `target/zaphod watch-tab` command.
+
+Standing KDL hashes before and after setup are identical:
+`config.kdl` `398ff6d6…be316` and `layouts/zaphod.kdl`
+`bb9e8e21…3980e`. AC-I1 remains pending.
+
+**Captain cue:** open the `Task 91 captain live` tab and only look. Report
+PASS if one fixed 28-column rail is visible at left with one selected terminal
+to its right; report FAIL with what differs. Also report whether a permission
+prompt is visible. Do not approve the prompt or start the watcher yet.
