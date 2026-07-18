@@ -1,7 +1,7 @@
 ---
 id: 91f2dxkn3v7fe1174ayj48j5
 title: Remove synchronous pane metadata calls from the plugin hot path
-status: validation
+status: implementation
 source: live nautical-cuckoo congestion diagnosis 2026-07-14
 sprint: s1-managed-tab-safety
 group: architecture-hardening
@@ -420,6 +420,23 @@ or redefine KJ's registry authority and session-incarnation decision.
   identity and lifecycle authority, bounded/cancelable/coalesced enrichment,
   malformed/stale fail-close behavior, and KJ's startup-only inventory, lease,
   and orphan-cleanup contract.
+
+#### Cycle 1 — 2026-07-18 — captain rejected production `FIXED` marker
+
+- AC-I1's first live checkpoint passed the fixed-width layout: one 28-column
+  rail appeared at left with one selected terminal at right, and the captain
+  confirmed the native permission prompt was visible.
+- The same checkpoint exposed `FIXED` in the production rail header. The
+  captain expected that word to be debug-only, so shipping it is an
+  operator-visible outcome defect rather than a failure of the fixed-width or
+  nonblocking mechanism.
+- Route only the header presentation back to implementation: remove the
+  production `FIXED` marker, pin the intended user-facing header bytes, and
+  preserve the 28-column layout, inert former-toggle inputs, fullscreen
+  behavior, exact-pane authority, nonblocking metadata path, and cleanup.
+- Re-run the focused header/UI checks and the fresh first AC-I1 checkpoint.
+  Do not hot-reload or reuse the existing rail; the replacement observation
+  must use a newly built WASM in a fresh managed tab.
 
 ## Stage Report: ideation
 
