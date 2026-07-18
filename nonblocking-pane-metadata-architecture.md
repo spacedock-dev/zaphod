@@ -682,3 +682,21 @@ next boundary is solely the captain's report of permission-prompt visibility.
 The captain confirmed the native permission prompt and explicitly kept the
 debug-only `FIXED` label outside task 91's blocking scope. AC-I1 continues from
 the prompt-approval boundary; no later watcher or session behavior is claimed.
+
+## Stage Report: validation (cycle 5)
+
+- DONE: Record the captain's exact permission approval action without inferring its visual outcome.
+  The captain confirmed one approval of the visible native prompt; prompt closure and layout preservation remain unclaimed pending explicit observation.
+- DONE: Retain native-state and standing-file instrumentation after the action.
+  Tab `4`, rail `plugin_33` at 28x58, selected terminal `26`, intact chrome, and unchanged standing KDL hashes are recorded without substituting for the human view.
+- DONE: Detect and preserve the service boundary before watcher startup.
+  The disposable AgentsView daemon is no longer listening; validation will restore it only after this visual checkpoint and before starting the watcher.
+- DONE: Return exactly one next captain observation with its expected result.
+  The sole cue asks for PASS only if the prompt is gone and the same fixed-width rail/terminal layout remains, otherwise FAIL; no further action is authorized.
+
+### Summary
+
+The captain's single permission approval is durably recorded, while its visual
+result remains correctly pending. Native geometry and standing KDL bytes are
+stable, and watcher startup is held until both the captain's view passes and
+the disposable AgentsView service is restored.

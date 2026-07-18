@@ -276,3 +276,22 @@ using its displayed approval control. Expected result: the prompt closes and
 the same `Task 91 captain live` tab returns with the fixed 28-column left rail
 and selected terminal to its right; no pane or layout moves. Report PASS or
 FAIL, then stop without starting the watcher.
+
+## Live permission approval action — captain confirmed
+
+The captain confirmed they approved the visible native permission prompt
+exactly once. That records the human action only; prompt closure and unchanged
+layout are not inferred without the captain's explicit visual report.
+
+Supporting native checkpoint
+`/tmp/task91-captain-native-permission-approved.json` still records tab `4`,
+candidate rail `plugin_33` at `x=0,y=1,28x58`, selected terminal `26` at
+`x=28,y=1,210x58`, and intact chrome; standing KDL hashes remain identical.
+This instrumentation does not replace the visual observation. The disposable
+AgentsView daemon is no longer listening, so validation will restore it before
+any watcher start after this visual checkpoint.
+
+**Captain cue:** look at `Task 91 captain live` now. Report `PASS` only if the
+permission prompt is gone and the same fixed 28-column left rail plus selected
+terminal are visible with no pane or layout movement; otherwise report `FAIL`
+and what differs. Do nothing else and do not start the watcher.
