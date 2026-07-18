@@ -594,3 +594,24 @@ fail-closed manual per-tab watcher contract. Canonical acceptance and proof now
 match the fixed 28-column demo, restart-empty recovery, exact-pane authority,
 and bounded nonblocking implementation, so task 91 is ready for fresh
 independent validation without another build or verification run.
+
+## Stage Report: validation
+
+- DONE: Verify frozen code head 45719f4 and stored code_completion parent 188 cover the exact current merge-base range, include every required member once, and have an authoritative PASS verdict.
+  Clean head `45719f4`, merge base `999ba8a`, quick `182`, and `code_completion` parent `188` were verified directly; correctness `185`, journey `186`, and proof `187` each occur once at exact range, `done/P`, retry zero.
+- DONE: Independently reproduce every revised offline AC and run a throwaway-checkout refutation audit, including fixed 28-column usability under held metadata congestion, exact-pane authority, 1/1/0 projection, restart-empty then fresh recovery, fail-close behavior, deadlines, and cleanup.
+  Rust 80/80, uncached Go plus vet, congestion, two-rail, and cleanup-stress packets passed; five local negative correctness mutations were rejected and the detached checkout was removed.
+- DONE: Prepare the exact captain-live demo script plus Subspace gate artifact and decision record, clearly separating independently reproduced offline evidence from the interactive observation reserved for the captain.
+  `gates/nonblocking-pane-metadata-architecture-validation.md`, the Subspace brief, and its decision log record offline PASS and an exact AC-I1 script; AC-I1 remains explicitly pending captain observation.
+- SKIPPED: Run or claim the AC-I1 captain-live observation.
+  The workflow makes the captain the validator for the real floating-TUI journey; no offline harness result was substituted for that observation.
+- SKIPPED: Record a human Subspace Review v1 decision.
+  Subspace 0.8.0-beta.5 opened the frozen brief at SHA-256 `a5c56086…f5ec7c` with `No decision`; no `person:reviewer` acted, so no Review v1 result was claimed and the pending presentation is recorded durably.
+
+### Summary
+
+All six revised offline criteria pass fresh independent validation at frozen
+head `45719f4`, including the fixed-width usable journey, exact per-tab
+restart-empty authority, deadlines, fail-close behavior, and complete owned
+cleanup. The gate packet is ready for the captain's real Subspace/Codex AC-I1
+walkthrough; product code and standing Zellij configuration were unchanged.
