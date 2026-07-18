@@ -394,7 +394,7 @@ stale or unknown without guessing or delaying Zellij actions.
 
 ## Stage Report: implementation
 
-- PARTIAL: Reconciled current main's fixed-width managed rail with task 91 at
+- DONE: Reconciled current main's fixed-width managed rail with task 91 at
   code head `45719f4aaf545213b2a623871892ec87bde800ca`.
   Merge `f8ccc1b` contains main `999ba8a`: one layout-owned 28-column rail,
   inert `Alt /`, inert `FIXED` header, native fullscreen, no runtime layout
