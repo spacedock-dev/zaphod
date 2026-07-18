@@ -375,6 +375,28 @@ or redefine KJ's registry authority and session-incarnation decision.
 - After task 91 lands, rerun KJ's native congestion proof and obtain a new
   full-range `code_completion` parent for KJ before its captain-live AC-I1.
 
+#### Captain approved per-tab restart-empty contract — 2026-07-18
+
+- The approved end value is one fail-closed in-memory registration set per
+  manually started tab watcher. A watcher restart begins with zero session
+  rows and may repopulate only after a fresh matching `SessionStart`.
+- This supersedes AC-O4's shared full-snapshot/local-intersection mechanism
+  and its requirement that restart rehydrate one row. Do not add a shared
+  registry, persistent recovery controller, watcher polling, or retries.
+- AC-O2 may use the shipped executable zero-forbidden-call, permission,
+  source, and handler-matrix proof instead of adding the proposed panicking
+  host seam, provided validation independently proves every handler path stays
+  nonblocking.
+- Acceptance remains anchored to the usable fixed-width journey: the rail is
+  layout-owned at 28 columns, a delivered row focuses its exact registered
+  pane while metadata enrichment is held in flight, native pane/tab actions
+  meet their one-second deadlines, two rails project exact `1/1/0`, restart is
+  empty, later fresh delivery recovers, and cleanup is complete.
+- Unchanged boundaries: no synchronous metadata host calls, exact pane
+  identity and lifecycle authority, bounded/cancelable/coalesced enrichment,
+  malformed/stale fail-close behavior, and KJ's startup-only inventory, lease,
+  and orphan-cleanup contract.
+
 ## Stage Report: ideation
 
 - DONE: Design a bounded cached/event-fed metadata architecture that removes every synchronous pane command, CWD, and scrollback call from the WASM hot path while preserving exact pane authority and degraded stale-state rendering.
