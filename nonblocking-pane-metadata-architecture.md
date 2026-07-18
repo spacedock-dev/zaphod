@@ -28,7 +28,7 @@ from blocking, cancel obsolete work, or prevent several rails from multiplying
 load.
 
 The accepted KJ design also changes the authority boundary. A SessionStart
-hook and native registry identify an agent session's exact Zellij pane. CWD,
+hook and the tab's manual watcher identify an agent session's exact Zellij pane. CWD,
 the foreground command, titles, prompt text, and temporal proximity no longer
 authorize session binding. Task 91 must use that exact identity rather than
 building a second pane-discovery mechanism.
@@ -39,7 +39,7 @@ Make the plugin render from bounded cached/event-fed state only. Slow pane enric
 
 Implementation starts from a mainline that contains task `44` and KJ's
 approved exact session-to-pane projection. If KJ has not merged, stop; do not
-restore CWD binding or duplicate its registry to make this task independently
+restore CWD binding or add a shared registry to make this task independently
 green.
 
 ## Riskiest mechanism spike — run first, PASSED
@@ -74,7 +74,7 @@ and deleted its session. It did not read or write standing Zellij KDL.
 This spike validates process isolation, latest-wins coalescing, bounded
 concurrency, cancellation, and the absence of a delayed burst. It does not
 validate the production pipe protocol or WASM cache. The first implementation
-test below repeats the same barrier through the candidate sidecar, private
+test below repeats the same barrier through the candidate watcher, private
 pipe, plugin cache, and literal-key path.
 
 ## Proposed approach
@@ -98,25 +98,32 @@ state and summary from the event feed. Missing enrichment never removes the
 terminal row and never enables focus for a session without exact registered
 pane membership.
 
-### 2. Feed one atomic, bounded cache over the existing private channel
+### 2. Feed one atomic, bounded per-tab cache over the existing private channel
 
-Extend the KJ subscriber rather than add a watcher or second sidecar. Each
-accepted full snapshot carries:
+Use the KJ manual watcher as the only native session feed. The operator starts
+one watcher from the selected terminal in each direct-entry tab. Its one
+startup inventory proves the exact Zellij session, stable tab, terminal pane,
+original rail, recipient token, and socket root; after readiness it performs
+no native pane inventory or pane-metadata lookup. A trusted matching
+`SessionStart` supplies one top-level provider registration through that
+terminal's private socket. The watcher keeps that registration only in memory,
+and a later matching `SessionStart` replaces it.
+
+Each accepted full snapshot carries:
 
 ```text
 stream_generation, snapshot_seq, observed_at, source_health,
 sessions[{provider_session_id, pane_id, agent, state, summary, updated_at}]
 ```
 
-The native registrar and AgentsView remain authoritative. Each tab-bound
-subscriber reads the session-scoped registry and exact AgentsView records. It
-does not call `list-panes` to enrich, filter, or bind rows. It may use the
-entry-time target proof once; afterward, the private pipe acknowledgment
-proves that the exact token-bound rail still exists. The plugin intersects the
-snapshot with its current `PaneUpdate`, so every tab may receive the same
-bounded session snapshot while only the rail containing an exact pane ID
-renders or focuses that session. A pane move therefore changes projection on
-the next `PaneUpdate` without a CWD lookup or a native inventory poll.
+The SessionStart registration and exact AgentsView ID remain authoritative.
+Each watcher fetches only `/api/v1/sessions/{provider:id}` for its in-memory
+registration and sends its own bounded snapshot to the original
+token/tab/rail tuple. It never consults the global session list. The plugin
+intersects that snapshot with its current `PaneUpdate`, so only the rail whose
+manifest contains the exact registered pane ID renders or focuses the session.
+A pane move therefore changes projection on the next `PaneUpdate` without a
+CWD lookup or native inventory poll.
 
 Validate a full snapshot atomically before replacing the cache. Reject the
 whole record on a duplicate session ID, duplicate pane ID, noncanonical pane
@@ -124,25 +131,24 @@ ID, invalid state, malformed UTF-8, trailing JSON, or a payload beyond KJ's
 existing 1 MiB registry/session envelope. Retain the last good cache and mark
 its source unhealthy.
 
-Persist a monotonic `stream_generation` for each recipient token under the
-existing runtime lock. Within one generation, accept only increasing
-`snapshot_seq`. A restarted sidecar reaps its predecessor, increments the
-generation, and completes a private ready handshake before sending a full
-snapshot. A new plugin ignores snapshots until that handshake arms the current
-generation. It then rejects lower generations and old or repeated sequences,
-so a canceled pipe cannot overwrite newer state if Zellij delivers it late.
+Persist only a monotonic `stream_generation` for each recipient under the
+existing runtime lock; never persist session authority. Within one generation,
+accept only increasing `snapshot_seq`. A restarted watcher advances the
+generation, completes a private ready handshake, and publishes an empty
+snapshot. Only a fresh matching `SessionStart` may repopulate it. The plugin
+rejects lower generations and old or repeated sequences, so a canceled pipe
+cannot overwrite newer state if Zellij delivers it late.
 
 ### 3. Bound, cancel, and coalesce native enrichment
 
-Add one latest-wins refresh coordinator to the existing Go sidecar. Extend the
-pure KJ functions `deliverableRegistrations`, `registeredSessionsForTab`, and
-`BuildRegisteredSessionRow`: split exact-session fetching from tab projection,
-then let WASM perform the final manifest intersection. Do not create another
-binding model.
+Add one latest-wins refresh coordinator to each Go manual watcher. Keep
+SessionStart ingestion, exact-ID fetching, and `BuildRegisteredSessionRow`
+separate from WASM's final manifest intersection. Do not create a shared
+registry, persistent recovery controller, or another binding model.
 
-- Registry changes, AgentsView `data_changed`, and the bounded recovery timer
-  request a refresh generation. A newer request cancels the current generation
-  and replaces the single pending generation.
+- In-memory registration changes, AgentsView `data_changed`, and the bounded
+  recovery timer request a refresh generation. A newer request cancels the
+  current generation and replaces the single pending generation.
 - At most two exact-ID HTTP enrichments run at once. Each gets a 500 ms request
   deadline and the parent generation's context. Results from a canceled or
   superseded generation are discarded.
@@ -157,7 +163,7 @@ binding model.
   it has a complete immutable snapshot. No canceled worker may enqueue a
   publish.
 
-These bounds apply per sidecar. They cannot congest Zellij's pane metadata
+These bounds apply per watcher. They cannot congest Zellij's pane metadata
 path because they never enter it. The private publisher remains bounded and
 coalesced, so a slow rail cannot accumulate a later delivery burst.
 
@@ -176,7 +182,7 @@ validated cache generation. Add a pure projection that combines
   render no session row and enable no focus action.
 - Missing enrichment for an ordinary pane: render the pane with event-derived
   title and `unknown` metadata.
-- Sidecar loss: the plugin's cache-age timer marks the last snapshot stale;
+- Watcher loss: the plugin's cache-age timer marks the last snapshot stale;
   it does not clear terminal rows or perform a recovery host call.
 
 Pane focus and layout actions continue to use current manifest IDs and the
@@ -196,7 +202,7 @@ The barrier remains in flight through the post-action native observations.
 Canceling it and waiting six seconds produces no delayed pane, tab, focus, or
 snapshot delivery.
 
-Verified by: the isolated tmux/Zellij harness, a sidecar debug barrier, and
+Verified by: the isolated tmux/Zellij harness, a watcher debug barrier, and
 task 44's structured identity format in
 `tests/zellij-pane-metadata-congestion-test.sh`. Each action compares the
 complete relevant native record, including pane ID, kind, tab ID, plugin URL, exited,
@@ -208,19 +214,21 @@ deadline, and late-publication variants must fail.
 **AC-O2 — WASM performs no synchronous pane metadata lookup.** Timer,
 `PaneUpdate`, render, click, key, and pipe handlers derive pane rows and
 session focus from `PaneInfo` plus the last accepted snapshot. They never call
-the command, CWD, or scrollback host APIs. An active rail with 100 manifest
-updates and 100 cache-age timer ticks issues zero such calls.
+the command, CWD, or scrollback host APIs, and the candidate no longer requests
+`ReadPaneContents`.
 
-Verified by: a host seam that panics on every forbidden API, exercised through
-all handler paths in `src/main.rs`, plus the compiled candidate's permission set. The test
-asserts exact rows and focus decisions, not only call counts; the candidate no
-longer requests `ReadPaneContents`.
+Verified by: the executable `src/main.rs` source/permission assertion that the
+runtime contains zero forbidden host calls and requests no pane-content
+permission, plus the timer, `PaneUpdate`, render, click, key, and pipe handler
+matrices that assert exact rows, focus decisions, and fail-closed outcomes.
+Independent validation must exercise every handler path; no proposed panicking
+host seam is required.
 
 **AC-O3 — scheduling, cancellation, and cache size stay bounded.** A burst of
 100 refresh requests for one pane produces one latest completed generation,
 never exceeds two enrichment workers or one publisher, and retains at most one
 pending refresh and one pending snapshot. Closing the pane, canceling the
-sidecar, or superseding the generation reaps every worker and pipe child. No
+watcher, or superseding the generation reaps every worker and pipe child. No
 result or publish appears after its deadline or cancellation.
 
 Verified by: a deterministic Go coordinator test in
@@ -230,22 +238,26 @@ post-deadline quiet window. Adjacent tests cover two panes, out-of-order
 completion, source timeout, pipe timeout, repeated cancellation, and a worker
 that ignores cancellation until its deadline.
 
-**AC-O4 — exact pane authority survives lifecycle and restart.** Two same-CWD
-managed tabs receive the same bounded registered-session snapshot but each
-renders exactly the one top-level session whose registered pane is in its
-current manifest; a child and unrelated history render nowhere. Moving the
-pane moves the row, closing or suppressing it removes the row, and plugin or
-sidecar restart rehydrates exactly one row. CWD, command, title, time, and row
-order cannot create a binding.
+**AC-O4 — exact per-tab pane authority fails closed across lifecycle and
+restart.** Two same-CWD managed tabs each run one manually started watcher and
+each render exactly the one top-level session registered from its watched
+terminal; a child and unrelated history render nowhere, for exact counts
+`1/1/0`. Moving the exact pane out of its watched tab removes the projection
+without transferring watcher authority; closing, suppressing, or making it
+unselectable also removes the row. Watcher restart
+publishes an empty projection and remains empty until a fresh matching
+`SessionStart`; that later delivery restores exactly one row. CWD, command,
+title, time, row order, and a foreign watcher sharing the recipient token
+cannot create a binding.
 
-Verified by: KJ's two-tab disposable harness,
-`tests/zellij-two-rail-recipient-smoke-test.sh`, extended with full snapshots,
-native pane move/close/suppress state, plugin/sidecar restart, exact counts
-`1/1/0`, click focus, and negative fixtures whose only matching attribute is
-CWD, command, title, or recency.
+Verified by: `tests/zellij-two-rail-recipient-smoke-test.sh`, which starts one
+watcher per exact same-CWD terminal, attacks stable-tab admission with a shared
+token, proves `1/1/0`, exact-row click focus, stale retention, restart-empty,
+fresh SessionStart recovery, manifest fail-close, bounded exact-ID fetching,
+zero idle native polls, and no durable session-authority record.
 
 **AC-O5 — stale and malformed data degrade without lying.** A source timeout,
-sidecar kill, malformed snapshot, duplicate identity, over-limit snapshot, old
+watcher kill, malformed snapshot, duplicate identity, over-limit snapshot, old
 stream generation, or repeated/out-of-order sequence preserves the last good
 terminal inventory. Exact cached sessions become visibly stale after the
 configured TTL; absent or ambiguous pane membership disables focus. A later
@@ -262,7 +274,7 @@ out-of-order records.
 **AC-O6 — failure and cleanup remain isolated.** A missed action deadline,
 worker leak, failed native observation, source hang, pipe hang, or interrupted
 harness fails visibly and removes only its disposable Zellij session, tmux
-server, sidecar, workers, fixtures, and temporary roots. Standing config and
+server, watcher, workers, fixtures, and temporary roots. Standing config and
 layout bytes remain unchanged.
 
 Verified by: injected failures under the existing cleanup traps in
@@ -274,14 +286,15 @@ skipped pass.
 ### Interactive (only after AC-O1 through AC-O6)
 
 **AC-I1 — the captain can work normally beside a slow pane.** In a fresh
-managed tab using main-built WASM, the captain opens real `subspace-tui` and a
-real registered Codex session. The rail shows exact session state or a visible
-stale marker. Three `Alt p` presses, `Alt n`, `Alt 1`, and `Alt 2` each take
-effect in under one second; closing the exact sidebar and waiting six seconds
-causes no delayed action burst.
+managed tab using main-built WASM, the captain manually starts `watch-tab` in
+the selected terminal, then opens real `subspace-tui` and a real registered
+Codex session. The rail shows exact session state or a visible stale marker.
+Three `Alt p` presses, `Alt n`, `Alt 1`, and `Alt 2` each take effect in under
+one second; closing the exact sidebar and waiting six seconds causes no delayed
+action burst.
 
 Verified by: captain observation plus external native pane/tab snapshots,
-sidecar gauges, exact refresh records, and standing-KDL hashes. The drill uses
+watcher gauges, exact refresh records, and standing-KDL hashes. The drill uses
 a fresh managed tab and follows `docs/zellij-agentsview-live-demo.md`; it never
 retrofits or hot-reloads an existing rail.
 
@@ -289,8 +302,10 @@ retrofits or hot-reloads an existing rail.
 
 1. **Repeat the invalidating spike first through the production seam.** Port
    the passed native scheduler spike into a committed deterministic test. Add
-   the candidate sidecar barrier and full snapshot, load the candidate WASM in
-   the isolated tmux harness, and run AC-O1. Prove that releasing the barrier
+   the manual watcher's barrier and full snapshot, load the candidate WASM in
+   the isolated tmux harness, and run AC-O1 through the fixed 28-column rail.
+   Prove that the delivered row focuses its exact pane before the one-second
+   deadline while enrichment remains held, and that releasing the barrier
    before native observation makes the test fail. If literal actions still
    miss one second, preserve the structured evidence and stop; do not add a
    longer timeout or another polling layer.
@@ -299,16 +314,20 @@ retrofits or hot-reloads an existing rail.
    replaces CWD binding and task 44's zero-scrollback rule remains intact.
 3. Remove the WASM host calls and permissions. Extend `rows_for_own_tab`,
    `apply_agent_snapshot`, and the session projection as pure functions. Run
-   the forbidden-host trap across every event and input path, then `cargo test`
-   and `cargo check --tests`.
-4. Add the Go latest-wins coordinator around KJ's
-   `deliverableRegistrations`, `registeredSessionsForTab`, and
-   `BuildRegisteredSessionRow`. Prove deadlines, two-worker/one-publisher
-   limits, coalescing, cancellation, backoff, stream generation, atomic size
-   limits, and child cleanup before changing the live subscriber.
-5. Extend the KJ two-tab harness for same-snapshot local intersection,
-   move/close/suppress, plugin and sidecar restart, source outage/recovery, and
-   the `1/1/0` cardinality. Add adjacent wrong-pane, wrong-field, old-sequence,
+   the executable zero-forbidden-call source/permission assertion and every
+   handler matrix, then `cargo test` and `cargo check --tests`. Independent
+   validation repeats the handler-path proof without requiring a panicking
+   host seam.
+4. Add the Go latest-wins coordinator to the manual watcher around its single
+   in-memory registration, exact-ID fetch, and `BuildRegisteredSessionRow`.
+   Prove deadlines, two-worker/one-publisher limits, coalescing, cancellation,
+   backoff, stream generation, atomic size limits, and child cleanup without a
+   shared registry, durable session authority, or native inventory
+   polling/retry.
+5. Extend the KJ two-tab harness to start one watcher per same-CWD terminal and
+   prove exact per-tab snapshots, move/close/suppress, stale retention,
+   restart-empty, fresh SessionStart recovery, and `1/1/0` cardinality. Add
+   adjacent foreign-token/tab/rail, wrong-pane, wrong-field, old-sequence,
    duplicate, EOF, Unicode, and maximum-plus-one variants.
 6. Run the retained Rust, Go, artifact, new-tab, managed-tab, recipient,
    lifecycle, and layout suites. Run AC-O1's success and injected-failure
@@ -316,22 +335,27 @@ retrofits or hot-reloads an existing rail.
    hashes.
 7. Only after the offline packet passes, give the captain AC-I1. A live miss
    blocks validation and preserves evidence; it does not authorize in-session
-   retrofit, manual watcher setup, or broader workspace-hub work.
+   retrofit, automatic watcher setup, a shared recovery registry, or broader
+   workspace-hub work.
 
 ## Documentation change
 
 - Update README's Features, Permissions, Status, and Development sections:
   the rail uses manifest and exact registered-session snapshots, never
   periodic command/CWD/scrollback calls; stale and unknown states are visible;
-  `ReadPaneContents` is no longer required.
+  `ReadPaneContents` is no longer required. Document one manually started
+  watcher per tab, one in-memory registration, restart-empty, and recovery only
+  after a fresh matching `SessionStart`.
 - Update SPEC's historical status note and `docs/docking-approach.md` to retire
   all periodic WASM metadata calls, not only scrollback, while preserving the
   old prototype findings as history.
 - Extend `docs/zellij-tmux-smoke-harness.md` with the external refresh barrier,
-  full lifecycle tuples, early-release negative, worker/publisher bounds, and
-  post-cancel quiet window.
-- Update `docs/zellij-agentsview-live-demo.md` only if KJ has merged; keep exact
-  registration as authority and add the visible stale/recovery step.
+  full lifecycle tuples, early-release negative, worker/publisher bounds,
+  per-tab `1/1/0`, restart-empty/fresh-registration recovery, and post-cancel
+  quiet window.
+- Update `docs/zellij-agentsview-live-demo.md` to keep exact registration as
+  authority and demonstrate manual watcher launch, visible stale retention,
+  restart-empty, and recovery only from a new SessionStart.
 
 ## Out of scope
 
@@ -553,3 +577,20 @@ validation, or send implementation back to build the shared rehydrating
 registry and exact requested host-seam proof. KJ's congestion rerun may use the
 green demo mechanics and head evidence, but KJ must not be advanced from this
 stage report alone.
+
+## Stage Report: implementation (cycle 2)
+
+- DONE: Align task 91's canonical AC-O2/AC-O4, approach, test plan, and documentation contract to the captain-approved per-tab restart-empty end value while preserving the recorded unchanged boundaries.
+  Captain approval `137af5b` now governs one manual watcher and one in-memory registration per tab, restart-empty until fresh matching SessionStart, executable handler/source/permission proof, and no shared recovery registry.
+- DONE: Map the existing fixed-width demo, exact 1/1/0 projection, restart-empty recovery, nonblocking handler coverage, and cleanup evidence to the revised acceptance criteria without inventing or rerunning unnecessary work.
+  Code head `45719f4` and retained run `/tmp/zaphod-task91-review-fix.ltQjcE` plus the two-rail, Rust 80/80, Go, lifecycle, congestion-negative, quiet-window, and owned-cleanup results in the prior report cover the revised AC-O1 through AC-O6.
+- DONE: Finish the implementation Stage Report with valid DONE/SKIPPED/FAILED accounting, commit the durable contract/report update, and leave task 91 ready for fresh independent validation.
+  This documentation-only alignment changes no product code, preserves authoritative `code_completion` parent `188` at exact head `45719f4`, and leaves KJ's congestion rerun as the next-stage handoff.
+
+### Summary
+
+The captain resolved the prior AC-O2/AC-O4 gate in favor of the already-green,
+fail-closed manual per-tab watcher contract. Canonical acceptance and proof now
+match the fixed 28-column demo, restart-empty recovery, exact-pane authority,
+and bounded nonblocking implementation, so task 91 is ready for fresh
+independent validation without another build or verification run.
