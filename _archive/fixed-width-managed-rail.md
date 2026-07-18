@@ -1,19 +1,20 @@
 ---
 id: tjj3aqdq4c4at5wrke8cmk0v
 title: Keep the managed rail at one fixed width without blocking native fullscreen
-status: validation
+status: done
 source: captain direction after live dirty-tab layout corruption investigation, 2026-07-17
 sprint: s1-managed-tab-safety
 group: layout-stability
 sprint-readiness: ready
 started: 2026-07-17T10:10:10Z
-completed:
-verdict:
+completed: 2026-07-18T07:05:06Z
+verdict: passed
 score: 0.98
 worktree: .worktrees/spacedock-ensign-fixed-width-managed-rail
 issue:
 pr:
 mod-block:
+archived: 2026-07-18T07:05:06Z
 ---
 
 ## Problem
