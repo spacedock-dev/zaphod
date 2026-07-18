@@ -391,3 +391,143 @@ its blocking calls more elaborate. KJ supplies exact session identity,
 `PaneUpdate` supplies exact live pane state, and the existing native subscriber
 supplies bounded, cancelable, atomic snapshots; unavailable enrichment becomes
 stale or unknown without guessing or delaying Zellij actions.
+
+## Stage Report: implementation
+
+- PARTIAL: Reconciled current main's fixed-width managed rail with task 91 at
+  code head `45719f4aaf545213b2a623871892ec87bde800ca`.
+  Merge `f8ccc1b` contains main `999ba8a`: one layout-owned 28-column rail,
+  inert `Alt /`, inert `FIXED` header, native fullscreen, no runtime layout
+  mutation, and no `Reconfigure`. Conflict resolution retained task 91's
+  exact-pane snapshots and removed main's superseded synchronous command/CWD
+  polling, backoff, wedge drill, and `ReadPaneContents` permission.
+- DONE: Corrected malformed snapshot degradation in `37bc0d1`. A malformed
+  accepted-recipient update now retains the last good exact row, marks it
+  visibly stale, and requires a later increasing healthy full snapshot to
+  clear stale state.
+- DONE: Corrected exact session click authority in `164c0ea`. A `PaneUpdate`
+  may temporarily disarm future broadcast admission, but it no longer makes a
+  cached session row inert while the exact registered pane remains live in the
+  current manifest. Missing, moved, suppressed, or unselectable membership
+  still clicks to nothing.
+- DONE: Added the fixed-width usable congestion journey in `2643aee` and bound
+  its latency to completed native observation in `45719f4`. The demo starts the
+  manual watcher in the exact direct-entry terminal, renders
+  `SMOKE_SECOND_ROW`, adds a real non-shell pane, holds native enrichment in
+  flight, clicks the delivered session row, observes its exact registered pane
+  focused before the one-second deadline, verifies the rail remains at
+  `x=0,y=1,28x46`, then runs literal `Alt p` x3, `Alt n`, `Alt 1`, and `Alt 2`
+  before the barrier is owner-released. It retains the six-second no-burst and
+  owned-cleanup checks plus early-release, expired-barrier, and action-timeout
+  negative controls.
+
+### TDD evidence
+
+- Malformed retained snapshot RED:
+  `cargo test tests::agent_snapshot_requires_valid_payload_and_exact_recipient -- --exact --nocapture`
+  failed at `src/main.rs:1973` because `snapshot_stale` remained false.
+  The identical focused command passed after `37bc0d1`; the full Rust suite is
+  80 passed, 0 failed.
+- Manifest-refresh click RED:
+  `cargo test tests::current_manifest_projects_cached_session_by_exact_lifecycle_state -- --exact --nocapture`
+  failed with `left: None`, `right: FocusPane(4)`. The identical focused
+  command passed after `164c0ea`; the full Rust suite and `cargo check --tests`
+  passed at final head.
+- Live reconciliation RED first launched `watch-tab` in a newly populated pane
+  without the injected private route (`watch-tab missing explicit route
+  context`). The harness now records the sole direct-entry terminal before
+  population and focuses that exact ID before launch.
+- Usable focus RED reached the owner-held metadata barrier but missed the
+  one-second focus deadline because local click authority reused the temporarily
+  unarmed pipe-recipient proof. The Rust fix above plus the canonical SGR row
+  mapping made the same live journey green.
+
+### Green verification
+
+- Shared native target: `CARGO_TARGET_DIR=/Users/clkao/git/zaphod/target`,
+  `RUSTC_WRAPPER=sccache`.
+- `cargo test`: 80 passed; `cargo check --tests`: passed.
+- `cd grout && go test ./... && go vet ./...`: passed.
+- `env -u CARGO_TARGET_DIR ./tests/build-artifact-test.sh`: passed.
+- `./tests/zellij-responsive-proof-test.sh`,
+  `./tests/sidebar-scrollback-docs-test.sh`,
+  `./tests/codex-session-hook-test.sh`, `./tests/zellij-new-tab-test.sh`, and
+  `./tests/zellij-manual-permission-grant-test.sh`: passed.
+- `env -u CARGO_TARGET_DIR ./tests/zellij-pane-metadata-congestion-test.sh`:
+  passed the usable focus journey, literal action deadlines, three negative
+  controls, quiet window, and cleanup.
+- `env -u CARGO_TARGET_DIR ./tests/zellij-two-rail-recipient-smoke-test.sh`:
+  passed exact same-CWD `1/1/0`, exact row focus, stale cache, restart-empty,
+  bounded fetch, zero idle native polls, and standing-root isolation.
+- `env -u CARGO_TARGET_DIR ./tests/zellij-watcher-lifecycle-smoke-test.sh`,
+  `./tests/zellij-watcher-layout-stress-test.sh`, and
+  `./tests/zellij-stress-evidence-test.sh`: passed outside/inside, serial,
+  concurrent, injected failure/hang, and cleanup cases.
+- Clean worktree; `git diff --check` passed.
+
+### Usable demo evidence
+
+The final retained positive run is under
+`/tmp/zaphod-task91-review-fix.ltQjcE`. Its exact result was:
+
+```text
+PASS: delivered SMOKE_SECOND_ROW focused exact pane 1 in 81ms through the fixed 28-column rail while native metadata remained in flight
+PASS: literal Alt p/Alt n/Alt 1/Alt 2 met native one-second deadlines during a native metadata barrier; the six-second post-close state was stable
+```
+
+An earlier retained run at `/tmp/zaphod-task91-usable-demo.SL88Bt` measured
+23 ms and contains the visible `SMOKE_SECOND_ROW`, phase log, process ownership,
+and cleanup result. The barrier phases are ordered
+`responsive-metadata-barrier-entered` -> `responsive-session-focus-complete`
+-> `responsive-metadata-barrier-released` -> `responsive-actions-complete`.
+
+### Adversarial and asynchronous-boundary pass
+
+- Identity/cardinality: exact pane ID is the only session join; same CWD,
+  title, command, recency, foreign tab/token/rail, duplicate ID/pane ID, moved,
+  suppressed, and missing panes do not create focus authority. Two rails render
+  `1/1/0`.
+- Protocol: empty, malformed, trailing JSON, Unicode, exact 1 MiB,
+  maximum-plus-one, duplicate, old/repeated/out-of-order generation and
+  sequence, stale, unhealthy, EOF, restart, and later healthy recovery are
+  covered atomically.
+- Fixed layout/input: `Alt /`, real `FIXED` click, and stale `toggle` pipe are
+  layout-inert; native terminal and rail fullscreen restore non-focus identity,
+  geometry, chrome, lifecycle, and layout fields.
+- Native coordinator owns workers and publisher; the exact recipient is the
+  original rail token/tab/pane tuple; `ready`/`accepted` are positive
+  acknowledgments; fetch/publish/action deadlines are independent;
+  supersession cancels generations; owned children are reaped; early release,
+  expired ownership, late action observation, and post-cancel publication fail.
+
+### Review evidence
+
+- Exact-tip quick job `180` found one Medium evidence defect: the focus
+  timestamp preceded native capture. `45719f4` records time after the successful
+  capture and rejects a post-deadline observation. Replacement exact-tip quick
+  job `182`, panel `quick`, passed with no findings.
+- Authoritative full-range synthesis parent `188`, panel `code_completion`,
+  reviewed
+  `999ba8ab06af8c09a736aed98db21c0d70e341a0..45719f4aaf545213b2a623871892ec87bde800ca`.
+  Required members `correctness` job `185`, `journey` job `186`, and `proof`
+  job `187` each ran once and passed; no execution failures; parent verdict
+  PASS with no findings.
+
+### Required contract decision before implementation completion
+
+The usable fixed-width journey is green, but this report does **not** mark task
+91 implementation complete. The durable approved AC-O4 says both rails receive
+one shared full bounded snapshot for local intersection and a sidecar restart
+rehydrates exactly one row. The implemented/manual-watcher contract instead
+keeps one registration in each watcher's memory and intentionally proves
+`restart-empty` until a new SessionStart. README, the live two-rail harness, and
+the demo all describe and enforce that safer restart-empty behavior, but the
+entity's approved outcome was never updated. AC-O2 also asks for a panicking
+forbidden-host seam through 100 manifest/timer cycles; final code has zero
+forbidden calls and source/permission assertions plus handler matrices, but not
+that named seam. The first officer must route a contract gate: either approve
+the manual per-tab/restart-empty end value and update AC-O2/AC-O4 before
+validation, or send implementation back to build the shared rehydrating
+registry and exact requested host-seam proof. KJ's congestion rerun may use the
+green demo mechanics and head evidence, but KJ must not be advanced from this
+stage report alone.
