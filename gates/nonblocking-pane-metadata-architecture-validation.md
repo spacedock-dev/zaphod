@@ -241,3 +241,19 @@ Standing KDL hashes before and after setup are identical:
 PASS if one fixed 28-column rail is visible at left with one selected terminal
 to its right; report FAIL with what differs. Also report whether a permission
 prompt is visible. Do not approve the prompt or start the watcher yet.
+
+## Live visual checkpoint 1 — captain PASS
+
+The captain reported PASS: one fixed 28-column rail is visible at left and one
+selected terminal is visible to its right. The captain did not report whether
+a permission prompt is visible, so validation does not infer that observation.
+
+Native checkpoint `/tmp/task91-captain-native-checkpoint-1.json` still records
+stable tab `4`, candidate rail `plugin_33` at `x=0,y=1,28x58`, selected
+terminal `26` at `x=28,y=1,210x58`, and intact 238-column chrome. The rail is
+now nonselectable, which is consistent with the plugin's granted-state
+behavior but does not prove what the captain can see. AgentsView remains
+healthy and standing KDL hashes remain byte-identical.
+
+**Captain cue:** is a permission prompt visible right now? Reply only `YES` or
+`NO`; do not press a key, approve anything, or start the watcher yet.

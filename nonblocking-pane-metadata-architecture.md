@@ -633,3 +633,20 @@ The exact offline preflight is green and a disposable live AC-I1 environment
 is ready at stable tab `4` with unchanged standing KDL bytes. Native setup
 evidence and route commands are retained, while the first visual check and all
 later keypresses remain explicitly captain-driven and unclaimed.
+
+## Stage Report: validation (cycle 3)
+
+- DONE: Record the captain's first AC-I1 visual observation without broadening it.
+  The captain reported PASS for one fixed 28-column left rail and one selected terminal to its right; prompt visibility was not reported and is not inferred.
+- DONE: Inspect only native instrumentation that does not substitute for the captain's visual report.
+  Checkpoint JSON preserves tab `4`, rail `plugin_33` at 28x58, selected terminal `26`, intact chrome, healthy AgentsView, and unchanged standing KDL hashes.
+- DONE: Provide the next single captain action while keeping AC-I1 pending.
+  The only cue asks whether a permission prompt is visible and requests a `YES` or `NO` reply with no keypress, approval, or watcher start.
+- SKIPPED: Infer prompt visibility from the rail's native selectable state.
+  `is_selectable=false` is consistent with granted-state behavior but is not a human-visible prompt observation.
+
+### Summary
+
+The captain passed the first fixed-width visual checkpoint, and native state
+remains consistent with the prepared environment. AC-I1 is still pending; the
+next boundary is solely the captain's report of permission-prompt visibility.
