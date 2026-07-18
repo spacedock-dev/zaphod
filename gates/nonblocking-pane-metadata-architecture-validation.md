@@ -257,3 +257,22 @@ healthy and standing KDL hashes remain byte-identical.
 
 **Captain cue:** is a permission prompt visible right now? Reply only `YES` or
 `NO`; do not press a key, approve anything, or start the watcher yet.
+
+## Live permission checkpoint — captain YES
+
+The captain reported `YES`: a native permission prompt is visibly present.
+The captain also explicitly accepted the visible `FIXED` label as a
+non-blocking follow-up, not a task-91 rejection. Follow-up entity
+`1zhcvrj8727eez45mdj6ec3j` owns removing that debug-only label without changing
+behavior; task 91 remains in validation.
+
+Native state remains retained at
+`/tmp/task91-captain-native-permission-visible.json`; AgentsView is healthy and
+standing KDL hashes remain byte-identical. These facts do not replace the
+captain's prompt observation.
+
+**Captain cue:** approve the visible native permission prompt exactly once
+using its displayed approval control. Expected result: the prompt closes and
+the same `Task 91 captain live` tab returns with the fixed 28-column left rail
+and selected terminal to its right; no pane or layout moves. Report PASS or
+FAIL, then stop without starting the watcher.

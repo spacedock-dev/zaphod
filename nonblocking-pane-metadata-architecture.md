@@ -665,3 +665,20 @@ later keypresses remain explicitly captain-driven and unclaimed.
 The captain passed the first fixed-width visual checkpoint, and native state
 remains consistent with the prepared environment. AC-I1 is still pending; the
 next boundary is solely the captain's report of permission-prompt visibility.
+
+## Stage Report: validation (cycle 4)
+
+- DONE: Record the captain's permission-prompt observation exactly.
+  The captain reported `YES`: a native permission prompt is visibly present; task 91 remains in validation and AC-I1 is not yet claimed.
+- DONE: Record the captain's disposition of the visible `FIXED` label without treating it as a task-91 defect.
+  The label is an accepted non-blocking follow-up owned by task `1zhcvrj8727eez45mdj6ec3j`, which may remove the debug-only text without behavior change.
+- DONE: Preserve non-human instrumentation at the permission checkpoint.
+  Native state, healthy AgentsView, and unchanged standing KDL hashes were rechecked without substituting them for the captain's visible prompt report.
+- DONE: Provide exactly one next captain action with its expected visible result.
+  The sole cue asks the captain to approve the prompt once, confirm it closes back to the unchanged fixed-width tab, report PASS/FAIL, and not start the watcher.
+
+### Summary
+
+The captain confirmed the native permission prompt and explicitly kept the
+debug-only `FIXED` label outside task 91's blocking scope. AC-I1 continues from
+the prompt-approval boundary; no later watcher or session behavior is claimed.
