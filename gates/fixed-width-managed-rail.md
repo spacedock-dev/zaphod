@@ -8,7 +8,7 @@ gate:
   round: 3
 recommendation:
   verdict: PASSED
-  rationale: "O1-O4 pass independently at c269b31: normal and upgrade fixed-width/fullscreen journeys are green, two recipient runs preserve exact stable-tab/token delivery, and candidate-attributable host records remain empty. I1-I2 await the captain."
+  rationale: "O1-O4 pass independently at c269b31 under the recorded review waiver, and the captain reported I1-I2 passing in the supplied throwaway-session walkthrough."
 artifact:
   kind: draft
   path: ./fixed-width-managed-rail-validation.md
@@ -32,17 +32,18 @@ criteria:
       evidence: "PASS: entry 14/14, main normal/upgrade, and recipient normal/hostile-inherited journeys pass; host candidate digest and log count remain empty/zero, and the inherited socket sentinel stays empty."
     - id: I1
       text: "Extra panes remain arranged after former toggle inputs in WORK."
-      evidence: "PENDING CL: exact captain script is in the artifact; offline validation passed."
+      evidence: "PASS — captain observed: former toggle inputs left the 28-column rail, pane arrangement, and chrome unchanged in the supplied throwaway-session walkthrough."
     - id: I2
       text: "The captain's native fullscreen journey works for ordinary and rail panes."
-      evidence: "PENDING CL: exact captain script is in the artifact; offline validation passed."
+      evidence: "PASS — captain observed: ordinary-pane and rail native fullscreen each restored the original geometry, with no pane left fullscreen."
 ---
 
 Validation cycle 3 at `c269b31bd9ada398cebb79e839580bb4f2a6b0d8`
-passes every offline criterion. The repaired main and recipient harnesses keep
-all candidate state disposable, exact stable-tab/token delivery remains green,
-and no candidate-attributable host record appears. I1-I2 remain for CL.
+passes every criterion. The repaired main and recipient harnesses keep all
+candidate state disposable, exact stable-tab/token delivery remains green,
+and no candidate-attributable host record appears. The captain reported I1-I2
+passing in the supplied throwaway-session walkthrough.
 
 The detailed artifact contains the exact review evidence, per-AC commands,
-named adversarial probes, accepted quick-review waiver, and the exact
-captain-driven I1-I2 script.
+named adversarial probes, accepted quick-review waiver, the exact captain-driven
+I1-I2 script, and the captain-observed walkthrough outcome.

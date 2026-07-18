@@ -2,9 +2,10 @@
 
 Current cycle: `3`
 Current repaired SHA: `c269b31bd9ada398cebb79e839580bb4f2a6b0d8`
-Current recommendation: **PASSED OFFLINE — PRESENT I1/I2 TO CAPTAIN.** The main
-and recipient harnesses are isolated and every offline AC survives independent
-reproduction. Cycles 1-2 are preserved below; cycle 3 is appended at the end.
+Current recommendation: **PASSED.** O1-O4 survive independent offline
+reproduction, and the captain reported I1-I2 passing in the supplied
+throwaway-session walkthrough. Cycles 1-2 are preserved below; cycle 3 is
+appended at the end.
 
 Entity: `fixed-width-managed-rail.md`  
 Implementation worktree: `.worktrees/spacedock-ensign-fixed-width-managed-rail`  
@@ -388,12 +389,12 @@ implementation file was changed.
 
 ### Cycle 3 recommendation
 
-**PASSED OFFLINE — PRESENT I1/I2 TO CAPTAIN.** O1-O4 independently pass. The
-main smoke is green in normal and permission-upgrade modes; the recipient
-smoke preserves exact stable-tab/token delivery in both normal and hostile
-inherited-environment runs; no candidate-attributable record appears in host
-log, cache, socket, data, session-info, or permission roots. I1 and I2 remain
-for CL to drive in `WORK`; this validator does not claim interactive evidence.
+**PASSED.** O1-O4 independently pass. The main smoke is green in normal and
+permission-upgrade modes; the recipient smoke preserves exact stable-tab/token
+delivery in both normal and hostile inherited-environment runs; no
+candidate-attributable record appears in host log, cache, socket, data,
+session-info, or permission roots. The captain reported I1 and I2 passing in
+the supplied throwaway-session walkthrough.
 
 ### Accepted review disposition
 
@@ -539,5 +540,13 @@ terminal split, and both chrome rows. No permission prompt or new pane appears.
 
 ### Cycle 3 demo outcome
 
-Pending CL. Offline validation is PASSED; this validator did not run or claim
-I1/I2 interactive evidence.
+**I1 PASS — captain observed.** In the supplied throwaway-session walkthrough,
+the former toggle inputs left the 28-column rail, pane arrangement, and chrome
+unchanged.
+
+**I2 PASS — captain observed.** In the same walkthrough, native fullscreen for
+an ordinary pane and for the rail each restored the original geometry, with no
+pane left fullscreen.
+
+Together with independently reproduced O1-O4 at clean head `c269b31` under the
+recorded review waiver, the final validation recommendation is **PASSED**.

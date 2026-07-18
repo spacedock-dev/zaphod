@@ -258,3 +258,16 @@ The remaining recipient-smoke leak is reproduced red and contained green while e
 ### Summary
 
 Cycle 3 closes O4 at clean `c269b31`: both fixed-width/fullscreen permission modes and both recipient isolation attacks pass without host-state leakage. Offline validation is PASSED under the captain's accepted quick-review waiver, and the exact I1-I2 journey is ready for CL.
+
+## Stage Report: validation (cycle 3 final)
+
+- DONE: Record the captain's throwaway-session result as I1 PASS and I2 PASS in the cycle-3 validation artifact, brief, decisions log, and durable validation report, without claiming any observation beyond the executed walkthrough.
+  I1 records that former toggle inputs left the 28-column rail, pane arrangement, and chrome unchanged; I2 records that ordinary-pane and rail native fullscreen each restored the original geometry with no pane left fullscreen.
+- DONE: Close the per-AC cross-check with O1-O4 offline PASS plus I1-I2 captain-observed PASS at clean head c269b31 under the recorded review waiver, and produce the final validation recommendation.
+  The cycle-3 artifact and gate brief now recommend final PASSED at `c269b31`, preserving independent offline attribution for O1-O4 and captain attribution for I1-I2.
+- DONE: Make no implementation, test, layout, review, or workflow-status change; commit/push only validation state artifacts as available and report completion for the First Officer's terminal gate.
+  Only the four validation state artifacts were edited; no implementation command, test, review, layout, or workflow-status mutation was performed.
+
+### Summary
+
+The captain's supplied throwaway-session result closes I1 and I2 without expanding the reported observations. All six acceptance criteria now pass at clean `c269b31` under the recorded review waiver, so cycle 3 carries the final PASSED recommendation.
