@@ -1,10 +1,10 @@
 # Validation: Keep the managed rail at one fixed width without blocking native fullscreen
 
-Current cycle: `2`  
-Current repaired SHA: `b9568fc8645646c15bb31878827cb86e4f1fff28`  
-Current recommendation: **REJECTED** — the repaired main smoke is isolated, but
-the unchanged recipient smoke still writes the candidate lifecycle to the host
-default Zellij log. Cycle 1 is preserved below; cycle 2 is appended at the end.
+Current cycle: `3`
+Current repaired SHA: `c269b31bd9ada398cebb79e839580bb4f2a6b0d8`
+Current recommendation: **PASSED OFFLINE — PRESENT I1/I2 TO CAPTAIN.** The main
+and recipient harnesses are isolated and every offline AC survives independent
+reproduction. Cycles 1-2 are preserved below; cycle 3 is appended at the end.
 
 Entity: `fixed-width-managed-rail.md`  
 Implementation worktree: `.worktrees/spacedock-ensign-fixed-width-managed-rail`  
@@ -378,3 +378,166 @@ including its version probe, control/session helpers, attached server, and
 cleanup. Keep product code and the repaired cursor oracle frozen. Re-run the
 recipient behavior plus host-root attack, obtain a replacement exact-head and
 completion review, then return to validation.
+
+## Validation cycle 3
+
+Repaired implementation SHA: `c269b31bd9ada398cebb79e839580bb4f2a6b0d8`
+Validation checkout: detached throwaway clone of that SHA, nested under the
+assigned worktree. The implementation worktree remained clean and no
+implementation file was changed.
+
+### Cycle 3 recommendation
+
+**PASSED OFFLINE — PRESENT I1/I2 TO CAPTAIN.** O1-O4 independently pass. The
+main smoke is green in normal and permission-upgrade modes; the recipient
+smoke preserves exact stable-tab/token delivery in both normal and hostile
+inherited-environment runs; no candidate-attributable record appears in host
+log, cache, socket, data, session-info, or permission roots. I1 and I2 remain
+for CL to drive in `WORK`; this validator does not claim interactive evidence.
+
+### Accepted review disposition
+
+- Clean worktree `HEAD` and current head are
+  `c269b31bd9ada398cebb79e839580bb4f2a6b0d8`; no later code change exists.
+- The captain explicitly waived another authoritative `code_completion` panel
+  for this bounded recipient-harness-only commit. Validation did not launch
+  Roborev.
+- Stored exact-head quick parent `132`, panel `quick`, is `done`, PASS, zero
+  retries, and names `c269b31`. Its sole required member `131` appears exactly
+  once with `done`, PASS, zero retries, and no issues.
+- Product code, the main-smoke containment, and the cursor-only fullscreen
+  oracle are unchanged from the previously accepted evidence.
+
+### Cycle 3 offline AC verdicts
+
+| AC | Verdict | Independently reproduced evidence |
+|---|---|---|
+| O1 — stable fixed rail and intact chrome | **PASS** | Normal and upgrade 160x48 main smokes each reached `candidate-settled` with the exact six-pane inventory: one canonical candidate rail at `x=0,y=1,28x46`, three terminals, tab bar `160x1@y=0`, and status bar `160x1@y=47`. |
+| O2 — former toggle inputs are layout-inert | **PASS** | Both main smokes reached `fixed-inputs-inert`; literal `Alt /`, the delivered visual `FIXED` click, and stale toggle pipe preserved native inventory and normalized KDL. Rust `89/89` includes the granted active-tiled Keybind-source, inert-header, permission, and row-action controls. |
+| O3 — native fullscreen round-trips both pane kinds | **PASS** | Both main smokes reached `native-fullscreen-roundtrips-complete`. Exact terminal and rail IDs became `is_fullscreen=true` at `160x46`; restore required all managed flags false plus identical stable identity, command, geometry, content geometry, chrome, floating/suppressed/selectable/exited state, and normalized layout. |
+| O4 — entry, rows, permissions, recipient, and standing-root isolation | **PASS** | Rust `89/89`, new-tab `14/14`, normal and upgrade main smokes, and two recipient smokes passed. Recipient stable-tab/token targeting remained exact. Candidate records stayed absent in host log, permission, cache, and data; a hostile inherited Zellij identity and socket directory also remained untouched. Internal positive controls required the candidate lifecycle log, socket, permission cache, and optional session-info only beneath the disposable root. |
+
+### Cycle 3 commands and results
+
+```bash
+env -u CARGO_TARGET_DIR cargo test
+bash tests/zellij-new-tab-test.sh
+
+ZAPHOD_SMOKE_EVIDENCE_DIR="$PWD/.validation-evidence/main" \
+  bash tests/zellij-tmux-smoke-test.sh
+ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 ZAPHOD_PERMISSION_FIXTURE=upgrade \
+  ZAPHOD_SMOKE_EVIDENCE_DIR="$PWD/.validation-evidence/upgrade" \
+  bash tests/zellij-tmux-smoke-test.sh
+
+bash tests/zellij-two-rail-recipient-smoke-test.sh
+ZELLIJ='host-client' ZELLIJ_SESSION_NAME='host-session' ZELLIJ_PANE_ID='999' \
+  ZELLIJ_SOCKET_DIR="$PWD/.validation-host-socket-sentinel" \
+  bash tests/zellij-two-rail-recipient-smoke-test.sh
+```
+
+Results: Rust `89/89`; new-tab `14/14`; main normal/upgrade `2/2`; recipient
+normal/hostile-inherited `2/2`. Main cleanup reported all owned processes,
+session, tmux server, socket, and disposable root absent, with standing config,
+layout, and candidate records unchanged. Main resolved paths placed config,
+layout, data, socket, lifecycle log, permission cache, and session-info under
+`/tmp/zs.*`.
+
+An external candidate-state digest searched the detached checkout path through
+the host default Zellij log, standing permission file, cache tree, and data
+tree before and after each recipient run. It remained the SHA-256 of empty
+input, `e3b0c442...b855`; host log candidate count stayed `0 -> 0`. The hostile
+inherited socket sentinel contained zero entries before and after.
+
+### Cycle 3 refutation audit
+
+- **Exact stable-tab/token false positive — SURVIVES.** Two real rails shared
+  CWD and token. The target-tab broadcast rendered only in its stable-tab
+  recipient; a separate accepted bystander barrier proved the bystander was
+  live without ever rendering the target marker.
+- **Inherited-client identity and socket escape — SURVIVES.** The hostile run
+  supplied fake loaded-client variables plus an inherited socket directory.
+  The script cleared identity before its first Zellij call, both rails passed,
+  and the inherited socket directory remained empty.
+- **Host log/cache/data/session-info/permission leakage — SURVIVES.** Both
+  recipient runs preserved the internal candidate-scoped digest. The external
+  detached-path digest and exact log count also stayed empty/zero. No standing
+  permission record or cache/data file contained the candidate path.
+- **Disposable-root false negative — SURVIVES.** The recipient harness requires
+  every resolved HOME/TMPDIR/XDG/config/layout/data/socket path under `/tmp/zr.*`,
+  positively observes its candidate-bearing lifecycle log and live socket
+  there, requires the disposable permission cache, records session-info if
+  materialized, and deletes the root on cleanup.
+- **Main fixed-width/fullscreen semantic drift — SURVIVES.** Normal and upgrade
+  journeys independently re-proved exact rail/chrome geometry, all inert former
+  inputs, terminal and rail fullscreen terminal state, restored stable fields,
+  entry/subscriber behavior, and complete cleanup with zero host records.
+- **Panic/indexing and caller impact — SURVIVES.** Rust `89/89`, new-tab
+  `14/14`, both main journeys, and both recipient journeys passed; explicit
+  cardinality checks and bounded waits remained intact.
+
+### Cycle 3 captain demo for I1 and I2
+
+CL should drive these steps from an ordinary pane inside `WORK`. First run the
+cheap identity/toolchain/binding/unit preflight:
+
+```bash
+set -euo pipefail
+WT=/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-fixed-width-managed-rail
+cd "$WT"
+test "$(git rev-parse HEAD)" = c269b31bd9ada398cebb79e839580bb4f2a6b0d8
+test "$(zellij --version)" = 'zellij 0.44.3'
+rg -n 'bind "Alt /" \{ NoOp; \}|bind "f" \{ ToggleFocusFullscreen;' \
+  /Users/clkao/.config/zellij/config.kdl
+cargo test fixed_header_clicks_are_inert_without_changing_row_behavior -- --nocapture
+./build.sh
+./scripts/zellij-new-tab.sh --session WORK --name 'Fixed rail validation cycle 3'
+```
+
+Copy the printed tab ID and prepare I1:
+
+```bash
+TAB_ID=<printed-tab-id>
+DEMO=/tmp/fixed-rail-cycle-3-$TAB_ID
+zellij --session WORK action new-pane --tab-id "$TAB_ID" --direction right \
+  --cwd "$WT" --name fixed-demo-right
+zellij --session WORK action new-pane --tab-id "$TAB_ID" --direction down \
+  --cwd "$WT" --name fixed-demo-down
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.before.json"
+zellij --session WORK action dump-layout > "$DEMO.before.kdl"
+```
+
+CL confirms one 28-column rail, three arranged terminals, and both chrome rows;
+presses literal `Alt /`; then clicks the visible word `FIXED`. Nothing moves,
+stacks, disappears, changes width, or prompts. Capture the result:
+
+```bash
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.after-inputs.json"
+zellij --session WORK action dump-layout > "$DEMO.after-inputs.kdl"
+```
+
+For I2, CL focuses an ordinary pane and presses the current native sequence
+`Ctrl-p`, then `f`. The terminal must occupy the whole content rectangle. CL
+presses the same sequence to restore and confirms the original rail, split,
+and chrome geometry. Then:
+
+```bash
+zellij --session WORK pipe --name navigate -- ""
+# CL observes rail focus and presses Ctrl-p then f.
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.rail-fullscreen.json"
+# CL presses Ctrl-p then f again, then Esc to exit rail navigation.
+zellij --session WORK action list-panes --json --all --command --geometry --state --tab \
+  > "$DEMO.restored.json"
+zellij --session WORK action dump-layout > "$DEMO.restored.kdl"
+```
+
+The rail must fill the same content rectangle with `is_fullscreen=true` and
+restore with every managed fullscreen flag false, the 28-column rail, original
+terminal split, and both chrome rows. No permission prompt or new pane appears.
+
+### Cycle 3 demo outcome
+
+Pending CL. Offline validation is PASSED; this validator did not run or claim
+I1/I2 interactive evidence.

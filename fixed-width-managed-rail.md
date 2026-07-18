@@ -244,3 +244,17 @@ Cycle 2 validates the main harness repair and cursor-only fullscreen oracle at c
 ### Repair Summary
 
 The remaining recipient-smoke leak is reproduced red and contained green while exact stable-tab/token routing remains intact. The main harness remains green, exact-head quick review passes, and clean head `c269b31` is stopped at the required convergence gate awaiting the captain's review-budget decision.
+
+## Stage Report: validation (cycle 3)
+
+- DONE: Verify clean head c269b31 and record the captain's explicit waiver of another authoritative review; accept quick parent 132/member 131 PASS and do not launch Roborev.
+  Clean `HEAD` is `c269b31`; quick parent `132` and sole member `131` are exact-head, `done`, PASS, zero-retry, and issue-free. The captain's bounded-harness waiver is recorded; no new review was launched.
+- DONE: Independently rerun O1-O4 from a detached throwaway checkout, concentrating on the repaired two-rail recipient harness: exact stable-tab/token delivery, fully disposable process roots, and zero candidate-attributable host log/cache/socket/data/session-info/permission records, while confirming the main fixed-width/fullscreen journey remains green.
+  Rust passed `89/89`, new-tab `14/14`, main normal/upgrade `2/2`, and recipient normal/hostile-inherited `2/2`; main and recipient journeys preserved exact fixed/fullscreen and stable-tab/token behavior.
+  Host candidate digest stayed empty, host log count stayed `0 -> 0`, standing permission/cache/data had no candidate path, and the inherited socket sentinel stayed empty; disposable positive controls and cleanup passed.
+- DONE: Update the validation artifact, brief, decisions log, and exact I1-I2 captain demo from reproduced evidence; recommend PASSED only if all offline criteria survive, otherwise report the concrete attack without modifying implementation.
+  Gate round 3 recommends PASSED OFFLINE and contains the exact `WORK` demo. I1-I2 remain pending CL; implementation code was untouched.
+
+### Summary
+
+Cycle 3 closes O4 at clean `c269b31`: both fixed-width/fullscreen permission modes and both recipient isolation attacks pass without host-state leakage. Offline validation is PASSED under the captain's accepted quick-review waiver, and the exact I1-I2 journey is ready for CL.
