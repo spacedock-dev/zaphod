@@ -721,3 +721,20 @@ The captain's single permission approval is durably recorded, while its visual
 result remains correctly pending. Native geometry and standing KDL bytes are
 stable, and watcher startup is held until both the captain's view passes and
 the disposable AgentsView service is restored.
+
+## Stage Report: implementation (cycle 3)
+
+- DONE: Reproduce the smallest ordinary pane-creation sequence that changes the correct task-91 rail from 28 columns to 50%, using the preserved live specimen as evidence, and classify narrow supported fix versus design reset before editing product code.
+  Preserved tab `4` still showed `plugin_33` at 91/181 columns and `size="50%"`; fresh case A at `/tmp/zaphod-task91-width-A.DgTwOw` went 28 -> 91 on its first literal `Alt p` with no CLI focus/expand, so this is an AC-I1 normal-workflow outcome defect. Case B at `/tmp/zaphod-task91-width-B.TtJmdx` reconstructed CLI focus plus fullscreen expand/restore and then also went 28 -> 91; the original captain CLI commands were not durably recorded, so B is not claimed as exact. A temporary native fixed-swap probe at `/tmp/zaphod-task91-width-swap-probe.LVADB1` held 28 through three pane creations, classifying a narrow supported layout fix rather than a design reset.
+- DONE: If Zellij 0.44.3 admits a narrow supported fix, add a red-first regression and preserve exact 28-column geometry through dynamic pane creation; otherwise make no workaround and record the concrete unsupported boundary for a captain decision.
+  RED `ZAPHOD_SMOKE_PREBUILT_ARTIFACTS=1 ./tests/zellij-fixed-width-pane-creation-test.sh` failed at `/tmp/zaphod-task91-width-red.eDhkGB` with one fresh 160-column tab widened from 28 to 80 after exactly one new terminal. Commit `4949599` adds one passive `fixed-width` swap template plus literal-key geometry coverage; `b5a379f` requires exact two-terminal cardinality before the proof may pass. GREEN `/tmp/zaphod-task91-width-green.8nCINK` records `size=28`, valid KDL, owned cleanup, and unchanged standing roots; post-fix 181-column cases A and reconstructed B at `/tmp/zaphod-task91-width-A-fixed.Zqbzwo` and `/tmp/zaphod-task91-width-B-fixed.JsCUlh` remain 28 through three additions.
+- DONE: Preserve all accepted task-91 metadata/session/fullscreen/isolation behavior, run only verification required by the resulting change, obtain current exact-head review evidence if code changes, and write a complete implementation feedback Stage Report.
+  `zellij-new-tab-test.sh`, the focused fresh-pane test, manual permission proof, two-rail `1/1/0`/restart-empty proof, docs check, and full congestion smoke passed; `/tmp/zaphod-task91-width-full-green.PYuOKu` focused the exact session pane in 87 ms, kept all later literal pane/tab actions prompt, round-tripped native fullscreen, and cleaned every owned root. Rust and Go suites were not rerun because neither runtime changed. Quick job `227` found the missing post-wait terminal-cardinality assertion; `b5a379f` fixed it and exact-tip quick job `232` passed. Authoritative `code_completion` parent `239` reviewed `999ba8ab06af8c09a736aed98db21c0d70e341a0..b5a379f5ef32d7b92effb219631c286dd7d41185`; correctness `236`, journey `237`, and proof `238` each passed once, with parent verdict PASS and no findings.
+
+### Summary
+
+Ordinary pane creation—not the undocumented CLI prelude—reproduced the
+fixed-width failure on the first literal key, making it a released outcome
+defect. Zellij 0.44.3's native single-swap boundary admits a narrow fix with no
+plugin runtime layout command; the corrected head preserves the 28-column
+journey and all accepted task-91 behavior and is ready for fresh validation.
