@@ -368,3 +368,40 @@ Expected visible result: the command returns `watch-tab ready pid=… log=…`,
 the rail stays 28 columns, and its AGENTS projection is empty before any fresh
 SessionStart. Report `PASS` or `FAIL` with the exact output, then stop without
 starting Codex or pressing pane keys.
+
+## Replacement watcher attempt 1 — setup/evidence failure
+
+The captain ran the supplied command and reported exactly:
+`watch-tab daemon exited before readiness: EOF`.
+
+The retained terminal transcript shows the long cue was entered as three
+physical commands. The first standalone `env
+ZAPHOD_METADATA_BARRIER_ENABLE=…` printed the environment and did not persist
+the enable path into `watch-tab`; the daemon log at
+`/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.2382221432.log`
+therefore reports `metadata barrier requires enable, entered, release, and
+completed paths`. No barrier evidence, watcher socket, or live watcher process
+was created. This immediate fail-close is a cue/setup defect, not a product
+defect.
+
+The disposable AgentsView source was also down when inspected, so it could not
+have supported a successful watcher journey. The first officer restarted the
+same isolated `.task91-agentsview` root; v0.37.5 PID `75707` is healthy and
+`/api/v1/sessions?limit=1` returns one session. Standing KDL hashes remain
+unchanged.
+
+To remove line-wrap ambiguity, validation created and syntax-checked executable
+`.task91-live-b5.Rkweve/start-watcher.sh`, which supplies all three barrier
+inputs in one process environment; the completed path is deterministically
+derived from the entered path by the candidate.
+
+**Captain cue:** in the same selected replacement terminal, run exactly this
+one short command:
+
+```bash
+/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/.task91-live-b5.Rkweve/start-watcher.sh
+```
+
+Expected visible result: `watch-tab ready pid=… log=…`, rail width remains 28,
+and AGENTS is empty before SessionStart. Report `PASS` or `FAIL` with the exact
+output, then stop without starting Codex or pressing pane keys.

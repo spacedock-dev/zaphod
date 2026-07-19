@@ -774,3 +774,21 @@ visual checkpoint.
 The replacement tab passes its first human fixed-width checkpoint without a
 permission prompt. Native state and standing roots are stable, AgentsView is
 healthy, and AC-I1 advances only to the manual watcher-start observation.
+
+## Stage Report: validation (cycle 8)
+
+- DONE: Record the captain's watcher failure output verbatim and retain its evidence.
+  Human output was exactly `watch-tab daemon exited before readiness: EOF`; terminal transcript and watcher log `zaphod-watch-tab.2382221432.log` are preserved.
+- DONE: Classify setup/evidence defect versus product defect from the retained route, binary, barrier, process, and service state.
+  The long cue split into three commands, omitting barrier enable from the daemon; the log failed closed before socket/readiness, while AgentsView was also down. Candidate head/binary and tab geometry remained exact, so no product defect is established.
+- DONE: Preserve cleanup and standing roots while restoring only the disposable dependency.
+  No watcher/socket/barrier child remained; FO restored isolated AgentsView PID `75707`, its endpoint returns one session, and standing KDL hashes are unchanged.
+- DONE: Provide exactly one safe retry action.
+  Checked wrapper `.task91-live-b5.Rkweve/start-watcher.sh` removes multiline ambiguity; the sole cue runs it and expects ready PID/log, width 28, and empty AGENTS before stopping.
+
+### Summary
+
+The first replacement watcher attempt failed because the live-demo command was
+split and its disposable source was down, not because watcher behavior was
+exercised and rejected. Evidence is preserved, cleanup is complete, the source
+is healthy again, and AC-I1 remains pending one safe wrapper-based retry.
