@@ -443,14 +443,16 @@ or redefine KJ's registry authority and session-incarnation decision.
   `91` of `181` columns, not 28; it was tiled, visible, and not fullscreen.
   The live dumped layout records `pane name="sidebar" size="50%"` beside four
   terminal panes.
-- This is a released-journey outcome defect at the fixed-width end value, not
-  a label-polish issue and not a metadata-timing failure. AC-I1 cannot pass
-  while normal pane creation replaces the promised 28-column geometry.
+- The captain clarified that the demo procedure had previously focused and
+  expanded a pane through the CLI. The 91-column state is therefore real but
+  not yet classified as a released normal-workflow defect; it may be a demo-
+  harness evidence defect or a bounded abnormal trigger.
 - Route to implementation with the current tab preserved as the failing
-  specimen. Reproduce the smallest pane-creation sequence that changes 28
-  columns to 50%, then classify whether the supported Zellij 0.44.3 boundary
-  admits a narrow layout fix or requires a design reset. Do not tune around
-  the observed geometry or claim the pre-populated smoke as sufficient.
+  specimen. Reproduce two fresh cases before editing product code: ordinary
+  pane creation from a 28-column tab with no CLI focus/expand, and the prior
+  CLI focus/expand sequence followed by pane creation. Only the ordinary-path
+  reproduction blocks task 91 as an outcome defect; CLI-only failure is
+  triaged as evidence/deferred scope with its exact trigger recorded.
 - Preserve exact-pane session authority, the per-tab restart-empty contract,
   nonblocking metadata behavior, inert former-toggle inputs, native fullscreen,
   standing-root isolation, and the separate non-blocking header-label task.
