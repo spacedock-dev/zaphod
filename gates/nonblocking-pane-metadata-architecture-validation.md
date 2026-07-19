@@ -1,7 +1,7 @@
 # Validation: Remove synchronous pane metadata calls from the plugin hot path
 
-Frozen code head: `45719f4aaf545213b2a623871892ec87bde800ca`  
-Merge base: `999ba8ab06af8c09a736aed98db21c0d70e341a0`  
+Frozen code head: `b5a379f5ef32d7b92effb219631c286dd7d41185`
+Merge base: `999ba8ab06af8c09a736aed98db21c0d70e341a0`
 Implementation worktree: `.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture`
 
 The implementation worktree was clean before and after validation. Product
@@ -10,27 +10,26 @@ was used only for negative correctness tests and was removed afterward.
 
 ## Recommendation
 
-**OFFLINE PASS — PRESENT AC-I1 TO THE CAPTAIN.** AC-O1 through AC-O6 pass
-independent reproduction. The interactive floating-TUI observation remains
-pending for the captain and is not inferred from the offline harnesses.
+**REPLACEMENT OFFLINE PASS — RESTART AC-I1 WITH A FRESH TAB.** AC-O1 through
+AC-O6 pass independent reproduction at `b5a379f`, including the passive
+fixed-width repair. The interactive floating-TUI observation remains pending
+for the captain and is not inferred from the offline harnesses.
 
 ## Frozen review integrity
 
-- Worktree `HEAD` is the required `45719f4aaf545213b2a623871892ec87bde800ca`;
+- Worktree `HEAD` is the required `b5a379f5ef32d7b92effb219631c286dd7d41185`;
   `merge-base(main, HEAD)` is `999ba8ab06af8c09a736aed98db21c0d70e341a0`.
-- Quick synthesis `182` names panel `quick`, exact head `45719f4`, status
-  `done`, verdict `P`, and retry count zero.
-- Synthesis `188` names `code_completion`, exact range
-  `999ba8a..45719f4`, status `done`, verdict `P`, and retry count zero.
-- Required members appear exactly once: correctness `185`, journey `186`,
-  and proof `187`. Each covers the same exact range, is `done/P`, and has
+- Synthesis `239` names `code_completion`, exact range
+  `999ba8a..b5a379f`, status `done`, verdict `P`, and retry count zero.
+- Required members appear exactly once: correctness `236`, journey `237`,
+  and proof `238`. Each covers the same exact range, is `done/P`, and has
   retry count zero. The parent output is `No issues found.`
 
 ## Offline AC verdicts
 
 | AC | Verdict | Independently reproduced evidence |
 |---|---|---|
-| AC-O1 | PASS | `tests/zellij-pane-metadata-congestion-test.sh` passed the exact `SMOKE_SECOND_ROW` focus through the fixed 28-column rail while the six-second native metadata barrier remained held. Literal `Alt p` x3, `Alt n`, `Alt 1`, and `Alt 2` reached complete native state within one second; early-release, expired-barrier, late-observation, and action-timeout controls failed visibly; the six-second quiet window stayed unchanged. |
+| AC-O1 | PASS | `tests/zellij-fixed-width-pane-creation-test.sh` passed the first literal `Alt p` at width 28. `tests/zellij-pane-metadata-congestion-test.sh` passed three later additions, exact `SMOKE_SECOND_ROW` focus through the fixed 28-column rail while the six-second native metadata barrier remained held, literal action deadlines, negative controls, fullscreen, and quiet cleanup. |
 | AC-O2 | PASS | Fresh `cargo test` passed 80/80. The executable source/permission assertion found zero command, CWD, or scrollback host calls and no `ReadPaneContents`; timer, `PaneUpdate`, render, click, key, and pipe matrices passed exact row, focus, and fail-close outcomes. `cargo check --tests` passed. |
 | AC-O3 | PASS | Fresh uncached `go test -count=1 ./...` and `go vet ./...` passed. Coordinator tests covered 100-request coalescing, two-worker/one-publisher bounds, one pending refresh/snapshot, supersession, cancellation, ignored cancellation until deadline, exact cache pruning, timeout, and no late publication. |
 | AC-O4 | PASS | `tests/zellij-two-rail-recipient-smoke-test.sh` passed two same-CWD manual watchers, exact `1/1/0`, exact row focus, child/history/foreign exclusion, bounded exact-ID fetch, zero idle native polls, restart-empty, later fresh SessionStart recovery, manifest fail-close, and no durable authority record. |
@@ -295,3 +294,50 @@ any watcher start after this visual checkpoint.
 permission prompt is gone and the same fixed 28-column left rail plus selected
 terminal are visible with no pane or layout movement; otherwise report `FAIL`
 and what differs. Do nothing else and do not start the watcher.
+
+## Replacement-head revalidation — `b5a379f`
+
+The preserved failed specimen was captured before retirement at
+`/tmp/task91-failing-specimen-before-retire.{json,kdl}`. It records tab `4`,
+rail `plugin_33` widened to 91 of 181 columns, four terminals, and dumped
+`size="50%"`. Exact pane IDs `26,28,29,30,plugin_33` were then closed; no old
+rail was hot-reloaded.
+
+Stored parent `239` is `done/P` on exact range `999ba8a..b5a379f`, with
+correctness `236`, journey `237`, and proof `238` exactly once at `done/P` and
+retry zero. The replacement does not change `src/main.rs` or Go runtime code;
+the clean isolated Rust build passed 80/80 plus `cargo check --tests`, including
+zero forbidden host calls, no pane-content permission, and no runtime layout
+mutation path. Fresh Go plus vet passed after isolated timing retries.
+
+Independent live results:
+
+- `zellij-fixed-width-pane-creation-test.sh`: first literal `Alt p` retained
+  the fresh rail at exactly 28 columns.
+- `zellij-pane-metadata-congestion-test.sh`: the later three literal pane
+  additions retained width 28; exact session focus, fullscreen, all one-second
+  pane/tab deadlines, barrier ownership, quiet window, and cleanup passed.
+- `zellij-new-tab-test.sh`: all 13 entry/render/isolation cases passed;
+  rendered layout contains exactly one passive `fixed-width` swap.
+- Manual permission exposure passed without auto-consent; two-rail smoke passed
+  exact `1/1/0`, focus, stale retention, restart-empty, zero idle polls, and
+  host-default isolation.
+- In a detached local checkout, removing the passive swap made the first pane
+  addition widen the rail to 80 and exit 1. Changing the swap rail to 29 made
+  it render at 29 and exit 1. Both incorrect layouts were rejected by the
+  exact-width journey, and the disposable checkout was removed.
+- Standing KDL hashes stayed `398ff6d6…be316` and `bb9e8e21…3980e` across all
+  replacement tests.
+
+The disposable AgentsView v0.37.5 service is healthy again. Fresh managed tab
+`4`, named `Task 91 captain live b5a379f`, uses candidate rail `plugin_38` at
+`x=0,y=1,28x49` beside selected terminal `31` at
+`x=28,y=1,153x49`; native state is retained at
+`/tmp/task91-b5-captain-native-before.json`, entry commands at
+`/tmp/task91-b5-captain-entry.out`, and standing hashes are unchanged.
+
+**Captain cue:** open `Task 91 captain live b5a379f` and only look. Report
+`PASS` if one fixed 28-column rail is visible at left with one selected
+terminal to its right; otherwise report `FAIL` and what differs. Also report
+whether a permission prompt is visible. Do not approve anything, press pane
+keys, or start the watcher yet.

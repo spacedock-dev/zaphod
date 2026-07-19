@@ -738,3 +738,22 @@ fixed-width failure on the first literal key, making it a released outcome
 defect. Zellij 0.44.3's native single-swap boundary admits a narrow fix with no
 plugin runtime layout command; the corrected head preserves the 28-column
 journey and all accepted task-91 behavior and is ready for fresh validation.
+
+## Stage Report: validation (cycle 6)
+
+- DONE: Verify replacement head b5a379f and code_completion parent 239 cover the exact current range, include required members 236/237/238 once, and pass without unresolved material findings.
+  Clean head `b5a379f`, merge base `999ba8a`, parent `239`, and members correctness `236`, journey `237`, proof `238` were verified directly at exact range, `done/P`, retry zero, with no parent findings.
+- DONE: Independently reproduce the normal supported path from a fresh 28-column tab: the first and three subsequent literal pane additions retain exact width 28, with a wrong/missing passive swap rejected, fullscreen/congestion/session behavior intact, and standing roots unchanged.
+  Focused first-pane and full congestion journeys passed; missing swap widened to 80 and wrong swap rendered 29, both exiting 1; Rust 80/80, Go/vet, entry, permission, two-rail, fullscreen, timing, cleanup, and standing-hash proofs passed.
+- DONE: Retire the preserved failing specimen after capturing it, prepare a fresh captain AC-I1 tab from b5a379f, and stop at the first human visual checkpoint with exact native geometry; do not claim the live observation.
+  The 91-column `plugin_33` specimen and 50% dump are retained under `/tmp`, its exact panes were closed, and fresh tab `4` has `plugin_38` at 28x49 beside selected terminal `31`; AC-I1 remains pending.
+- SKIPPED: Infer the replacement tab's visual result or continue to watcher/key actions.
+  The gate stops at the captain's first look and asks only for the fixed-width view plus permission-prompt visibility.
+
+### Summary
+
+The narrow passive-swap repair passes exact-range review, independent positive
+and negative width proofs, and every preserved task-91 contract. The old
+failing specimen is retired, a fresh replacement tab is instrumented with
+unchanged standing roots, and AC-I1 has restarted at its first captain-only
+visual checkpoint.

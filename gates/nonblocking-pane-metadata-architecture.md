@@ -8,7 +8,7 @@ gate:
   round: 1
 recommendation:
   verdict: PENDING_CAPTAIN
-  rationale: "AC-O1 through AC-O6 independently pass at frozen head 45719f4 with exact-range code_completion parent 188. AC-I1 remains reserved for the captain's real Subspace/Codex fixed-width journey."
+  rationale: "AC-O1 through AC-O6 independently pass at replacement head b5a379f with exact-range code_completion parent 239, including the passive fixed-width pane-addition repair. AC-I1 restarts in a fresh tab."
 artifact:
   kind: draft
   path: ./nonblocking-pane-metadata-architecture-validation.md
@@ -42,8 +42,9 @@ criteria:
       evidence: "PENDING: exact captain-live script is in the validation artifact; no interactive observation is claimed."
 ---
 
-Frozen head `45719f4` passes every independently reproducible offline
-criterion, the local negative correctness audit, and the exact-range review
-integrity check. Present the linked artifact and its exact AC-I1 script to the
-captain. The decision log must record the real interactive result; offline
-harness evidence is not a substitute for the captain's TUI observation.
+Replacement head `b5a379f` passes every independently reproducible offline
+criterion, the passive-swap negative controls, and the exact-range review
+integrity check. Present the linked artifact and restart its AC-I1 script in
+the fresh replacement tab. The decision log must record the real interactive
+result; offline harness evidence is not a substitute for the captain's TUI
+observation.
