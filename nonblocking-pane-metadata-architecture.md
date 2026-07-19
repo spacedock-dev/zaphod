@@ -1,7 +1,7 @@
 ---
 id: 91f2dxkn3v7fe1174ayj48j5
 title: Remove synchronous pane metadata calls from the plugin hot path
-status: validation
+status: implementation
 source: live nautical-cuckoo congestion diagnosis 2026-07-14
 sprint: s1-managed-tab-safety
 group: architecture-hardening
@@ -435,6 +435,25 @@ or redefine KJ's registry authority and session-incarnation decision.
 - The follow-up removes the production `FIXED` marker and pins the intended
   user-facing header bytes without changing layout or interaction behavior.
   It must land through its own task or a compatible narrow render-UX task.
+
+#### Cycle 1 — 2026-07-19 — rail expands to half-width after pane creation
+
+- The captain created additional ordinary panes in the correct task-91
+  candidate tab during AC-I1. Native state then showed rail `plugin_33` at
+  `91` of `181` columns, not 28; it was tiled, visible, and not fullscreen.
+  The live dumped layout records `pane name="sidebar" size="50%"` beside four
+  terminal panes.
+- This is a released-journey outcome defect at the fixed-width end value, not
+  a label-polish issue and not a metadata-timing failure. AC-I1 cannot pass
+  while normal pane creation replaces the promised 28-column geometry.
+- Route to implementation with the current tab preserved as the failing
+  specimen. Reproduce the smallest pane-creation sequence that changes 28
+  columns to 50%, then classify whether the supported Zellij 0.44.3 boundary
+  admits a narrow layout fix or requires a design reset. Do not tune around
+  the observed geometry or claim the pre-populated smoke as sufficient.
+- Preserve exact-pane session authority, the per-tab restart-empty contract,
+  nonblocking metadata behavior, inert former-toggle inputs, native fullscreen,
+  standing-root isolation, and the separate non-blocking header-label task.
 
 ## Stage Report: ideation
 
