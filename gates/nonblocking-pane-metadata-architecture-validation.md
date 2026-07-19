@@ -341,3 +341,30 @@ The disposable AgentsView v0.37.5 service is healthy again. Fresh managed tab
 terminal to its right; otherwise report `FAIL` and what differs. Also report
 whether a permission prompt is visible. Do not approve anything, press pane
 keys, or start the watcher yet.
+
+## Replacement live visual checkpoint — captain PASS
+
+The captain reported both required human observations: the fresh replacement
+rail is visibly 28 columns wide, and no permission prompt is visible. No
+permission action is required or authorized at this checkpoint.
+
+Supporting native state at `/tmp/task91-b5-captain-visual-pass.json` still
+records tab `4`, candidate rail `plugin_38` at `x=0,y=1,28x49`, selected
+terminal `31` at `x=28,y=1,153x49`, and intact chrome. AgentsView is healthy
+and standing KDL hashes remain byte-identical; this instrumentation supports
+but does not replace the captain's visible report.
+
+The validator prepared the owner-held metadata barrier root
+`/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/.task91-live-b5.Rkweve`.
+
+**Captain cue:** in the selected terminal of `Task 91 captain live b5a379f`,
+run this one command exactly:
+
+```bash
+env ZAPHOD_METADATA_BARRIER_ENABLE=/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/.task91-live-b5.Rkweve/metadata-enable ZAPHOD_METADATA_BARRIER_ENTERED=/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/.task91-live-b5.Rkweve/metadata-entered ZAPHOD_METADATA_BARRIER_RELEASE=/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/.task91-live-b5.Rkweve/metadata-release /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/target/zaphod watch-tab
+```
+
+Expected visible result: the command returns `watch-tab ready pid=… log=…`,
+the rail stays 28 columns, and its AGENTS projection is empty before any fresh
+SessionStart. Report `PASS` or `FAIL` with the exact output, then stop without
+starting Codex or pressing pane keys.

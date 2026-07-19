@@ -757,3 +757,20 @@ and negative width proofs, and every preserved task-91 contract. The old
 failing specimen is retired, a fresh replacement tab is instrumented with
 unchanged standing roots, and AC-I1 has restarted at its first captain-only
 visual checkpoint.
+
+## Stage Report: validation (cycle 7)
+
+- DONE: Record both captain observations from the fresh replacement tab exactly.
+  The captain reports the rail is visibly 28 columns wide and no permission prompt is visible; no permission approval is inferred or attempted.
+- DONE: Preserve native instrumentation without substituting it for the human view.
+  Tab `4`, `plugin_38` at 28x49, selected terminal `31`, intact chrome, healthy AgentsView, and unchanged standing KDL hashes remain recorded.
+- DONE: Prepare the owner-held metadata barrier before watcher startup.
+  Disposable root `.task91-live-b5.Rkweve` carries exact absolute enable/entered/release paths for the manually started tab watcher.
+- DONE: Return exactly one next captain action with its expected visible result.
+  The sole cue is one exact `watch-tab` command; expected output is ready PID/log, width 28, and empty AGENTS before SessionStart, followed by a stop.
+
+### Summary
+
+The replacement tab passes its first human fixed-width checkpoint without a
+permission prompt. Native state and standing roots are stable, AgentsView is
+healthy, and AC-I1 advances only to the manual watcher-start observation.
