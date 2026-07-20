@@ -1,7 +1,7 @@
 ---
 id: 91f2dxkn3v7fe1174ayj48j5
 title: Remove synchronous pane metadata calls from the plugin hot path
-status: implementation
+status: validation
 source: live nautical-cuckoo congestion diagnosis 2026-07-14
 sprint: s1-managed-tab-safety
 group: architecture-hardening
