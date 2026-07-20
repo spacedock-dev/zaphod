@@ -581,3 +581,41 @@ now.
 28-column rail is visibly present at left, exactly one selected terminal is
 visible to its right, and no AGENTS heading is visible. Otherwise report `FAIL`
 and what differs. Do not start the watcher or Codex, or press pane keys.
+
+## Unique-URL post-approval visual checkpoint — captain PASS
+
+The captain clarified that current `Task 91 validator unique 7bdb3d7` passes
+all three requested visual checks: the rail is visibly fixed at 28 columns,
+exactly one selected terminal is visible to its right, and no AGENTS heading is
+visible. This supersedes their intermediate wording about one stale AGENTS row.
+
+That stale row was in a previous tab, not the current unique-URL tab. Native
+inventory records older canonical-URL rails `plugin_38` in tab `4` and
+`plugin_41` in tab `5`, both at 28 columns, and no process owns the remaining
+older watcher socket. Native inspection cannot recover the stale row's exact
+registered pane identity or focus authority, so validation records only the
+captain's prior-tab observation; it does not claim proven last-good retention
+and does not classify it as current unique-URL leakage.
+
+Current native state still records stable tab `7`, unique rail `plugin_47` at
+`x=0,y=1,28x58`, and sole focused terminal `38` at
+`x=28,y=1,210x58`. Frozen unique artifacts remain SHA-256
+`64140a12…ee64` for WASM and `26b0c63e…739be` for the native binary.
+
+Validator AgentsView v0.38.1 is restored from the same disposable root as PID
+`90305` on `127.0.0.1:18092`; its session endpoint is healthy. The executable
+short wrapper `.task91-validator-live-7b/start-unique-watcher.sh` passes
+`sh -n` and now checks that endpoint before it starts the exact tab-7 watcher.
+Validation has not run the wrapper after permission approval.
+
+**Captain cue:** in the selected terminal of the current unique tab, run
+exactly:
+
+```bash
+/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/.task91-validator-live-7b/start-unique-watcher.sh
+```
+
+Expected visible result: `watch-tab ready pid=… log=…`, the rail remains fixed
+at 28 columns, and no AGENTS heading appears before SessionStart. Report `PASS`
+or `FAIL` with the exact command output, then stop. Do not start Codex or press
+pane keys.

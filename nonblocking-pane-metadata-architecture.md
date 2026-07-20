@@ -953,3 +953,20 @@ human TUI journey and no watcher readiness is claimed.
 The captain has completed the one required native permission approval for the
 unique frozen-artifact rail. Native geometry remains exact, but AC-I1 advances
 only to the post-approval human visual checkpoint; no later state is claimed.
+
+## Stage Report: validation (cycle 13)
+
+- DONE: Record the captain's corrected current-tab visual result.
+  Current `Task 91 validator unique 7bdb3d7` visibly passes fixed 28-column width, exactly one selected terminal, and no AGENTS heading; the captain's intermediate stale-row wording referred to a previous tab and is superseded for current tab `7`.
+- DONE: Separate the prior-tab stale observation from current unique-URL state without inventing focus authority.
+  Older canonical-URL rails remain in tabs `4` and `5` with no live watcher owner, but native state cannot recover the stale row's registered pane binding. Validation records the human prior-tab observation only, makes no last-good focusability claim, and does not treat it as current leakage.
+- DONE: Restore the validator source and prepare one short health-checked watcher command.
+  AgentsView v0.38.1 PID `90305` owns the same disposable root and serves HTTP 200 on port `18092`; executable `start-unique-watcher.sh` passes `sh -n`, preflights source health, and carries the exact tab-7/pane-38/unique-rail route.
+- DONE: Return exactly one next captain action.
+  The sole cue runs the short wrapper and expects ready PID/log while width stays 28 and AGENTS remains absent before SessionStart; Codex and pane keys remain unauthorized.
+
+### Summary
+
+The current unique frozen-artifact tab passes its complete post-permission
+visual checkpoint. Prior-tab stale state is isolated and not overclaimed; the
+validator source is healthy and AC-I1 advances only to exact watcher startup.
