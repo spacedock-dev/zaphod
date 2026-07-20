@@ -499,6 +499,24 @@ or redefine KJ's registry authority and session-incarnation decision.
   to implementation, preserve all partial human PASS evidence, and require a
   fresh independent validation route before AC-I1 can pass.
 
+#### Cycle 4 — 2026-07-21 — repaired native proof diverges from fresh live route
+
+- The captain authorized one targeted repair round. Head `79f53cd` passed the
+  deterministic transient-manifest tests and a validator-owned native journey
+  covering same-tab pane creation, exact-row focus, a later acknowledged
+  snapshot, and six-second watcher survival.
+- In the fresh human route, the captain approved the exact artifact, observed
+  the rail remain 28 columns, and started watcher PID `31978`. The watcher
+  reached readiness for WORK/tab9/rail54, then exited at revision `506` after
+  five seconds without a `metadata-snapshot` acknowledgment, before any first
+  Codex message was entered. Validator AgentsView `:18093` remained healthy.
+- The authorized repair round is exhausted and did not close the live gap.
+  Do not ask for another blind retry. Any proposed next round must first add
+  receiver-decision and event-order evidence sufficient to identify whether
+  recipient admission, stream/sequence validation, or lease validation withheld
+  the acknowledgment on revision `506`, then reproduce that exact live ordering
+  in the native harness.
+
 ## Stage Report: ideation
 
 - DONE: Design a bounded cached/event-fed metadata architecture that removes every synchronous pane command, CWD, and scrollback call from the WASM hot path while preserving exact pane authority and degraded stale-state rendering.
