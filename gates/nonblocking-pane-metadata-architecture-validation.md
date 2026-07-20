@@ -879,3 +879,68 @@ updates and maintaining the route are required by AC-I1.
 implementation.** No further captain action is authorized on this failed live
 route. The successful human projection and exact-focus evidence remain valid
 partial results and are not converted into a full acceptance claim.
+
+## Feedback-cycle-3 repair revalidation — offline and native PASS
+
+Validation froze head `79f53cdf7d8e97a64cc5a83fa87b96b245a631ae`
+with merge base `999ba8ab06af8c09a736aed98db21c0d70e341a0`.
+Stored quick review job `350` is `done/P`, retry zero, on exact tip `79f53cd`.
+The authoritative `code_completion` synthesis job `354` is `done/P`, retry
+zero, on exact range `999ba8a..79f53cd`; correctness `351`, journey `352`, and
+proof `353` each occur exactly once at `done/P`, retry zero.
+
+Independent execution passed:
+
+- A clean isolated Rust target with sccache disabled passed 85/85 plus
+  `cargo check --tests`. It exercises the transient missing/reappearance
+  positive and moved, floating, missing, ambiguous, replacement, foreign-URL,
+  duplicate/replaced-rail, and stable-tab-change fail-closed cases.
+- Fresh Go cache execution from the actual `grout` module passed `go test
+  ./...` and `go vet ./...`; all tracked shell scripts parsed.
+- The first-literal-`Alt p` native fixture preserved a newly created ordinary
+  pane and the rail at exactly 28 columns.
+- The complete metadata-congestion wrapper passed same-tab `Alt p`, exact-row
+  focus, a later acknowledged `SMOKE_POST_PANE_ROW`, watcher survival beyond
+  six seconds, one-second pane/tab deadlines under the native metadata barrier,
+  quiet cleanup, and its early-release, barrier-timeout, and retained-evidence
+  negative controls.
+- The two-rail fixture passed exact `1/1/0`, exact-pane click, stale retention,
+  restart-empty/fresh recovery, zero idle native polls, and zero host-default
+  candidate records.
+- Exact hook, 13-case entry, native permission exposure, artifact build, docs,
+  stress evidence, and responsive-proof tests passed.
+
+The throwaway-clone audit rejected four mutations with status 101: removing
+gap retention failed the transient-reappearance positive; retaining unsafe
+identity failed on moved state; ignoring replacement detection failed
+specifically on replacement; and retaining proof across a stable-tab change
+revived the old watcher and failed its rejection assertion. The baseline suite
+separately passed floating, ambiguous, foreign, missing-gap, and replacement
+matrices. The throwaway clone was removed.
+
+Prior captain evidence remains valid partial PASS: the rail was visibly 28
+columns, AGENTS appeared only after a real Codex message, exactly one
+`TASK91_CAPTAIN_REAL` row appeared with no extras, and the delivered row focused
+registered terminal `38` from distinct terminal `40`. Watcher survival and all
+later AC-I1 steps require fresh evidence on the repair.
+
+## Validator-owned 79f live handoff — native permission boundary
+
+Validator-owned checkout `.task91-validator-entry-79f` is detached at exact
+head `79f53cd`. Its freshly built native binary is SHA-256
+`7510c9610e335757e8f27f6030c07ee9ff0dd43597c87a5e1c8ce771c2f131c6` and its
+WASM is `6a884b72813163e67f5fd4c1ff0e1bd85a0170d0ec3848c8fe3e457c98483f38`.
+
+Validator AgentsView v0.38.1 PID `74949` owns disposable root
+`.task91-validator-agentsview-79f`, listens only on `127.0.0.1:18093`, has
+idle shutdown disabled, and serves the session API. Fresh managed tab `9`
+contains rail `plugin_54` at `x=0,y=1,28x49` and sole terminal `43` at
+`x=28,y=1,153x49`, with the exact unique URL and route. No watcher or Codex has
+started. Focusing `plugin_54` exposed the ungranted native permission boundary;
+the prompt's visible presence and any approval remain human-only facts.
+
+**Captain cue:** open the current fresh tab containing the 28-column rail from
+`.task91-validator-entry-79f`. If the native permission prompt for that exact
+WASM is visible, approve it exactly once, then report `PASS`; otherwise report
+`FAIL` and what is visible. Stop after the prompt closes. Do not start the
+watcher or Codex, create panes, click rows, or press other pane keys yet.

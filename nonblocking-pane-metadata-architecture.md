@@ -1190,3 +1190,26 @@ the trusted tiled rail, and revokes unsafe identity transitions. The fixed
 28-column demo survives same-tab pane creation, exact-row focus, and a later
 acknowledged snapshot with its watcher alive. Isolation, restart, timing, and
 cleanup remain green; it is ready for renewed captain validation.
+
+## Stage Report: validation (cycle 22)
+
+- DONE: Verify frozen head and authoritative exact-tip/exact-range review integrity.
+  Head `79f53cd`, merge base `999ba8a`, quick job `350`, synthesis `354`, and exact-range members correctness `351`, journey `352`, proof `353` were inspected directly; all are `done/P`, retry zero, and every required member occurs once.
+- DONE: Reproduce offline lifecycle, build, entry, permission, documentation, and cleanup evidence independently.
+  Isolated Rust passed 85/85 plus check; fresh Go test/vet and tracked shell parsing passed; entry, permission exposure, hook, artifact, docs, stress, and responsive-proof suites passed.
+- DONE: Adversarially refute both under-retention and unsafe over-retention.
+  Throwaway mutations removing gap retention, retaining moved identity, ignoring replacement, and ignoring stable-tab changes each failed targeted assertions with status 101. Baseline moved, floating, missing, ambiguous, replacement, foreign, duplicate, and stable-tab cases all pass; the clone was removed.
+- DONE: Re-run the supported native same-tab, post-ack, timing, isolation, restart, and cleanup journeys.
+  First literal `Alt p` preserved width 28; full congestion passed exact focus, later acknowledged snapshot, watcher survival, one-second deadlines, quiet cleanup, and negative controls; two-rail passed `1/1/0`, stale retention, restart-empty/fresh recovery, zero idle native polls, and host isolation.
+- DONE: Preserve only valid prior human partial evidence.
+  Visible width 28, post-message AGENTS appearance, exact single `TASK91_CAPTAIN_REAL` row with no extras, and discriminating terminal-40-to-terminal-38 focus remain accepted; watcher survival and later steps are not carried forward.
+- DONE: Prepare a validator-owned fresh 79f permission checkpoint.
+  Detached checkout `.task91-validator-entry-79f` has byte-recorded fresh artifacts; validator AgentsView PID `74949` serves :18093 with idle timeout disabled; fresh tab `9` has exact rail `plugin_54` 28x49 beside sole terminal `43` 153x49 and no watcher/Codex. The sole cue asks for exact native permission approval and stops.
+
+### Summary
+
+Repair head `79f53cd` passes exact review verification, isolated execution,
+adversarial refutation, and all supported-runtime native proofs. Prior human
+projection/focus evidence remains valid partial PASS only. AC-I1 now resumes at
+one fresh exact-artifact permission boundary; no approval or later result is
+inferred. Crew, we love you.
