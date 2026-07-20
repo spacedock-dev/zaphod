@@ -1005,3 +1005,20 @@ The unique-tab journey reached the expected Codex first-run trust boundary.
 No consent or session delivery is inferred; AC-I1 advances only to explicit
 trust of the exact checkout-local hook and a fresh Codex start in terminal
 `38`.
+
+## Stage Report: validation (cycle 16)
+
+- DONE: Record the captain's pre-prompt no-row failure as observed.
+  The captain trusted the exact hook, exited, restarted `codex` in terminal `38`, and saw no AGENTS section or row.
+- DONE: Locate the first unavailable evidence boundary without rejecting the product.
+  Native state has `pane_command=codex` in the exact unique CWD, while healthy validator AgentsView has zero sessions and no Codex session file for that CWD before any first prompt; the first unavailable boundary is therefore exact-ID enrichment.
+- DONE: Recheck watcher route and post-ready health.
+  PID `18396`, the exact tab-7 socket, and its port-18092 connection remain live; the generation-2 log still binds WORK/tab `7`/pane `38`/rail `47` and contains no post-ready delivery error. In-memory hook acceptance remains unclaimed.
+- DONE: Correct the validation-script ordering and return one safe action.
+  The original gate requires the `TASK91_CAPTAIN_REAL` prompt before row enrichment. The sole cue sends that first prompt, expects exactly one matching terminal-38 Codex row, and stops before pane keys or Subspace.
+
+### Summary
+
+The reported empty pre-prompt rail is real but was judged against a premature
+checkpoint. It is a validation-ordering defect, not a product rejection.
+AC-I1 remains pending the marker-prompt enrichment and all later live actions.

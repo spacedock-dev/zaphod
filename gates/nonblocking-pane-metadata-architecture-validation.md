@@ -689,3 +689,42 @@ Then exit that Codex process and run `codex` again in the same terminal `38`.
 Expected visible result: the restarted Codex TUI opens in terminal `38` and the
 rail shows AGENTS with exactly one top-level Codex row. Report `PASS`, or `FAIL`
 with what differs, and stop. Do not send a task prompt or press pane keys yet.
+
+## Unique-URL pre-prompt row checkpoint — validation ordering corrected
+
+The captain trusted the exact checkout-local hook, exited the first Codex
+process, restarted `codex` in terminal `38`, and reported FAIL because no
+AGENTS section or row appeared. This human failure is recorded as observed.
+
+Native state confirms that the restarted pane command is `codex` in the exact
+unique checkout CWD. Validator-owned AgentsView on `127.0.0.1:18092` is healthy
+but has zero sessions for `.task91-validator-entry-7b`, and no new Codex session
+file for that CWD is visible. The captain had been explicitly told not to send
+a first prompt, so AgentsView has no persisted session to return for the exact
+SessionStart ID yet.
+
+Watcher PID `18396` remains live with the exact tab-7 socket
+`/tmp/zaphod-watch-tab-v1-501/w-qigSzMFVOGxOc7KEKsze3iSRYwSHcVCjIn-Cq9zCj0c.sock`
+and an established connection to port `18092`. Its log still contains only the
+generation-2 ready record for `WORK`/tab `7`/pane `38`/rail `47`, with no
+post-ready delivery error. Hook acceptance is intentionally in-memory and no
+durable SessionStart record can be inferred from these facts.
+
+The concrete first unavailable boundary is AgentsView exact-ID enrichment, not
+the native pane route or watcher readiness. This is a validation-script ordering
+defect: the original gate sequence sends
+`TASK91_CAPTAIN_REAL: inspect README.md without edits, then wait.` before it
+expects enrichment and a visible row. The premature no-row expectation is
+withdrawn and is not a product rejection.
+
+**Captain cue:** send exactly this as the first prompt in the restarted Codex
+TUI in terminal `38`:
+
+```text
+TASK91_CAPTAIN_REAL: inspect README.md without edits, then wait.
+```
+
+Expected visible result: AgentsView records that exact Codex session and the
+same tab-7 rail shows AGENTS with exactly one top-level Codex row for terminal
+`38`, carrying the `TASK91_CAPTAIN_REAL` identity/summary. Report `PASS`, or
+`FAIL` with what differs, and stop. Do not press pane keys or open Subspace yet.
