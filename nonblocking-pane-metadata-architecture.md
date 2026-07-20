@@ -471,9 +471,12 @@ or redefine KJ's registry authority and session-incarnation decision.
   `33838`, listening on `127.0.0.1:8080`. Direct API inspection then returned
   HTTP 500, `counting sessions: sql: database is closed`; the earlier
   disposable-data-root status had not described this live process. Classify
-  the source as alive-but-broken, not absent, and separate that invalid demo
-  dependency from the recorded plugin-pipe acknowledgment timeout before
-  choosing a repair. Do not ask the captain for another blind retry.
+  that moment as alive-but-unhealthy, not absent. The same endpoint later
+  recovered without a process replacement and returned HTTP 200 with 1,433
+  sessions, matching the captain's successful server-backed session listing.
+  Separate the transient source interval from the recorded plugin-pipe
+  acknowledgment timeout before choosing a repair. Do not ask the captain for
+  another blind retry.
 - This blocks AC-I1 and the exact session-delivery value until a fresh normal
   journey keeps the watcher alive, positively acknowledges post-ready metadata,
   and renders one exact focusable row. Preserve the fixed-width repair,
