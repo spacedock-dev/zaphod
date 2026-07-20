@@ -1213,3 +1213,28 @@ adversarial refutation, and all supported-runtime native proofs. Prior human
 projection/focus evidence remains valid partial PASS only. AC-I1 now resumes at
 one fresh exact-artifact permission boundary; no approval or later result is
 inferred. Crew, we love you.
+
+## Stage Report: validation (cycle 23)
+
+- DONE: Record the captain's fresh native-permission result without inference.
+  The captain reports PASS: the `.task91-validator-entry-79f` prompt was
+  visible, approved exactly once, and closed. This establishes permission only;
+  watcher startup/survival, empty projection, session delivery, and rendered
+  rows remain unclaimed.
+- DONE: Preserve the repaired artifact and fresh-tab geometry after approval.
+  Read-only audit keeps exact head `79f53cd`, native SHA
+  `7510c961…131c6`, WASM SHA `6a884b72…3f38`, and healthy validator
+  AgentsView `:18093`. Native inspection retains non-selectable rail
+  `plugin_54` at 28x49 beside sole focused terminal `43` at 153x49 in tab `9`.
+- DONE: Prepare exactly one AC-I1 continuation action.
+  The next cue runs `./target/zaphod watch-tab` in terminal `43`, asks for its
+  exact ready line and confirmation that the rail remains 28 columns, and then
+  stops. Codex, pane creation, row interaction, pane keys, and Subspace remain
+  outside this checkpoint.
+
+### Summary
+
+The exact repair artifact has crossed its fresh native permission boundary
+with captain PASS and remains geometrically intact. AC-I1 continues only at
+watcher readiness; no watcher-survival or later acceptance evidence is inferred.
+Crew, we love you.

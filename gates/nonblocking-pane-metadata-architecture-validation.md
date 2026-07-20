@@ -944,3 +944,27 @@ the prompt's visible presence and any approval remain human-only facts.
 WASM is visible, approve it exactly once, then report `PASS`; otherwise report
 `FAIL` and what is visible. Stop after the prompt closes. Do not start the
 watcher or Codex, create panes, click rows, or press other pane keys yet.
+
+## Fresh 79f permission checkpoint — captain PASS
+
+The captain reports: **PASS** — the fresh `.task91-validator-entry-79f`
+native permission prompt was visible, approved exactly once, and closed. This
+records only the human-observed permission result. It does not infer watcher
+startup or survival, an empty projection, session delivery, a rendered row, or
+any later AC-I1 result.
+
+The post-report read-only audit keeps the frozen checkout at exact head
+`79f53cdf7d8e97a64cc5a83fa87b96b245a631ae`, native SHA-256
+`7510c9610e335757e8f27f6030c07ee9ff0dd43597c87a5e1c8ce771c2f131c6`,
+and WASM SHA-256
+`6a884b72813163e67f5fd4c1ff0e1bd85a0170d0ec3848c8fe3e457c98483f38`.
+Validator AgentsView still serves `127.0.0.1:18093`. Native inspection after
+the permission result shows tab `9` with non-selectable rail `plugin_54` at
+`28x49` beside the sole focused terminal `43` at `153x49`; no watcher or Codex
+has started.
+
+**Captain cue:** in terminal `43` of the current fresh tab `9`, run exactly
+`./target/zaphod watch-tab`. Report the exact `watch-tab ready pid=... log=...`
+line and whether the rail remains 28 columns; report `FAIL` and what is visible
+if either condition is absent. Stop immediately after that report. Do not start
+Codex, create panes, click rows, press pane keys, or open Subspace yet.
