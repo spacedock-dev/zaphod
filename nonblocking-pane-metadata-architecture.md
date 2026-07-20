@@ -483,6 +483,22 @@ or redefine KJ's registry authority and session-incarnation decision.
   restart-empty contract, nonblocking action deadlines, cleanup, standing-root
   isolation, and the separate header-label follow-up.
 
+#### Cycle 3 — 2026-07-20 — same-tab pane interaction again kills watcher
+
+- On repaired head `7bdb3d7a5a07b45245b37ee44d80920f673041b4`, the
+  captain visibly confirmed the rail at 28 columns, one exact
+  `TASK91_CAPTAIN_REAL` row with no extras, and successful focus routing from a
+  second same-tab tiled terminal back to the registered Codex terminal.
+- After that same-tab pane interaction, watcher PID `18396` exited and its
+  generation socket disappeared. The owned log records revision `15513`
+  timing out after five seconds without the targeted rail acknowledging the
+  post-ready `metadata-snapshot`.
+- This is the third feedback cycle. Per the feedback-rejection contract,
+  escalate to the captain instead of automatically dispatching another repair
+  round. If the captain authorizes another round, route this exact live failure
+  to implementation, preserve all partial human PASS evidence, and require a
+  fresh independent validation route before AC-I1 can pass.
+
 ## Stage Report: ideation
 
 - DONE: Design a bounded cached/event-fed metadata architecture that removes every synchronous pane command, CWD, and scrollback call from the WASM hot path while preserving exact pane authority and degraded stale-state rendering.
