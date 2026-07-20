@@ -1136,3 +1136,57 @@ post-ready recipient-acknowledgment timeout back to implementation.** The
 human projection and exact-focus checks remain valid partial PASS evidence, but
 the live watcher did not survive a required same-tab pane interaction. No
 further captain action is authorized on this failed route. Crew, we love you.
+
+## Stage Report: implementation (cycle 5)
+
+- DONE: Rework recipient lifecycle so a transient missing `PaneUpdate` disarms
+  delivery only temporarily and the exact same tiled rail can re-arm without a
+  new `TabUpdate`, while moved, floating, replaced, ambiguous, or foreign rails
+  remain fail-closed.
+  Commit `79f53cd` retains the trusted stable-tab proof with a stale manifest
+  generation only during exact plugin omission; pipe admission remains closed
+  while `own_tab` is absent. Only the same plugin ID, URL, tiled state, and
+  display position refresh the generation. Unsafe identity or stable-tab
+  changes revoke proof and require a fresh complete `TabUpdate`. No synchronous
+  metadata API, poll, retry controller, or watcher-timeout relaxation was added.
+- DONE: Add deterministic event-sequence coverage for the rejected lifecycle.
+  RED `cargo test transient_missing_manifest_rearms_same_tiled_plugin_without_tab_update`
+  rejected the second snapshot after exact return. Red guard
+  `changed_tab_identity_during_missing_manifest_revokes_trusted_mapping` then
+  caught over-retention from stable tab `73` after the snapshot changed to
+  `74`. Both and the moved/floating/ambiguous/replacement/foreign matrix are
+  GREEN. Shared target `/Users/clkao/git/zaphod/target` passes Rust 85/85 plus
+  `cargo check --tests`.
+- DONE: Add the native same-tab `Alt p` plus exact-row-focus regression and prove
+  a later metadata snapshot is acknowledged while the watcher stays alive.
+  The isolated supported-runtime journey created exactly one same-tab ordinary
+  terminal with literal `Alt p`, preserved the rail at 28 columns, clicked the
+  visible session row back to its exact registered pane, rendered the later
+  `SMOKE_POST_PANE_ROW`, and kept both row and watcher alive for six seconds.
+  Exact result: `PASS: same-tab Alt p plus exact-row focus kept the watcher alive
+  through a later acknowledged metadata snapshot`.
+- DONE: Preserve the fixed-width, exact-pane, restart-empty, deadline,
+  isolation, and cleanup contracts plus the captain's partial live PASS.
+  Go tests/vet, shell syntax, fixture test, first-literal-`Alt p` fixed-width
+  creation, two-rail shared-token `1/1/0` with restart-empty/fresh recovery,
+  and the full metadata-congestion journey all pass. The congestion matrix
+  focuses exact `SMOKE_POST_PANE_ROW` through the fixed 28-column rail while
+  native metadata is held in flight, proves the one-second pane/tab deadlines,
+  and passes its early-release, owner-timeout, retained-evidence, and quiet-
+  cleanup negative controls. The prior human 5/5 projection and discriminating
+  terminal-40-to-terminal-38 row-focus PASS remain recorded unchanged above.
+- DONE: Run exact-tip and authoritative exact-range review before reporting.
+  Quick review `326` / job `350` passed head `79f53cd` with no issues. The
+  `code_completion` synthesis job `354` reviewed
+  `999ba8ab06af8c09a736aed98db21c0d70e341a0..79f53cdf7d8e97a64cc5a83fa87b96b245a631ae`;
+  correctness `351`, journey `352`, and proof `353` each ran once with
+  `done/P`, and synthesis returned PASS with no findings.
+
+### Summary
+
+The revision-15513 timeout came from discarding exact stable-tab proof during a
+transient manifest omission. Head `79f53cd` keeps the gap disarmed, re-arms only
+the trusted tiled rail, and revokes unsafe identity transitions. The fixed
+28-column demo survives same-tab pane creation, exact-row focus, and a later
+acknowledged snapshot with its watcher alive. Isolation, restart, timing, and
+cleanup remain green; it is ready for renewed captain validation.
