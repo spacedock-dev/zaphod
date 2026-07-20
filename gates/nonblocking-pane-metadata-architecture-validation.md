@@ -659,3 +659,33 @@ an AGENTS heading with exactly one top-level Codex row. If Codex instead shows a
 hook-trust prompt, report `TRUST PROMPT` and stop there. Otherwise report
 `PASS`, or `FAIL` with what differs. Do not send the task prompt or press pane
 keys yet.
+
+## Unique-URL Codex hook-trust checkpoint — expected consent boundary
+
+The captain reported verbatim:
+
+```text
+TRRUST PROMPT
+```
+
+The spelling is preserved exactly. This is classified as the expected
+first-run consent boundary for the checkout-local SessionStart hook, not as
+consent. It does not establish that the hook was trusted or ran, that a
+SessionStart reached the watcher, or that the rail rendered a session row.
+
+The exact hook source is
+`/Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture/.codex/hooks.json`;
+its SessionStart command is `scripts/zaphod-codex-session-hook.sh`. Codex records
+trust for the exact hook definition. Because this already-started process
+skipped the untrusted SessionStart hook, it must be exited after trust and a new
+Codex process must be started in the same watched terminal to exercise a fresh
+SessionStart.
+
+**Captain cue:** at the current Codex screen, open `/hooks` if the hook browser
+is not already open, select only the project-local hook from the exact source
+above with command `scripts/zaphod-codex-session-hook.sh`, and choose **Trust**.
+Then exit that Codex process and run `codex` again in the same terminal `38`.
+
+Expected visible result: the restarted Codex TUI opens in terminal `38` and the
+rail shows AGENTS with exactly one top-level Codex row. Report `PASS`, or `FAIL`
+with what differs, and stop. Do not send a task prompt or press pane keys yet.

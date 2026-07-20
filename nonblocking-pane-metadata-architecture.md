@@ -987,3 +987,21 @@ validator source is healthy and AC-I1 advances only to exact watcher startup.
 The unique watcher now passes both human and native readiness checkpoints and
 survives the former failure window with an acknowledged empty projection.
 AC-I1 advances to one real top-level Codex SessionStart and remains pending.
+
+## Stage Report: validation (cycle 15)
+
+- DONE: Record the captain's first-run hook-trust observation verbatim.
+  The captain reported `TRRUST PROMPT`; the spelling is preserved, and the observation is classified only as the expected consent boundary for the checkout-local hook.
+- DONE: Keep consent and session delivery explicitly unclaimed.
+  The report does not prove trust, hook execution, SessionStart delivery, or a rendered row; AC-I1 remains pending.
+- DONE: Identify the exact hook definition and required restart boundary.
+  The project-local source is the frozen worktree's `.codex/hooks.json`, and its SessionStart command is `scripts/zaphod-codex-session-hook.sh`; after explicitly trusting only that definition through `/hooks`, the already-started process must exit and a new `codex` must start in watched terminal `38`.
+- DONE: Return exactly one next captain action with a hard stop.
+  The sole cue covers exact-hook trust plus the required restart, expects AGENTS with exactly one top-level Codex row, and stops before any task prompt or pane key.
+
+### Summary
+
+The unique-tab journey reached the expected Codex first-run trust boundary.
+No consent or session delivery is inferred; AC-I1 advances only to explicit
+trust of the exact checkout-local hook and a fresh Codex start in terminal
+`38`.
