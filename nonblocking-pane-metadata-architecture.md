@@ -853,3 +853,65 @@ fixed width and empty AGENTS.
 The captain's missing AGENTS heading is the designed empty projection and
 passes this checkpoint. AC-I1 now advances to starting one real top-level Codex
 session in the watched terminal; no session-row result is claimed yet.
+
+## Stage Report: implementation (cycle 4)
+
+- DONE: Separate the transient AgentsView failure from the post-ready pipe
+  failure and reproduce the released path against an independently owned
+  source before editing product code.
+  PID `33838` remained the actual listener on `127.0.0.1:8080`: its API
+  returned HTTP 500 `sql: database is closed` during the rejected interval and
+  later recovered to HTTP 200. The isolated-root `agentsview serve status`
+  result described a different ownership root, so it never established that
+  PID `33838` was absent. Independent AgentsView v0.38.1 PID `68294` now owns
+  `127.0.0.1:18091`, serves HTTP 200 from the preserved isolated database, and
+  exposes the exact registered session. This proves the source can be healthy
+  while the recorded `revision=2037` failure remains a distinct recipient-
+  acknowledgment defect.
+- DONE: Add a red-first regression and the smallest authority-preserving fix
+  for post-ready metadata delivery after ordinary pane changes.
+  RED `cargo test harmless_manifest_refresh_keeps_exact_snapshot_recipient_live`
+  failed at `src/main.rs:2030` because `sidebar.pipe(...)` returned false after
+  a harmless same-tab `PaneUpdate`. Every `PaneUpdate` had incremented the
+  manifest generation and cleared `agent_recipient`; normal focus or pane
+  creation does not necessarily emit the later `TabUpdate` required to re-arm
+  it, so the watcher could report ready from its initial acknowledgment and
+  then lose every later snapshot acknowledgment. Commit `7bdb3d7` carries the
+  previously proved stable-tab recipient forward only while the same plugin ID
+  remains tiled at the same display position. Moved, floating, and missing
+  variants still clear admission and were added as an adversarial matrix.
+  No synchronous pane metadata call, poll, retry controller, layout mutation,
+  or alternate identity source was added.
+- DONE: Prove one stable, acknowledged, usable live journey and preserve every
+  accepted fixed-width, session, timing, restart, cleanup, and isolation
+  boundary.
+  Fresh `WORK` tab `5` loads head `7bdb3d7` as rail `plugin_41`; independently
+  owned watcher generation 2 is still live as PID `96455`, bound to terminal
+  `33`, and renders exact AgentsView session
+  `codex:019f7007-8fba-7503-8c44-5ebf9a7cc945` as one Codex row with the visible
+  summary `You totally got this. Ta`. After readiness and row delivery, another
+  ordinary pane was created and seven seconds elapsed beyond the former
+  timeout: the watcher and socket remained live, the row remained rendered,
+  and native inventory showed three selectable terminals beside one tiled rail
+  at `x=0,y=1,28x49`.
+  GREEN focused tests passed 2/2 and the Rust suite passed 82/82; `cargo check
+  --tests`, Go tests/vet, the two-rail `1/1/0` and restart-empty smoke, the
+  first-pane fixed-width smoke, and the full congestion journey all passed.
+  The latter focused `SMOKE_SECOND_ROW` onto exact pane `1` in 81 ms while
+  enrichment remained in flight, kept literal pane/tab actions within one
+  second, and completed the six-second quiet cleanup. Exact-tip quick parent
+  `293` passed. Authoritative `code_completion` parent `297` reviewed
+  `999ba8ab06af8c09a736aed98db21c0d70e341a0..7bdb3d7a5a07b45245b37ee44d80920f673041b4`;
+  correctness `294`, journey `295`, and proof `296` each ran once with
+  `done/P`, and the synthesis verdict is PASS with no findings.
+
+### Summary
+
+The source had one transient alive-but-unhealthy interval, but it was not the
+cause of the acknowledged post-ready pipe failure. Ordinary `PaneUpdate`
+events incorrectly discarded a still-valid exact rail recipient. Head
+`7bdb3d7` preserves that proof only across harmless same-rail refreshes and
+continues to fail closed for movement, floating, disappearance, stale stream,
+or foreign identity. The fresh 28-column live demo now holds one exact row and
+survives later pane creation with its independently owned source and watcher
+still running, so it is ready for renewed captain validation.
