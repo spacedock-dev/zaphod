@@ -436,3 +436,33 @@ observation. Standing KDL hashes remain `398ff6d6…be316` and
 **Captain cue:** look at the same rail now. Report `PASS` only if it is still
 visibly 28 columns wide and AGENTS is empty; otherwise report `FAIL` and what
 differs. Do not start Codex or press pane keys.
+
+## Replacement empty-state observation — captain PASS
+
+The captain reported that no AGENTS heading is visible. This is the expected
+empty state at frozen replacement head `b5a379f`, not a failure: `src/main.rs`
+renders the heading and its rows only inside `if !sessions.is_empty()`. With
+zero delivered sessions, the entire section intentionally has zero visual
+footprint.
+
+Supporting native state still records `plugin_38` at exactly 28 columns beside
+focused terminal `31`; watcher PID `47030`, its generation socket, and its
+AgentsView connection remain live. This instrumentation supports the state but
+does not replace the captain's observation.
+
+The focused terminal's current native CWD is `/Users/clkao/git/agentsview`, so
+the next command explicitly changes to the frozen task worktree before starting
+Codex. That ensures `.codex/hooks.json` loads the intended trusted SessionStart
+hook while preserving the direct-entry shell's watcher route.
+
+**Captain cue:** in the same focused terminal, run exactly:
+
+```bash
+cd /Users/clkao/git/zaphod/.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture && codex
+```
+
+Expected visible result: the Codex TUI opens in that same terminal and the rail
+shows an AGENTS heading with exactly one top-level Codex session row. If Codex
+instead shows a hook-trust prompt, report `TRUST PROMPT` and stop there. Otherwise
+report `PASS`, or `FAIL` with what differs. Do not send the task prompt or press
+pane keys yet.

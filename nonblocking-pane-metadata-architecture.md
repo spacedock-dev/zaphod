@@ -810,3 +810,20 @@ The short wrapper successfully started the exact watcher and its native route
 is healthy. Native geometry and the blank rail dump support the expected state,
 but AC-I1 remains pending the captain's post-readiness visual confirmation of
 fixed width and empty AGENTS.
+
+## Stage Report: validation (cycle 10)
+
+- DONE: Record the captain's empty-state observation exactly.
+  The captain reports no AGENTS heading is visible; no session row or other visual result is inferred.
+- DONE: Interpret the observation against the frozen render contract.
+  At `b5a379f`, `src/main.rs` wraps the AGENTS heading and rows in `if !sessions.is_empty()`, so zero delivered sessions intentionally hide the entire section.
+- DONE: Preserve native watcher and geometry support without substituting it for the captain.
+  Rail `plugin_38` remains exactly 28 columns beside focused terminal `31`; watcher PID `47030`, its generation socket, and AgentsView connection remain live.
+- DONE: Return exactly one next captain action from the correct project CWD.
+  Because terminal `31` currently reports CWD `/Users/clkao/git/agentsview`, the sole command changes to the frozen task worktree and starts `codex`; expected result is the TUI plus exactly one top-level Codex row, or a hook-trust prompt that must stop the sequence.
+
+### Summary
+
+The captain's missing AGENTS heading is the designed empty projection and
+passes this checkpoint. AC-I1 now advances to starting one real top-level Codex
+session in the watched terminal; no session-row result is claimed yet.
