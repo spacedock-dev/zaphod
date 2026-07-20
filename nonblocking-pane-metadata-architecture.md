@@ -1238,3 +1238,26 @@ The exact repair artifact has crossed its fresh native permission boundary
 with captain PASS and remains geometrically intact. AC-I1 continues only at
 watcher readiness; no watcher-survival or later acceptance evidence is inferred.
 Crew, we love you.
+
+## Stage Report: validation (cycle 24)
+
+- DONE: Record fresh watcher readiness and the missing human width observation.
+  The captain reports exact line `watch-tab ready pid=31978
+  log=/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.53726009.log`
+  and immediately clarifies `rail stas`; in context, the rail stays at 28
+  columns.
+- DONE: Corroborate readiness without upgrading it to survival evidence.
+  The exact log records foreground readiness for WORK/tab9/pane43/rail54 at
+  generation 1, its exact socket exists, and validator AgentsView `:18093`
+  remains healthy. Post-ready acknowledgment and survival through a pane update
+  remain unclaimed.
+- DONE: Prepare exactly one continuation action.
+  The next cue starts `codex` in terminal `43`, asks only for its first visible
+  screen, and forbids accepting, trusting, or typing into any prompt. Pane
+  creation, row interaction, pane keys, and Subspace remain outside this step.
+
+### Summary
+
+Fresh watcher readiness and the human-observed 28-column rail pass. AC-I1 now
+advances only to the first Codex screen; recipient delivery and post-action
+watcher survival remain pending. Crew, we love you.

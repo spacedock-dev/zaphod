@@ -968,3 +968,24 @@ has started.
 line and whether the rail remains 28 columns; report `FAIL` and what is visible
 if either condition is absent. Stop immediately after that report. Do not start
 Codex, create panes, click rows, press pane keys, or open Subspace yet.
+
+## Fresh 79f watcher-ready checkpoint — captain PASS
+
+The captain reports the exact line:
+
+```text
+watch-tab ready pid=31978 log=/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.53726009.log
+```
+
+The captain immediately clarified `rail stas`; in the context of the requested
+yes-or-no observation, this records that the rail stays at 28 columns. The
+exact watcher log records foreground readiness for `WORK`, stable tab `9`, pane
+`43`, rail `54`, and generation 1, and its exact socket exists. Validator
+AgentsView `:18093` remains healthy. This is watcher-readiness and visible-width
+evidence only; it does not yet claim post-ready recipient acknowledgment,
+watcher survival through a pane update, Codex delivery, or a rendered row.
+
+**Captain cue:** in the same terminal `43`, run exactly `codex`, then report
+what the first visible Codex screen shows and stop without accepting, trusting,
+or typing into any prompt. Do not create panes, click rows, press pane keys, or
+open Subspace yet.
