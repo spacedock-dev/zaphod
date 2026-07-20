@@ -557,3 +557,27 @@ KDL hashes remain `398ff6d6…be316` and `bb9e8e21…3980e`.
 to its right; otherwise report `FAIL` and what differs. Also report whether a
 permission prompt is visible. Do not approve anything, start the watcher or
 Codex, or press pane keys yet.
+
+## Unique-URL permission checkpoint — captain approval recorded
+
+The captain reported two human facts: the native permission prompt was visible
+in `Task 91 validator unique 7bdb3d7`, and they approved it exactly once. No
+28-column visual result, selected-terminal cardinality, prompt-closure result,
+or empty AGENTS observation is inferred from that report.
+
+Post-approval native state records stable tab `7`, unique-URL rail `plugin_47`
+at `x=0,y=1,28x58`, sole focused terminal `38` at
+`x=28,y=1,210x58`, and intact 238-column chrome. No validator watcher or socket
+is live, the targeted rail dump is zero bytes, and standing KDL hashes remain
+`398ff6d6…be316` and `bb9e8e21…3980e`. These facts support but do not replace the
+captain's view.
+
+Validator-owned AgentsView PID `33168` has stopped and port `18092` is no longer
+listening. It is not required for this visual-only checkpoint and will be
+restored before any watcher startup; no watcher or Codex action is authorized
+now.
+
+**Captain cue:** look at the same tab now. Report `PASS` only if one fixed
+28-column rail is visibly present at left, exactly one selected terminal is
+visible to its right, and no AGENTS heading is visible. Otherwise report `FAIL`
+and what differs. Do not start the watcher or Codex, or press pane keys.

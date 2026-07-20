@@ -936,3 +936,20 @@ fail-closed lifecycle proofs, adversarial refutation, and every preserved
 offline contract. A validator-owned source and unique frozen-artifact tab are
 stable at the first native permission checkpoint; AC-I1 remains pending the
 human TUI journey and no watcher readiness is claimed.
+
+## Stage Report: validation (cycle 12)
+
+- DONE: Record the captain's unique-URL permission facts without broadening them.
+  The captain reports the native prompt was visible in `Task 91 validator unique 7bdb3d7` and approved it exactly once; width, terminal cardinality, prompt closure, and empty AGENTS remain unclaimed.
+- DONE: Inspect post-approval native state without substituting it for the captain's view.
+  Stable tab `7` retains unique rail `plugin_47` at 28x58 beside sole focused terminal `38` at 210x58 with intact chrome, no validator watcher/socket, a zero-byte targeted rail dump, and unchanged standing KDL hashes.
+- DONE: Preserve the service dependency boundary before watcher startup.
+  Validator AgentsView PID `33168` has stopped and port `18092` is not listening; it is unnecessary for this visual-only checkpoint and must be restored before any later watcher action.
+- DONE: Return exactly one next captain observation.
+  The sole cue asks for the still-missing visible fixed 28-column rail, exactly one selected terminal, and absent AGENTS heading; watcher, Codex, and pane keys remain unauthorized.
+
+### Summary
+
+The captain has completed the one required native permission approval for the
+unique frozen-artifact rail. Native geometry remains exact, but AC-I1 advances
+only to the post-approval human visual checkpoint; no later state is claimed.
