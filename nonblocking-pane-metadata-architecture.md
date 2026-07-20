@@ -467,11 +467,13 @@ or redefine KJ's registry authority and session-incarnation decision.
   acknowledgment for `kind=metadata-snapshot`, targeted at session `WORK`, tab
   `4`, rail `38`, and the generation socket. The captain then observed no
   watcher process and no `AGENTS` row.
-- The disposable AgentsView service was also no longer running at inspection,
-  but the watcher had already received a post-ready revision and failed at the
-  plugin-pipe acknowledgment boundary. Separate source-lifetime setup from the
-  pipe failure before choosing a repair; do not label the latter as EOF or ask
-  the captain for another blind retry.
+- The captain identified the actual AgentsView process still alive as PID
+  `33838`, listening on `127.0.0.1:8080`. Direct API inspection then returned
+  HTTP 500, `counting sessions: sql: database is closed`; the earlier
+  disposable-data-root status had not described this live process. Classify
+  the source as alive-but-broken, not absent, and separate that invalid demo
+  dependency from the recorded plugin-pipe acknowledgment timeout before
+  choosing a repair. Do not ask the captain for another blind retry.
 - This blocks AC-I1 and the exact session-delivery value until a fresh normal
   journey keeps the watcher alive, positively acknowledges post-ready metadata,
   and renders one exact focusable row. Preserve the fixed-width repair,
