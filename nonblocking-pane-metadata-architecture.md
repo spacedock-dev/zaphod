@@ -1055,3 +1055,20 @@ check before any focus or timing action.
 
 The exact one-row marker projection passes human inspection. AC-I1 remains
 pending the isolated row-click focus check and all later timing/neighbor work.
+
+## Stage Report: validation (cycle 19)
+
+- DONE: Accept the captain's row-focus walkthrough correction.
+  With only non-selectable rail `47` and already-focused terminal `38`, the prior click cue could not distinguish exact routing from no action; it is withdrawn as a validation-design error, not product failure or routing PASS.
+- DONE: Preserve all earlier human PASS observations.
+  AGENTS appeared after the first real Codex message, exactly one top-level row with no extras visibly identifies `TASK91_CAPTAIN_REAL`, and rail width remains 28 columns.
+- DONE: Confirm the live pre-sequence native baseline.
+  Tab `7` still contains unique rail `plugin_47` at 28x58 and sole focused selectable terminal `38` at 210x58 running `codex` in the exact unique CWD; watcher PID `18396`, exact socket, and AgentsView connections remain live.
+- DONE: Replace the cue with one discriminating focus-away/click sequence.
+  The sole sequence creates and focuses one second ordinary terminal with `Alt n`, then clicks the marker row and expects focus to return to original terminal `38` while rail width and the single marker row remain stable; all other keys, clicks, and Subspace remain unauthorized.
+
+### Summary
+
+No row-action evidence is inferred from an already-focused one-terminal tab.
+AC-I1 remains pending a genuinely discriminating second-terminal click check
+and all subsequent timing/neighbor actions.

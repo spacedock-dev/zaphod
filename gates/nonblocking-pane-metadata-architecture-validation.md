@@ -781,3 +781,32 @@ Report `PASS` only if focus lands on or remains on the sole terminal immediately
 to the rail's right in the same unique tab—the Codex terminal `38`—with no tab
 switch and no floating pane; otherwise report `FAIL` with what received focus.
 Then stop. Do not click anything else, press pane keys, or open Subspace yet.
+
+## Unique-URL row-focus walkthrough correction — discriminating setup required
+
+The captain correctly identified that the preceding click cue is
+non-discriminating: current tab `7` contains only non-selectable rail
+`plugin_47` and selectable terminal `38`, which is already focused. A click
+that leaves terminal `38` focused cannot distinguish correct exact-row routing
+from no action at all.
+
+This is a validation walkthrough-design error, not a product failure and not
+PASS evidence for row action routing. No focusability or click-target result is
+recorded from the withdrawn cue. The prior human observations remain intact:
+AGENTS appeared after the first real Codex message, it contains exactly one
+top-level row with no extras, the row visibly identifies
+`TASK91_CAPTAIN_REAL`, and the rail remains 28 columns wide.
+
+Native state confirms the unchanged baseline: tab `7` has non-selectable
+unique rail `plugin_47` at `28x58` and sole focused selectable terminal `38` at
+`210x58`, running `codex` in the exact unique CWD. Watcher PID `18396`, its
+exact tab-7 socket, and validator AgentsView connections remain live. Creating
+one ordinary terminal with the existing `Alt n` binding is within AC-I1 and
+provides a distinct focus-away pane without changing session authority.
+
+**Captain cue:** press `Alt n` exactly once. Confirm the new second ordinary
+terminal becomes selected, then click the visible `TASK91_CAPTAIN_REAL` row
+exactly once. Report `PASS` only if the rail stays 28 columns with the same one
+marker row and focus moves from the new terminal back to the original Codex
+terminal `38` in the same tab; otherwise report `FAIL` with what differs. Then
+stop. Do not press any other pane key, click anything else, or open Subspace.
