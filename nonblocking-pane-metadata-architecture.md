@@ -1072,3 +1072,20 @@ pending the isolated row-click focus check and all later timing/neighbor work.
 No row-action evidence is inferred from an already-focused one-terminal tab.
 AC-I1 remains pending a genuinely discriminating second-terminal click check
 and all subsequent timing/neighbor actions.
+
+## Stage Report: validation (cycle 20)
+
+- DONE: Record the captain's rejection of `Alt n` as a second walkthrough-design correction.
+  Active locked mode maps `Alt n` to `NewTab`, so it would remove the visible tab-7 rail context; no product failure or visual result is inferred.
+- DONE: Resolve the precise same-tab ordinary-pane action from active configuration.
+  In the same locked mode, `Alt p` maps to `NewPane`, which creates a tiled ordinary terminal inside active tab `7` without a plugin permission prompt.
+- DONE: Preserve prior visual evidence and current route scope.
+  AGENTS appearance, exact one-row/no-extra cardinality, visible `TASK91_CAPTAIN_REAL` identity, 28-column width, rail `47`, and original Codex terminal `38` remain intact.
+- DONE: Return one discriminating same-tab focus-away/click sequence.
+  The sole sequence uses one `Alt p`, confirms a selected second tiled terminal beside the still-visible rail, then clicks the marker row and expects exact focus back on terminal `38`; other keys, clicks, and Subspace remain unauthorized.
+
+### Summary
+
+The invalid new-tab sequence is withdrawn. AC-I1 remains pending the precise
+same-tab `Alt p` pane creation and exact-row focus result; no outcome from that
+sequence is inferred in advance.

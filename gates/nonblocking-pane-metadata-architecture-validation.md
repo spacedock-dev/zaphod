@@ -810,3 +810,27 @@ exactly once. Report `PASS` only if the rail stays 28 columns with the same one
 marker row and focus moves from the new terminal back to the original Codex
 terminal `38` in the same tab; otherwise report `FAIL` with what differs. Then
 stop. Do not press any other pane key, click anything else, or open Subspace.
+
+## Unique-URL same-tab pane correction — use locked-mode Alt p
+
+The captain correctly rejected the preceding `Alt n` sequence: in this setup
+the active locked-mode binding maps `Alt n` to `NewTab`, which would move to a
+new terminal context without the tab-7 rail and could not validate same-tab row
+focus. This is another validation walkthrough-design error, not a product
+failure. The withdrawn sequence produced no visual or routing result.
+
+Inspection of the active Zellij configuration provides the precise compatible
+action: within the same locked mode, `Alt p` maps to `NewPane`, while `Alt n`
+maps to `NewTab`. `NewPane` creates an ordinary tiled terminal in the active tab
+and does not load a plugin, so it adds no permission prompt. Current native
+state still contains tab-7 rail `plugin_47` at 28 columns and original Codex
+terminal `38`; the prior human AGENTS appearance, exact one-row cardinality,
+`TASK91_CAPTAIN_REAL` identity, and width PASSes remain preserved.
+
+**Captain cue:** in current unique tab `7`, press `Alt p` exactly once. Confirm
+a second ordinary tiled terminal appears in the same tab and is selected while
+rail `47` remains visible, then click the visible `TASK91_CAPTAIN_REAL` row
+exactly once. Report `PASS` only if focus moves from the new terminal back to
+the original Codex terminal `38`, with the rail still 28 columns and the same
+single marker row; otherwise report `FAIL` with what differs. Then stop. Do not
+press any other pane key, click anything else, or open Subspace.
