@@ -1282,3 +1282,27 @@ watcher survival remain pending. Crew, we love you.
 The fresh Codex process is paused at an observed two-part trust boundary. AC-I1
 advances only through exact checkout trust and exact hook trust, in that order;
 no trust acceptance or delivery result is inferred. Crew, we love you.
+
+## Stage Report: validation (cycle 26)
+
+- DONE: Record the captain's ordered trust PASS without inferring a session row.
+  The captain reports `there`: the main Codex prompt appeared after approving
+  exact work-directory trust first and exact checkout-local hook trust second.
+  No first message was entered.
+- FAILED: Preserve the required post-ready recipient acknowledgment and watcher.
+  Before a first message was authorized, the exact fresh watcher log ended at
+  revision `506` with a five-second `metadata-snapshot` acknowledgment timeout
+  for WORK/tab9/rail54. Its exact socket is absent. Validator AgentsView
+  `:18093` still responds, so source-listener downtime does not explain the
+  watcher exit.
+- SKIPPED: Enter a first real message or continue to session-row, pane,
+  Subspace, restart, and cleanup checks.
+  The hard watcher failure invalidates further evidence on this route.
+
+### Summary
+
+**Verdict: AC-I1 FAIL. Recommendation: REJECTED; route the revision-506
+post-ready recipient-acknowledgment timeout back to implementation.** Human
+permission, readiness/width, and ordered trust PASSes remain valid partial
+evidence. No first-message text or further live action is authorized on the
+failed route. Crew, we love you.

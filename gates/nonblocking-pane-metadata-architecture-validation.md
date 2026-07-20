@@ -1011,3 +1011,38 @@ the next prompt identifies that checkout's exact `.codex/hooks.json` /
 visible and report `PASS`; otherwise report `FAIL` and the exact unexpected
 prompt. Do not enter a task, create panes, click rows, press pane keys, or open
 Subspace yet.
+
+## Fresh 79f trust PASS — pre-message watcher hard failure
+
+The captain reports `there`: the main Codex prompt appeared after approving the
+specified work-directory prompt first and the exact checkout-local hook prompt
+second. This is human PASS for the ordered trust boundary only. No first message
+was entered, and no session row is inferred.
+
+Before authorizing a first message, the exact fresh watcher log was audited. It
+ends:
+
+```text
+metadata delivery failed phase=post-ready revision=506 session=WORK tab=9 rail=54 socket=/tmp/zaphod-watch-tab-v1-501/w-pklLprE-Ure7J3-BsMiZQK1wtuMsfWuhpa8rROje0lw.sock: pipe timeout after 5s without recipient acknowledgment: kind=metadata-snapshot
+```
+
+The exact socket is absent. Validator AgentsView `:18093` still responds, so
+the route cannot attribute this failure to the source listener being down. The
+watcher failed on the required post-ready rail acknowledgment before any real
+Codex message. Watcher survival and post-ready recipient acknowledgment are
+mandatory AC-I1 evidence.
+
+### AC-I1 repair checkpoint disposition
+
+- Human native permission: **PASS**.
+- Human watcher-ready line and 28-column width: **PASS**.
+- Ordered work-directory and exact-hook trust to main prompt: **PASS**.
+- First real message / fresh session row: **NOT RUN**.
+- Post-ready recipient acknowledgment and watcher survival: **FAIL** at
+  revision `506`.
+- Later pane, Subspace, restart, and cleanup actions: **NOT RUN** after the hard
+  failure.
+
+**Verdict: AC-I1 FAIL; validation recommends REJECTED and feedback routing to
+implementation.** Do not enter a first message or take any further live action
+on this failed route.
