@@ -970,3 +970,20 @@ only to the post-approval human visual checkpoint; no later state is claimed.
 The current unique frozen-artifact tab passes its complete post-permission
 visual checkpoint. Prior-tab stale state is isolated and not overclaimed; the
 validator source is healthy and AC-I1 advances only to exact watcher startup.
+
+## Stage Report: validation (cycle 14)
+
+- DONE: Record the captain's exact unique-watcher readiness output and post-start visual result.
+  Human output was `watch-tab ready pid=18396 log=/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.2004140966.log`; the captain separately confirms the current rail remains visibly 28 columns and AGENTS remains empty before SessionStart.
+- DONE: Confirm native watcher, socket, source, and empty projection support beyond the old timeout.
+  PID `18396` owns the byte-verified unique binary, exact tab-7 socket, and established port-18092 source connection; generation 2 binds WORK/tab `7`/terminal `38`/rail `47` and remained live for 81 seconds without post-ready error, beyond the former five-second acknowledgment failure.
+- DONE: Preserve exact current native geometry without replacing human observation.
+  Unique rail `plugin_47` remains 28x58 beside sole focused terminal `38` at 210x58 with intact chrome; the targeted rail dump is zero bytes.
+- DONE: Return exactly one real-session action.
+  The sole cue starts `codex` in the selected watched terminal and expects one top-level Codex row; a hook-trust prompt must be reported without proceeding, and no task prompt or pane keys are authorized yet.
+
+### Summary
+
+The unique watcher now passes both human and native readiness checkpoints and
+survives the former failure window with an acknowledged empty projection.
+AC-I1 advances to one real top-level Codex SessionStart and remains pending.

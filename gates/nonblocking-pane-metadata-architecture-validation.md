@@ -619,3 +619,43 @@ Expected visible result: `watch-tab ready pid=… log=…`, the rail remains fix
 at 28 columns, and no AGENTS heading appears before SessionStart. Report `PASS`
 or `FAIL` with the exact command output, then stop. Do not start Codex or press
 pane keys.
+
+## Unique-URL watcher checkpoint — captain PASS
+
+The captain ran the short health-checked wrapper and reported exact successful
+output:
+
+```text
+watch-tab ready pid=18396 log=/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.2004140966.log
+```
+
+The captain separately reported PASS for the post-watcher view: the current
+unique-tab rail remains visibly fixed at 28 columns and AGENTS remains empty
+before SessionStart. This human result is not inferred from native geometry.
+
+Independent support confirms PID `18396` owns the byte-verified unique native
+binary, holds Unix socket
+`/tmp/zaphod-watch-tab-v1-501/w-qigSzMFVOGxOc7KEKsze3iSRYwSHcVCjIn-Cq9zCj0c.sock`,
+and has an established connection to validator AgentsView on port `18092`.
+The readiness log binds generation `generation-00000000000000000002` to
+session `WORK`, tab `7`, terminal `38`, and rail `47`. At the final check it had
+remained live for 81 seconds after the readiness log timestamp, with no
+post-ready delivery error; this exceeds the former five-second acknowledgment
+failure window and supports successful empty projection acknowledgment.
+
+Native inventory still records unique rail `plugin_47` at
+`x=0,y=1,28x58`, sole focused terminal `38` at `x=28,y=1,210x58`, and intact
+chrome. The targeted rail dump is zero bytes. This supports, but does not
+replace, the captain's visible empty-state PASS.
+
+**Captain cue:** in the same selected terminal, run exactly:
+
+```bash
+codex
+```
+
+Expected visible result: the Codex TUI opens in terminal `38` and the rail shows
+an AGENTS heading with exactly one top-level Codex row. If Codex instead shows a
+hook-trust prompt, report `TRUST PROMPT` and stop there. Otherwise report
+`PASS`, or `FAIL` with what differs. Do not send the task prompt or press pane
+keys yet.
