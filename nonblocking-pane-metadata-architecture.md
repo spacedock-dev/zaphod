@@ -1,7 +1,7 @@
 ---
 id: 91f2dxkn3v7fe1174ayj48j5
 title: Remove synchronous pane metadata calls from the plugin hot path
-status: validation
+status: implementation
 source: live nautical-cuckoo congestion diagnosis 2026-07-14
 sprint: s1-managed-tab-safety
 group: architecture-hardening
@@ -456,6 +456,27 @@ or redefine KJ's registry authority and session-incarnation decision.
 - Preserve exact-pane session authority, the per-tab restart-empty contract,
   nonblocking metadata behavior, inert former-toggle inputs, native fullscreen,
   standing-root isolation, and the separate non-blocking header-label task.
+
+#### Cycle 2 — 2026-07-20 — post-ready metadata delivery kills watcher
+
+- In the fresh repaired live tab, the captain started the supplied wrapper and
+  observed `watch-tab ready pid=47030`; rail `plugin_38` remained 28 columns
+  and the empty projection correctly hid the `AGENTS` section.
+- Before a usable session row appeared, PID `47030` exited. Its owned log
+  records revision `2037` failing after five seconds without a recipient
+  acknowledgment for `kind=metadata-snapshot`, targeted at session `WORK`, tab
+  `4`, rail `38`, and the generation socket. The captain then observed no
+  watcher process and no `AGENTS` row.
+- The disposable AgentsView service was also no longer running at inspection,
+  but the watcher had already received a post-ready revision and failed at the
+  plugin-pipe acknowledgment boundary. Separate source-lifetime setup from the
+  pipe failure before choosing a repair; do not label the latter as EOF or ask
+  the captain for another blind retry.
+- This blocks AC-I1 and the exact session-delivery value until a fresh normal
+  journey keeps the watcher alive, positively acknowledges post-ready metadata,
+  and renders one exact focusable row. Preserve the fixed-width repair,
+  restart-empty contract, nonblocking action deadlines, cleanup, standing-root
+  isolation, and the separate header-label follow-up.
 
 ## Stage Report: ideation
 
