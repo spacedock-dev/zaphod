@@ -1022,3 +1022,20 @@ trust of the exact checkout-local hook and a fresh Codex start in terminal
 The reported empty pre-prompt rail is real but was judged against a premature
 checkpoint. It is a validation-ordering defect, not a product rejection.
 AC-I1 remains pending the marker-prompt enrichment and all later live actions.
+
+## Stage Report: validation (cycle 17)
+
+- DONE: Record the captain's marker-prompt section observation without broadening it.
+  The captain reported `I see AGENTS now`; this establishes only that the AGENTS section appeared, not row cardinality, identity, focusability, or pane binding.
+- DONE: Confirm exact source identity and persisted marker support.
+  Validator AgentsView and the local Codex session file agree on session `codex:019f7ee7-672a-7a72-9726-ecf1e0a4ce35`, exact unique CWD, agent `codex`, and the full `TASK91_CAPTAIN_REAL` first message.
+- DONE: Recheck the live exact route without substituting native support for vision.
+  Watcher PID `18396`, its tab-7 socket and AgentsView connections remain live with no post-ready log error; unique rail `plugin_47` remains 28x58 beside sole focused selectable terminal `38` running `codex` in the exact unique CWD.
+- DONE: Return exactly one next captain observation before interaction.
+  The sole cue asks for one top-level Codex row, no additional rows, and visible marker identity; click, pane keys, and Subspace remain unauthorized.
+
+### Summary
+
+The marker prompt made the AGENTS section appear and exact source support is
+coherent. AC-I1 remains pending the human row-cardinality and marker-identity
+check before any focus or timing action.

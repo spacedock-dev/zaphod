@@ -728,3 +728,36 @@ Expected visible result: AgentsView records that exact Codex session and the
 same tab-7 rail shows AGENTS with exactly one top-level Codex row for terminal
 `38`, carrying the `TASK91_CAPTAIN_REAL` identity/summary. Report `PASS`, or
 `FAIL` with what differs, and stop. Do not press pane keys or open Subspace yet.
+
+## Unique-URL marker enrichment checkpoint — AGENTS section observed
+
+After sending the exact marker prompt, the captain reported verbatim:
+
+```text
+I see AGENTS now
+```
+
+This is a human PASS only for appearance of the AGENTS section. It does not
+establish exact row count, visible row identity or summary, focusability, or
+terminal binding.
+
+Supporting source state now serves exact session
+`codex:019f7ee7-672a-7a72-9726-ecf1e0a4ce35` with CWD
+`.task91-validator-entry-7b`, first message
+`TASK91_CAPTAIN_REAL: inspect README.md without edits, then wait.`, and agent
+`codex`. The local Codex session file carries the same session ID, exact CWD,
+and first user message.
+
+Watcher PID `18396` still owns the exact tab-7 socket and has established
+connections to validator AgentsView on port `18092`; its log retains the
+generation-2 binding to `WORK`/tab `7`/pane `38`/rail `47` with no post-ready
+error. Native inventory records unique rail `plugin_47` at `28x58` beside the
+sole focused selectable terminal `38` at `210x58`; that terminal runs `codex`
+in the exact unique CWD. These facts support the route but do not replace the
+remaining visual observation.
+
+**Captain cue:** look only at the AGENTS section in the current unique tab.
+Report `PASS` only if it contains exactly one top-level Codex row, no additional
+rows, and the visible row text identifies the `TASK91_CAPTAIN_REAL` marker;
+otherwise report `FAIL` with the row count and visible text. Do not click the
+row, press pane keys, or open Subspace yet.
