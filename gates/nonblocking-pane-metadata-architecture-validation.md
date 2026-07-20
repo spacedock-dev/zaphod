@@ -989,3 +989,25 @@ watcher survival through a pane update, Codex delivery, or a rendered row.
 what the first visible Codex screen shows and stop without accepting, trusting,
 or typing into any prompt. Do not create panes, click rows, press pane keys, or
 open Subspace yet.
+
+## Fresh 79f Codex trust boundary — captain observation
+
+The captain reports that the first visible Codex screen presents `trust work
+dir, trust hooks`. This is a visual observation only. It does not establish
+workspace trust, hook trust, hook execution, SessionStart delivery, a rendered
+row, or watcher survival.
+
+The frozen checkout remains exact head `79f53cd`. Its project-local hook file
+is exactly `.task91-validator-entry-79f/.codex/hooks.json`; it declares only a
+`SessionStart` command for `startup|resume` at
+`scripts/zaphod-codex-session-hook.sh`. The watcher log still contains only its
+foreground-ready record and its exact socket remains present; no later result
+is inferred from those read-only facts.
+
+**Captain cue:** approve the work-directory trust prompt for the exact
+`.task91-validator-entry-79f` checkout first. Then approve hook trust only if
+the next prompt identifies that checkout's exact `.codex/hooks.json` /
+`scripts/zaphod-codex-session-hook.sh`. Stop as soon as the main Codex prompt is
+visible and report `PASS`; otherwise report `FAIL` and the exact unexpected
+prompt. Do not enter a task, create panes, click rows, press pane keys, or open
+Subspace yet.

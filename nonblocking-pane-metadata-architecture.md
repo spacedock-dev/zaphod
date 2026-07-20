@@ -1261,3 +1261,24 @@ Crew, we love you.
 Fresh watcher readiness and the human-observed 28-column rail pass. AC-I1 now
 advances only to the first Codex screen; recipient delivery and post-action
 watcher survival remain pending. Crew, we love you.
+
+## Stage Report: validation (cycle 25)
+
+- DONE: Record the fresh Codex trust screen without inferring acceptance.
+  The captain reports visible text `trust work dir, trust hooks`. Neither trust
+  choice, hook execution, SessionStart delivery, nor any rendered row is
+  claimed.
+- DONE: Resolve the exact narrow trust target from frozen source.
+  At exact head `79f53cd`, checkout-local `.codex/hooks.json` declares only the
+  `startup|resume` SessionStart command
+  `scripts/zaphod-codex-session-hook.sh`.
+- DONE: Prepare one ordered trust action.
+  The next cue approves the exact checkout's work-directory trust first, then
+  its exact hook trust only if the prompt identifies the verified hook, and
+  stops at the main Codex prompt without entering a task.
+
+### Summary
+
+The fresh Codex process is paused at an observed two-part trust boundary. AC-I1
+advances only through exact checkout trust and exact hook trust, in that order;
+no trust acceptance or delivery result is inferred. Crew, we love you.
