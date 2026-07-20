@@ -1,6 +1,6 @@
 # Validation: Remove synchronous pane metadata calls from the plugin hot path
 
-Frozen code head: `b5a379f5ef32d7b92effb219631c286dd7d41185`
+Frozen code head: `7bdb3d7a5a07b45245b37ee44d80920f673041b4`
 Merge base: `999ba8ab06af8c09a736aed98db21c0d70e341a0`
 Implementation worktree: `.worktrees/spacedock-ensign-nonblocking-pane-metadata-architecture`
 
@@ -10,19 +10,20 @@ was used only for negative correctness tests and was removed afterward.
 
 ## Recommendation
 
-**REPLACEMENT OFFLINE PASS — RESTART AC-I1 WITH A FRESH TAB.** AC-O1 through
-AC-O6 pass independent reproduction at `b5a379f`, including the passive
-fixed-width repair. The interactive floating-TUI observation remains pending
-for the captain and is not inferred from the offline harnesses.
+**RECIPIENT REPAIR OFFLINE PASS — RESTART AC-I1 IN VALIDATOR TAB 7.** AC-O1
+through AC-O6 pass independent reproduction at `7bdb3d7`, including the
+post-ready recipient repair and passive fixed-width boundary. The interactive
+floating-TUI observation remains pending for the captain and is not inferred
+from the offline harnesses.
 
 ## Frozen review integrity
 
-- Worktree `HEAD` is the required `b5a379f5ef32d7b92effb219631c286dd7d41185`;
+- Worktree `HEAD` is the required `7bdb3d7a5a07b45245b37ee44d80920f673041b4`;
   `merge-base(main, HEAD)` is `999ba8ab06af8c09a736aed98db21c0d70e341a0`.
-- Synthesis `239` names `code_completion`, exact range
-  `999ba8a..b5a379f`, status `done`, verdict `P`, and retry count zero.
-- Required members appear exactly once: correctness `236`, journey `237`,
-  and proof `238`. Each covers the same exact range, is `done/P`, and has
+- Synthesis `297` names `code_completion`, exact range
+  `999ba8a..7bdb3d7`, status `done`, verdict `P`, and retry count zero.
+- Required members appear exactly once: correctness `294`, journey `295`,
+  and proof `296`. Each covers the same exact range, is `done/P`, and has
   retry count zero. The parent output is `No issues found.`
 
 ## Offline AC verdicts
@@ -466,3 +467,93 @@ shows an AGENTS heading with exactly one top-level Codex session row. If Codex
 instead shows a hook-trust prompt, report `TRUST PROMPT` and stop there. Otherwise
 report `PASS`, or `FAIL` with what differs. Do not send the task prompt or press
 pane keys yet.
+
+## Recipient repair independent revalidation — offline PASS
+
+Frozen head `7bdb3d7a5a07b45245b37ee44d80920f673041b4` and merge base
+`999ba8ab06af8c09a736aed98db21c0d70e341a0` were identity-checked before and
+after validation. Stored `code_completion` parent `297` is `done/P`, retry
+zero, on exact range `999ba8a..7bdb3d7`; correctness `294`, journey `295`, and
+proof `296` each appear exactly once at `done/P`, retry zero, with no unresolved
+material finding.
+
+Independent execution passed:
+
+- A clean isolated Rust target with sccache disabled passed 82/82 and
+  `cargo check --tests`. The new harmless-refresh positive and
+  moved/floating/missing negative tests ran in the full suite alongside foreign
+  token/tab/rail and exact lifecycle matrices.
+- Fresh uncached `go test -count=1 ./...` plus `go vet ./...` passed the bounded
+  scheduler, cancellation, cache, source, and watcher matrices.
+- `zellij-two-rail-recipient-smoke-test.sh` passed exact `1/1/0`, exact row
+  focus, foreign/child/history exclusion, stale retention, restart-empty,
+  fresh SessionStart recovery, zero idle native polls, and host isolation.
+- `zellij-fixed-width-pane-creation-test.sh` kept the first literal `Alt p` at
+  exact width 28. `zellij-pane-metadata-congestion-test.sh` kept the later
+  ordinary pane additions at 28, focused the delivered exact row, held native
+  enrichment across every sub-one-second pane/tab action, and passed fullscreen,
+  negative timing controls, six-second quiet cleanup, and owned-state removal.
+- The 13-case entry suite, explicit native permission exposure, retired-host-call
+  docs check, and stress-evidence suite all passed. The latter retained bounded
+  evidence for forced failure, native hang, vanished startup, and inconclusive
+  cleanup probes without claiming absence.
+
+The throwaway clone attacked both sides of the recipient boundary. Restoring
+unconditional recipient clearing made
+`harmless_manifest_refresh_keeps_exact_snapshot_recipient_live` fail at its
+post-PaneUpdate snapshot assertion with status 101. Over-retaining the recipient
+alone did not bypass the downstream current-position/floating guards; after
+also removing those live guards,
+`moved_floating_or_missing_rail_still_disarms_snapshot_recipient` failed at its
+rejection assertion with status 101. The committed narrow carry-forward plus
+downstream exact-state checks survived both attacks. The clone was removed.
+
+## Validator-owned live handoff — first captain checkpoint
+
+AgentsView v0.38.1 PID `33168` owns disposable root
+`.task91-validator-agentsview`, listens only on `127.0.0.1:18092`, and serves
+the exact-session API successfully. It is independent of implementer PIDs
+`68294` and `96455`.
+
+Stable proof tab `6` contained tiled rail `plugin_44` at `x=0,y=1,28x49`
+beside selected terminal `36` at `x=28,y=1,153x49`. Validator watcher
+generation 1, PID `48779`, accepted one
+exact SessionStart after an ordinary second terminal was created and remained
+live with its socket and healthy exact source for seven seconds beyond the old
+five-second acknowledgment timeout. The rail stayed 28 columns. The extra
+terminal and generation-1 watcher were then removed.
+
+That tab was not used for captain handoff. After watcher restart, validation
+renamed the tab post-readiness; a later source revision then failed with the
+exact retained log:
+
+```text
+metadata delivery failed phase=post-ready revision=166 session=WORK tab=6 rail=44 socket=/tmp/zaphod-watch-tab-v1-501/w-DYEBPjdEYsYwX2L_ugtK4_pa56RLmnEU6d99Tv9Eh1o.sock: pipe timeout after 5s without recipient acknowledgment: kind=metadata-snapshot
+```
+
+The failed watcher PID `64271` exited and removed its socket while the source
+remained HTTP 200 and the rail stayed 28 columns. Because that setup also reused
+the file URL loaded by prior live heads and introduced a post-ready rename not
+present in the required harmless-PaneUpdate proof, it cannot establish either
+the current-head handoff or a current-head product rejection. Validation
+retired tab `6` and preserved the log at
+`/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.1289599368.log`
+
+Validation copied the frozen artifacts byte-for-byte into a unique checkout
+path. The unique WASM SHA-256 is
+`64140a1249c5d53c632abfd9ffe5e1f5feca8062b04fd928a9b547043649ee64`;
+the native binary SHA-256 is
+`26b0c63e590131255e8499349d8961d7de41355642c5c14af85241b9397739be`.
+Fresh stable tab `7`, renamed before watcher startup to
+`Task 91 validator unique 7bdb3d7`, now contains exact unique-URL rail
+`plugin_47` at `x=0,y=1,28x49` beside selected terminal `38` at
+`x=28,y=1,153x49`. Its watcher launcher failed closed before readiness with
+`recipient-ready timeout for stable tab 7`, the expected ungranted native
+permission boundary for this new URL. No watcher or socket remains. Standing
+KDL hashes remain `398ff6d6…be316` and `bb9e8e21…3980e`.
+
+**Captain cue:** open `Task 91 validator unique 7bdb3d7` and only look. Report
+`PASS` if one fixed 28-column rail is visible at left with one selected terminal
+to its right; otherwise report `FAIL` and what differs. Also report whether a
+permission prompt is visible. Do not approve anything, start the watcher or
+Codex, or press pane keys yet.

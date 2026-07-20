@@ -5,10 +5,10 @@ gate:
   entity: nonblocking-pane-metadata-architecture
   entity-title: Remove synchronous pane metadata calls from the plugin hot path
   stage: validation
-  round: 1
+  round: 3
 recommendation:
   verdict: PENDING_CAPTAIN
-  rationale: "AC-O1 through AC-O6 independently pass at replacement head b5a379f with exact-range code_completion parent 239, including the passive fixed-width pane-addition repair. AC-I1 restarts in a fresh tab."
+  rationale: "AC-O1 through AC-O6 independently pass at recipient-repair head 7bdb3d7 with exact-range code_completion parent 297. Harmless post-ready PaneUpdate retains the exact tiled recipient; moved, floating, missing, and foreign variants still fail closed. AC-I1 restarts at the native permission checkpoint in validator-owned unique-URL tab 7."
 artifact:
   kind: draft
   path: ./nonblocking-pane-metadata-architecture-validation.md
@@ -24,7 +24,7 @@ criteria:
       evidence: "PASS: fixed 28-column exact-row focus, literal action deadlines, held barrier, negative controls, and quiet window reproduced."
     - id: AC-O2
       text: WASM performs no synchronous pane metadata lookup.
-      evidence: "PASS: Rust 80/80 includes zero-forbidden-call, permission, source, and every handler-path matrix."
+      evidence: "PASS: isolated Rust 82/82 includes zero-forbidden-call, exact recipient refresh, fail-closed lifecycle, permission, source, and every handler-path matrix."
     - id: AC-O3
       text: Scheduling, cancellation, and cache size stay bounded.
       evidence: "PASS: fresh uncached Go coordinator suite and vet passed."
@@ -42,9 +42,9 @@ criteria:
       evidence: "PENDING: exact captain-live script is in the validation artifact; no interactive observation is claimed."
 ---
 
-Replacement head `b5a379f` passes every independently reproducible offline
-criterion, the passive-swap negative controls, and the exact-range review
-integrity check. Present the linked artifact and restart its AC-I1 script in
-the fresh replacement tab. The decision log must record the real interactive
-result; offline harness evidence is not a substitute for the captain's TUI
-observation.
+Recipient-repair head `7bdb3d7` passes every independently reproducible
+offline criterion, adversarial under/over-retention controls, the passive-swap
+width boundary, and the exact-range review integrity check. Present the linked
+artifact and restart AC-I1 in validator-owned stable tab `7`. The decision log
+must record the real interactive result; offline harness evidence is not a
+substitute for the captain's TUI observation.

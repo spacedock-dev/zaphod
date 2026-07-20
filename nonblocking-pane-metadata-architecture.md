@@ -915,3 +915,24 @@ continues to fail closed for movement, floating, disappearance, stale stream,
 or foreign identity. The fresh 28-column live demo now holds one exact row and
 survives later pane creation with its independently owned source and watcher
 still running, so it is ready for renewed captain validation.
+
+## Stage Report: validation (cycle 11)
+
+- DONE: Verify frozen head and authoritative exact-range review integrity.
+  Head `7bdb3d7`, merge base `999ba8a`, synthesis `297`, and members correctness `294`, journey `295`, proof `296` were verified directly on exact range `999ba8a..7bdb3d7`; all are `done/P`, retry zero, members occur once, and no material finding remains.
+- DONE: Independently prove harmless post-ready refresh stays live while adjacent recipient states fail closed.
+  Isolated Rust passed 82/82 plus check; exact two-rail and full congestion journeys passed live exact-row focus and post-ready ordinary pane creation. Moved/floating/missing/foreign matrices rejected delivery. Under-retention and over-retention-without-live-guards mutations each failed the targeted assertion with status 101.
+- DONE: Preserve the accepted width, timing, restart, cleanup, and isolation boundaries.
+  First and later literal pane additions stayed at width 28; all measured pane/tab actions completed under one second during held enrichment; restart-empty/fresh recovery, six-second quiet cleanup, permission, entry, docs, Go/vet, and retained failure-evidence suites passed.
+- DONE: Prepare a validator-owned live source and unique-artifact tab without using implementer-owned evidence.
+  AgentsView v0.38.1 PID `33168` at `127.0.0.1:18092` and proof tab `6` independently kept watcher PID `48779` plus its socket live seven seconds after post-ready PaneUpdate and exact delivery. A restarted watcher later failed after a validator post-ready rename on the previously used URL; its log is retained and tab `6` was retired rather than handed off. Frozen artifacts were copied byte-identically to a unique URL, and fresh tab `7` now has rail `plugin_47` at 28x49 beside selected terminal `38`; watcher startup correctly stops at the new URL's ungranted native permission boundary.
+- SKIPPED: Claim the first fresh-tab visual result or any later AC-I1 action.
+  Validation stops with exactly one captain look at width, selected-terminal cardinality, empty AGENTS projection, and permission-prompt visibility; no consent, Codex, Subspace, or pane keys are authorized yet.
+
+### Summary
+
+Recipient-repair head `7bdb3d7` passes exact review, independent positive and
+fail-closed lifecycle proofs, adversarial refutation, and every preserved
+offline contract. A validator-owned source and unique frozen-artifact tab are
+stable at the first native permission checkpoint; AC-I1 remains pending the
+human TUI journey and no watcher readiness is claimed.
