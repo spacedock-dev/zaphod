@@ -834,3 +834,48 @@ exactly once. Report `PASS` only if focus moves from the new terminal back to
 the original Codex terminal `38`, with the rail still 28 columns and the same
 single marker row; otherwise report `FAIL` with what differs. Then stop. Do not
 press any other pane key, click anything else, or open Subspace.
+
+## Unique-URL discriminating row click — human PASS, native AC-I1 FAIL
+
+The captain reports that `Alt p` created and selected a second tiled terminal
+inside the current unique tab, and clicking the visible
+`TASK91_CAPTAIN_REAL` row successfully switched focus back to the original
+Codex pane. This is a human visual PASS for exact row action routing.
+
+The prior human results remain accepted: the rail is 28 columns wide; AGENTS
+appears only after the first real Codex message; it contains exactly one
+top-level `TASK91_CAPTAIN_REAL` row and no additional rows. Post-action native
+inventory corroborates the focus transition boundary: tab `7` contains rail
+`plugin_47` at `28x58`, focused original Codex terminal `38`, and second
+ordinary tiled terminal `40` in the same tab.
+
+However, the preserved watcher subsequently failed the required same-tab pane
+interaction. PID `18396` is no longer live, its exact tab-7 socket is absent,
+and its log now ends with:
+
+```text
+metadata delivery failed phase=post-ready revision=15513 session=WORK tab=7 rail=47 socket=/tmp/zaphod-watch-tab-v1-501/w-qigSzMFVOGxOc7KEKsze3iSRYwSHcVCjIn-Cq9zCj0c.sock: pipe timeout after 5s without recipient acknowledgment: kind=metadata-snapshot
+```
+
+Validator AgentsView on port `18092` was also unavailable at the final audit,
+so the live drill cannot safely continue. That source outage does not erase the
+separate terminal watcher failure: the watcher exited specifically on a
+post-ready rail metadata-snapshot acknowledgment timeout. Surviving pane
+updates and maintaining the route are required by AC-I1.
+
+### AC-I1 checkpoint disposition
+
+- Human projection checks: **5/5 PASS** — fixed 28-column rail, post-message
+  AGENTS appearance, exactly one top-level row, no extra rows, exact marker
+  identity.
+- Discriminating row-focus check: **1/1 PASS** — focus returned from terminal
+  `40` to registered Codex terminal `38`.
+- Watcher survival / post-ready acknowledgment: **0/1 FAIL** — PID `18396`
+  exited on revision `15513` after a five-second recipient timeout.
+- Real Subspace neighbor, remaining timed pane/tab actions, restart-empty/fresh
+  recovery, and six-second quiet cleanup: **NOT RUN** after the hard failure.
+
+**Verdict: AC-I1 FAIL; validation recommends REJECTED and feedback routing to
+implementation.** No further captain action is authorized on this failed live
+route. The successful human projection and exact-focus evidence remain valid
+partial results and are not converted into a full acceptance claim.

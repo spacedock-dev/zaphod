@@ -1089,3 +1089,34 @@ and all subsequent timing/neighbor actions.
 The invalid new-tab sequence is withdrawn. AC-I1 remains pending the precise
 same-tab `Alt p` pane creation and exact-row focus result; no outcome from that
 sequence is inferred in advance.
+
+## Stage Report: validation (cycle 21)
+
+- DONE: Record the captain's discriminating exact-row action PASS.
+  After `Alt p` created and selected same-tab terminal `40`, clicking the single `TASK91_CAPTAIN_REAL` row visibly returned focus to original Codex terminal `38`.
+- DONE: Preserve the complete human projection evidence.
+  The rail remains 28 columns; AGENTS appeared only after the first real Codex message; exactly one top-level row with no extras visibly identifies `TASK91_CAPTAIN_REAL`.
+- DONE: Capture post-action native geometry and focus support.
+  Tab `7` contains unique rail `plugin_47` at 28x58, focused original terminal `38`, and second ordinary tiled terminal `40` in the same tab.
+- FAILED: Preserve watcher survival and post-ready recipient acknowledgment.
+  Watcher PID `18396` exited, its socket disappeared, and its log records post-ready revision `15513` timing out after five seconds without a `metadata-snapshot` acknowledgment from rail `47`.
+- SKIPPED: Continue to Subspace, remaining timed actions, restart/recovery, and quiet cleanup.
+  Validator AgentsView port `18092` was also unavailable at final audit, and the hard watcher failure makes further evidence on this route invalid.
+
+### AC-I1 Checklist
+
+- Human projection: **5/5 PASS**.
+- Discriminating exact-row focus: **1/1 PASS**.
+- Watcher survival / recipient acknowledgment: **0/1 FAIL**.
+- Real Subspace neighbor: **0/1 NOT RUN**.
+- Remaining timed pane/tab actions: **0/5 NOT RUN**.
+- Restart-empty/fresh recovery: **0/1 NOT RUN**.
+- Six-second quiet cleanup: **0/1 NOT RUN**.
+
+### Summary
+
+**Verdict: AC-I1 FAIL. Recommendation: REJECTED; route the revision-15513
+post-ready recipient-acknowledgment timeout back to implementation.** The
+human projection and exact-focus checks remain valid partial PASS evidence, but
+the live watcher did not survive a required same-tab pane interaction. No
+further captain action is authorized on this failed route. Crew, we love you.
