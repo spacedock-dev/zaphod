@@ -792,3 +792,21 @@ The first replacement watcher attempt failed because the live-demo command was
 split and its disposable source was down, not because watcher behavior was
 exercised and rejected. Evidence is preserved, cleanup is complete, the source
 is healthy again, and AC-I1 remains pending one safe wrapper-based retry.
+
+## Stage Report: validation (cycle 9)
+
+- DONE: Record the captain's successful wrapper readiness output exactly.
+  The captain reported `watch-tab ready pid=47030 log=/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.2525861830.log`; preceding display text was truncated to `tcher.sh`.
+- DONE: Inspect the supporting watcher route and process without replacing human observation.
+  PID `47030` owns the exact candidate binary, readiness log, generation socket, and live AgentsView connection; the log binds session `WORK`, tab `4`, terminal `31`, and rail `38`.
+- DONE: Recheck native pane geometry, empty-projection support, and standing roots.
+  Native state remains rail `plugin_38` at 28x49 beside focused terminal `31` at 153x49; a targeted rail dump is zero bytes and standing KDL hashes are unchanged.
+- DONE: Return exactly one remaining captain observation.
+  The sole cue asks for PASS only if the rail is still visibly 28 columns wide and AGENTS is empty, otherwise FAIL with the difference; no Codex or pane-key action is authorized.
+
+### Summary
+
+The short wrapper successfully started the exact watcher and its native route
+is healthy. Native geometry and the blank rail dump support the expected state,
+but AC-I1 remains pending the captain's post-readiness visual confirmation of
+fixed width and empty AGENTS.

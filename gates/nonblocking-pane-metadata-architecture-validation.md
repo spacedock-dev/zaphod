@@ -405,3 +405,34 @@ one short command:
 Expected visible result: `watch-tab ready pid=… log=…`, rail width remains 28,
 and AGENTS is empty before SessionStart. Report `PASS` or `FAIL` with the exact
 output, then stop without starting Codex or pressing pane keys.
+
+## Replacement watcher retry — readiness confirmed
+
+The captain ran the short wrapper and reported the exact successful readiness
+output:
+
+```text
+watch-tab ready pid=47030 log=/Users/clkao/Library/Application Support/org.Zellij-Contributors.Zellij/zaphod-watch-tab.2525861830.log
+```
+
+The preceding terminal echo was visibly truncated to `tcher.sh`; it is recorded
+as display context, not as a second command result. The captain has not yet
+reported the post-readiness rail width or AGENTS projection.
+
+Supporting native inspection confirms PID `47030` owns the candidate
+`target/zaphod` binary, readiness log, and Unix socket
+`/tmp/zaphod-watch-tab-v1-501/w-awdGTI5bgHd1-c25PczLhHg1Jo_QFBHbHcRKQshHZQM.sock`,
+with an established connection to the isolated AgentsView endpoint. The log
+binds generation `generation-00000000000000000001` to session `WORK`, tab `4`,
+terminal `31`, and rail `38`.
+
+A fresh native `list-panes --all --json` records `plugin_38` at
+`x=0,y=1,28x49`, focused terminal `31` at `x=28,y=1,153x49`, and intact
+181-column chrome. A targeted rail screen dump is zero bytes, supporting an
+empty pre-SessionStart projection without substituting for the captain's visual
+observation. Standing KDL hashes remain `398ff6d6…be316` and
+`bb9e8e21…3980e`.
+
+**Captain cue:** look at the same rail now. Report `PASS` only if it is still
+visibly 28 columns wide and AGENTS is empty; otherwise report `FAIL` and what
+differs. Do not start Codex or press pane keys.
