@@ -1039,3 +1039,19 @@ AC-I1 remains pending the marker-prompt enrichment and all later live actions.
 The marker prompt made the AGENTS section appear and exact source support is
 coherent. AC-I1 remains pending the human row-cardinality and marker-identity
 check before any focus or timing action.
+
+## Stage Report: validation (cycle 18)
+
+- DONE: Record the captain's exact row-cardinality and marker-identity PASS.
+  The current unique rail visibly contains exactly one top-level Codex row, no additional rows, and identifies `TASK91_CAPTAIN_REAL`.
+- DONE: Preserve a native pre-click focus baseline.
+  In tab `7`, non-selectable unique rail `plugin_47` remains 28 columns and sole focused selectable terminal `38` remains 210 columns immediately to its right; watcher PID `18396`, its exact socket, and AgentsView connections remain live.
+- SKIPPED: Infer row focusability or terminal binding before interaction.
+  No click has occurred, so focus behavior and exact binding remain pending.
+- DONE: Return exactly one isolated focus action.
+  The sole cue clicks the marker row once, expects focus on terminal `38` without a tab switch or floating pane, and stops before any other click, pane key, or Subspace action.
+
+### Summary
+
+The exact one-row marker projection passes human inspection. AC-I1 remains
+pending the isolated row-click focus check and all later timing/neighbor work.

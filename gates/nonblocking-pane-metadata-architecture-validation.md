@@ -761,3 +761,23 @@ Report `PASS` only if it contains exactly one top-level Codex row, no additional
 rows, and the visible row text identifies the `TASK91_CAPTAIN_REAL` marker;
 otherwise report `FAIL` with the row count and visible text. Do not click the
 row, press pane keys, or open Subspace yet.
+
+## Unique-URL exact marker row checkpoint — captain PASS
+
+The captain reports PASS: the current unique tab's AGENTS section contains
+exactly one top-level Codex row, contains no additional rows, and the visible
+row identifies `TASK91_CAPTAIN_REAL`. This is the required human row-cardinality
+and marker-identity observation. Focus behavior and exact terminal binding have
+not yet been exercised.
+
+Before the click, native inventory records unique rail `plugin_47` as the
+non-selectable 28-column pane in tab `7` and terminal `38` as the sole focused
+selectable 210-column pane immediately to its right. Watcher PID `18396` still
+owns the exact tab-7 socket and retains established validator AgentsView
+connections. This instrumentation is preserved for the post-click comparison.
+
+**Captain cue:** click the visible `TASK91_CAPTAIN_REAL` Codex row exactly once.
+Report `PASS` only if focus lands on or remains on the sole terminal immediately
+to the rail's right in the same unique tab—the Codex terminal `38`—with no tab
+switch and no floating pane; otherwise report `FAIL` with what received focus.
+Then stop. Do not click anything else, press pane keys, or open Subspace yet.
