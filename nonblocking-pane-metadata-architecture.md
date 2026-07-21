@@ -517,6 +517,25 @@ or redefine KJ's registry authority and session-incarnation decision.
   the acknowledgment on revision `506`, then reproduce that exact live ordering
   in the native harness.
 
+#### Cycle 5 — 2026-07-21 — shared CLI-pipe starvation diagnosed
+
+- Exact ready and valid-snapshot probes to WORK/tab9/rail54 were acknowledged,
+  excluding recipient admission, generation, sequence, payload, and lease
+  validation as the revision-506 rejection point. A paced valid replay instead
+  lost acknowledgment output while Zellij logged one-second `Action CliPipe`
+  route timeouts and a client logout.
+- The standing WORK server also contained legacy plugin instances `4` and `11`
+  stalled in the synchronous `GetPaneRunningCommand` and `GetPaneCwd` calls
+  removed by task 91. The watcher amplified shared-route congestion by starting
+  a fresh `zellij pipe` client every 50 ms after exit-zero/no-output results.
+  The isolated native regression omitted this brownfield contention.
+- The captain authorized a bounded repair: add a failing brownfield route-
+  starvation test; coalesce unchanged full snapshots into lightweight lease
+  heartbeats; permit only one outstanding delivery client; and apply bounded
+  exponential backoff to empty acknowledgments. Changed snapshots must retain
+  exact acknowledgment and fail-closed behavior. Timeout extension, admission
+  relaxation, and operational legacy-rail reloads are not the product fix.
+
 ## Stage Report: ideation
 
 - DONE: Design a bounded cached/event-fed metadata architecture that removes every synchronous pane command, CWD, and scrollback call from the WASM hot path while preserving exact pane authority and degraded stale-state rendering.
