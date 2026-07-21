@@ -1046,3 +1046,58 @@ mandatory AC-I1 evidence.
 **Verdict: AC-I1 FAIL; validation recommends REJECTED and feedback routing to
 implementation.** Do not enter a first message or take any further live action
 on this failed route.
+
+## Feedback-cycle-4 repair revalidation — offline and native PASS
+
+Validation froze head `537eefb10fb2d57f6328fba62fad1043060ff151`
+over merge base `999ba8ab06af8c09a736aed98db21c0d70e341a0`.
+Stored quick synthesis `432` is `done/P`, retry zero, on exact tip `537eefb`.
+Authoritative `code_completion` synthesis `436` is `done/P`, retry zero, on
+exact range `999ba8a..537eefb`; correctness `433`, journey `434`, and proof
+`435` each occur exactly once at `done/P`, retry zero.
+
+Independent execution passed Rust 85/85 plus `cargo check --tests`, fresh Go
+`go test ./...` plus vet, and tracked Bash parsing. The deterministic
+brownfield backoff, unchanged-heartbeat serialization, and changed-snapshot
+fail-closed tests passed three consecutive runs. A throwaway semantic matrix
+proved that generation, source health, identity, pane, agent, state, summary,
+order, and cardinality changes are never heartbeat-coalesced, while observation
+timestamps alone are. Four sabotage mutations were rejected: fixed 50 ms retry
+launched 33 clients instead of 5–7; ignoring state coalesced a changed snapshot;
+deserializing the publisher lost the required heartbeat; discarding publish
+errors retained the failed watcher's live socket. All throwaway clones were
+removed.
+
+The supported native matrix passed: first literal `Alt p` kept the rail at 28
+columns; two rails proved `1/1/0`, exact focus, stale retention, restart-empty,
+zero idle native polls, and host isolation; the congestion wrapper proved
+same-tab pane creation, exact-row focus, a later acknowledged changed snapshot,
+watcher survival, all one-second pane/tab deadlines, early-release and timeout
+negative controls, quiet cleanup, and owned-session absence. Exact hook,
+build-artifact, permission, documentation, and responsive-proof checks also
+passed.
+
+## Validator-owned 537 live handoff — native permission boundary
+
+Validator-owned checkout `.task91-validator-entry-537` is detached at exact
+head `537eefb`. Its native binary SHA-256 is
+`8ad22b37a65aa7a81992590e35c7e321e3242d5dbbb6f1d75f8aa408e0ab2e20`; its
+WASM SHA-256 is
+`6a884b72813163e67f5fd4c1ff0e1bd85a0170d0ec3848c8fe3e457c98483f38`.
+Validator AgentsView v0.38.1 PID `60493` owns fresh root
+`.task91-validator-agentsview-537`, listens only on `127.0.0.1:18094`, and has
+idle shutdown disabled.
+
+Fresh long-lived WORK tab `10` contains exact candidate rail `plugin_63` at
+`x=0,y=1,28x49` and sole terminal `47` at `x=28,y=1,153x49` in the exact
+checkout CWD. The rail is focused and selectable at its ungranted native
+permission boundary. No watcher or Codex has started. Prior human width,
+projection, exact-focus, and exact workdir/hook trust PASSes remain preserved;
+this route will exercise only permission, watcher idle survival, and one
+changed-metadata acknowledgment.
+
+**Captain cue:** inspect the current fresh tab `10`. If the native permission
+prompt for the exact `.task91-validator-entry-537` WASM is visible, approve it
+exactly once and report `PASS`; otherwise report `FAIL` and what is visible.
+Stop when the prompt closes. Do not start the watcher or Codex, create panes,
+click rows, press pane keys, or open Subspace.

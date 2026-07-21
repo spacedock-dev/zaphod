@@ -1456,3 +1456,20 @@ lease without full-snapshot churn, changed content still requires exact rail
 acknowledgment, and empty acknowledgments cannot create a 50 ms client storm.
 All automated and isolated native proofs are green; the preserved human
 28-column projection/focus PASS is ready for one renewed brownfield validation.
+
+## Stage Report: validation (cycle 27)
+
+- DONE: Independently verify frozen head 537eefb and exact-range reviews, then adversarially validate unchanged-content heartbeat coalescing, changed-content exact acknowledgment/fail-closed behavior, one-publisher serialization, and bounded exponential empty-ack backoff.
+  Quick `432` and `code_completion` `436` are exact and `done/P`; members `433`/`434`/`435` occur once. Rust 85/85 plus check, Go test/vet, Bash parsing, a nine-dimension semantic matrix, three repeated brownfield/coalescing/fail-closed runs, and four rejected sabotage mutations pass.
+- DONE: Re-run the deterministic brownfield starvation fixture plus the complete fixed-width, exact-focus, two-rail, congestion, deadline, restart-empty, isolation, and quiet-cleanup native matrix on validator-owned evidence.
+  First `Alt p` held 28 columns; two-rail passed `1/1/0`, exact focus, stale retention, restart-empty, zero idle native polls, and isolation; congestion passed later changed-snapshot acknowledgment, watcher survival, one-second deadlines, negative controls, and owned quiet cleanup.
+- DONE: Only after automated and native evidence is green, prepare the minimum fresh long-lived WORK-session human route needed to prove watcher survival through idle refresh and changed metadata; preserve prior valid human width/projection/focus/trust evidence and never infer visual results.
+  Detached `.task91-validator-entry-537` has byte-recorded artifacts; fresh AgentsView PID `60493` serves `:18094`; WORK/tab10 has exact rail `plugin_63` 28x49 beside sole terminal `47` 153x49. The first cue stops at exact native permission approval.
+
+### Summary
+
+Repair head `537eefb` passes exact review verification, independent execution,
+adversarial refutation, and the complete supported-runtime matrix. Prior human
+width/projection/focus/trust PASSes remain valid; the minimum fresh brownfield
+route now begins at one exact-artifact permission boundary. Captain and crew,
+we love you.
