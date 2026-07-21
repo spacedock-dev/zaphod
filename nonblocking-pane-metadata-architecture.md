@@ -1324,3 +1324,67 @@ post-ready recipient-acknowledgment timeout back to implementation.** Human
 permission, readiness/width, and ordered trust PASSes remain valid partial
 evidence. No first-message text or further live action is authorized on the
 failed route. Crew, we love you.
+
+## Stage Report: implementation (cycle 6)
+
+- DONE: Interrogate the rejected live route without changing its artifact or
+  approving another permission boundary. The exact target remained WORK stable
+  tab `9`, terminal `43`, rail `54`, token
+  `zaphod-76098-17195-1784560292`, and generation `1`. Its watcher log records
+  post-ready revision `506` failing after five seconds without a snapshot
+  acknowledgment; the watcher PID and socket are gone while AgentsView
+  `:18093` remains healthy.
+- DONE: Prove that the recipient guard is not rejecting this route. An exact
+  ready probe to tab `9`/rail `54` returned `ready`; an exact valid snapshot
+  returned `accepted`. Both exited zero with empty stderr. A paced replay then
+  failed at valid sequence `34` after two seconds with exit zero but zero bytes
+  on stdout and stderr. The command carried the same exact tab, rail, token,
+  generation, lease, and valid JSON envelope, so the acknowledgment disappeared
+  before receiver admission rather than at a plugin guard.
+- DONE: Correlate the missing acknowledgment with the standing Zellij route.
+  At the original failure Zellij logged three one-second `Action CliPipe`
+  timeouts at `01:08:47` through `01:08:49`, then logged the client out after
+  over 1,000 consecutive unknown messages. Immediately afterward, already
+  loaded plugins `4` and `11` repeatedly timed out in
+  `GetPaneRunningCommand` and `GetPaneCwd`. The paced replay reproduced the
+  same CLI-pipe timeout flood and client logout.
+- DONE: Explain why the native regression did not expose the standing-session
+  failure. Its disposable Zellij session loads only the candidate rail and
+  therefore omits the long-lived plugin instances that the WORK server log
+  shows still executing the removed synchronous host calls. A temporary
+  debug-only comparator in that isolated session accepted all `11` snapshots,
+  recorded zero snapshot rejections and zero missing-manifest observations,
+  and preserved exact `PaneUpdate`/`TabUpdate` recipient identity. The trace
+  instrumentation was removed before reporting.
+- DONE: Classify the finding as an outcome defect at the transport boundary,
+  not an evidence-only defect or fixed-width regression. The 28-column rail,
+  exact row projection, and exact-row focus all passed, but AC-I1 promises a
+  watcher that remains alive in a normal long-lived session. The retry loop
+  starts a fresh `zellij pipe` client every 50 ms after an exit-zero/no-output
+  result; under a congested standing route this amplifies the backlog until the
+  five-second fail-fast deadline expires.
+- DONE: Bound the repair choices without implementing product behavior in this
+  diagnosis cycle. Recommended first: coalesce unchanged idle refreshes and
+  use the existing lightweight heartbeat to renew leases, retaining exact
+  acknowledgment for changed full snapshots; this reduces shared-route load
+  without weakening identity safety, at the cost of a bounded refresh cadence.
+  Also pair it with one-outstanding-client delivery and exponential retry
+  backoff so an empty response cannot create a 50 ms client storm. A clean
+  reload of every legacy rail is a useful operational proof but not a durable
+  product fix. Merely relaxing admission or extending the five-second timeout
+  would mask the failure and is rejected. Replacing broadcast CLI pipes with a
+  dedicated transport is the higher-cost fallback if the bounded repair still
+  fails in a brownfield session.
+- DONE: Restore and verify the frozen candidate. Head remains `79f53cd`; the
+  rebuilt WASM SHA is `6a884b72…3f38`, matching the validated artifact.
+  `git diff --check` passes, tracked diff is empty, and only the validator-owned
+  untracked evidence directories remain. No product commit was created.
+
+### Summary
+
+The first usable fixed-width projection is real, but it is not yet releasably
+usable in the captain's standing WORK session. The fresh failure is shared
+Zellij CLI-pipe starvation amplified by 50 ms retry clients while legacy rails
+still block the server on synchronous pane metadata. Route the bounded
+coalescing/backoff repair through implementation, then rerun the same live
+28-column journey before declaring KJ/task 91's first usable milestone.
