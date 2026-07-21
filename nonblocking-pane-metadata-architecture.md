@@ -1407,3 +1407,52 @@ Zellij CLI-pipe starvation amplified by 50 ms retry clients while legacy rails
 still block the server on synchronous pane metadata. Route the bounded
 coalescing/backoff repair through implementation, then rerun the same live
 28-column journey before declaring KJ/task 91's first usable milestone.
+
+## Stage Report: implementation (cycle 7)
+
+- DONE: Add a deterministic failing brownfield test that reproduces shared
+  Zellij CLI-pipe starvation from blocking legacy plugin traffic and proves the
+  current 50 ms fresh-client retry behavior loses acknowledgments or amplifies
+  the route backlog.
+  `go test ./... -run TestAcknowledgedPipeBacksOffUnderBrownfieldRouteStarvation
+  -count=1` failed RED with `launched 29 fresh clients, want 5..7` inside the
+  two-second fail-fast boundary. Commit `fcfdf54` makes the same fixture GREEN
+  with 5–7 attempts and the same missing-ack failure at the deadline.
+- DONE: Implement unchanged-snapshot coalescing through lease heartbeats plus
+  one-outstanding-client delivery and bounded exponential backoff for
+  exit-zero/no-output, while changed snapshots retain exact acknowledgment,
+  identity safety, and fail-closed semantics.
+  The coordinator test first failed to compile on missing `RenewLease`, then a
+  forced unchanged refetch failed RED with `launched no lease heartbeat`.
+  Commit `54fc5bf` now serializes full snapshots and heartbeats through one
+  publisher, renews semantically unchanged content without acknowledging it,
+  and keeps changed identity, pane, agent, state, summary, order, generation,
+  or source health on the exact acknowledged full-snapshot path. Observation
+  timestamps alone do not manufacture a content change. Commit `537eefb`
+  makes the post-ready failure proof inject a real changed session row and
+  assert that only its full snapshot fails closed.
+- DONE: Prove the repair under the brownfield fixture and the full fixed-width,
+  exact-focus, two-rail, congestion, deadline, restart-empty, isolation, and
+  quiet-cleanup matrix; freeze the head and complete exact-tip and exact-range
+  review before reporting.
+  Shared target `/Users/clkao/git/zaphod/target` passed Rust 85/85 plus
+  `cargo check --tests`; Go passed 61 tests plus vet; all tracked shell scripts
+  parse. Native fixed-width passed first literal `Alt p` at 28 columns. The
+  two-rail journey passed `1/1/0`, exact focus, stale retention, restart-empty,
+  zero idle native polls, and cleanup. The congestion journey passed later
+  acknowledged changed-snapshot focus, all one-second pane/tab deadlines,
+  negative controls, isolation, and quiet cleanup.
+- DONE: Freeze exact head and complete authoritative review.
+  Head `537eefb` has no tracked diff. Exact-tip quick synthesis `432` is
+  `done/P` with no findings. Exact-range `code_completion` synthesis `436`
+  reviewed `999ba8ab06af8c09a736aed98db21c0d70e341a0..537eefb10fb2d57f6328fba62fad1043060ff151`;
+  correctness `433`, journey `434`, and proof `435` each ran once as `done/P`,
+  and the parent verdict is PASS with no findings to disposition.
+
+### Summary
+
+The bounded repair is complete at `537eefb`: idle refreshes renew the accepted
+lease without full-snapshot churn, changed content still requires exact rail
+acknowledgment, and empty acknowledgments cannot create a 50 ms client storm.
+All automated and isolated native proofs are green; the preserved human
+28-column projection/focus PASS is ready for one renewed brownfield validation.
